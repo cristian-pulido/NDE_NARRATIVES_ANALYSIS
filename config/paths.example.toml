@@ -1,0 +1,8 @@
+[paths]
+survey_csv = "D:/data/nde/results-survey.csv"
+annotation_output_dir = "D:/data/nde/annotation_outputs"
+llm_batch_dir = "D:/data/nde/llm_batches"
+evaluation_output_dir = "D:/data/nde/evaluation_outputs"
+sampled_private_workbook = "D:/data/nde/annotation_outputs/nde_annotation_mapping_private.xlsx"
+human_annotation_workbook = "D:/data/nde/annotation_outputs/nde_annotation_sample_completed.xlsx"
+llm_predictions_path = "D:/data/nde/llm_outputs/nde_predictions.jsonl"

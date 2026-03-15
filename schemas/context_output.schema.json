@@ -1,0 +1,13 @@
+{
+  "": "https://json-schema.org/draft/2020-12/schema",
+  "title": "nde_context_output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["context_tone"],
+  "properties": {
+    "context_tone": {
+      "type": "string",
+      "enum": ["positive", "negative", "mixed"]
+    }
+  }
+}

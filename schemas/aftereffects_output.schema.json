@@ -1,0 +1,40 @@
+{
+  "": "https://json-schema.org/draft/2020-12/schema",
+  "title": "nde_aftereffects_output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "aftereffects_tone",
+    "m9_moral_rules",
+    "m9_long_term_thinking",
+    "m9_consider_others",
+    "m9_help_others",
+    "m9_forgiveness"
+  ],
+  "properties": {
+    "aftereffects_tone": {
+      "type": "string",
+      "enum": ["positive", "negative", "mixed"]
+    },
+    "m9_moral_rules": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m9_long_term_thinking": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m9_consider_others": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m9_help_others": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m9_forgiveness": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+response_id,context_tone,experience_tone,aftereffects_tone,m8_out_of_body,m8_bright_light,m8_peace,m8_time_distortion,m8_presence,m9_moral_rules,m9_long_term_thinking,m9_consider_others,m9_help_others,m9_forgiveness
+101,negative,positive,positive,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes
+102,negative,negative,mixed,no,no,no,no,no,no,no,no,no,no
+103,negative,mixed,mixed,no,no,yes,yes,no,no,no,yes,no,no

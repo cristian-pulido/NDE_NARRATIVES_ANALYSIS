@@ -1,0 +1,85 @@
+[dataset]
+id_column = "response_id"
+stratify_column = "valence"
+missing_label = "Missing"
+quality_label_column = "m11_quality_label"
+quality_values_to_use = ["Complete structured"]
+to_drop_column = "TO_DROP"
+to_drop_exclude_value = true
+require_all_texts = true
+drop_missing_strata = true
+
+[sampling]
+n_total = 3
+random_state = 11
+aux_prefix = "ANN"
+aux_id_digits = 4
+hash_salt = "nde_annotation_2026"
+
+[workflow]
+section_order = ["context", "experience", "aftereffects"]
+
+[outputs]
+annotator_filename = "nde_annotation_sample.xlsx"
+mapping_filename = "nde_annotation_mapping_private.xlsx"
+column_map_filename = "nde_annotation_column_mapping_private.xlsx"
+
+[labels]
+tone = ["positive", "negative", "mixed"]
+binary = ["yes", "no"]
+
+[sections.context]
+source_column = "nde_context"
+text_label = "Context Narrative"
+tone_internal_column = "context_tone"
+tone_visible_label = "Context Tone"
+
+[sections.context.binary_labels]
+
+[sections.experience]
+source_column = "nde_description"
+text_label = "Experience Narrative"
+tone_internal_column = "experience_tone"
+tone_visible_label = "Experience Tone"
+
+[sections.experience.binary_labels]
+m8_out_of_body = "Out-of-body sensation"
+m8_bright_light = "Bright light"
+m8_peace = "Peace or wellbeing"
+m8_time_distortion = "Altered time perception"
+m8_presence = "Encounter with a presence"
+
+[sections.aftereffects]
+source_column = "nde_aftereffects"
+text_label = "Aftereffects Narrative"
+tone_internal_column = "aftereffects_tone"
+tone_visible_label = "Aftereffects Tone"
+
+[sections.aftereffects.binary_labels]
+m9_moral_rules = "Stronger moral principles"
+m9_long_term_thinking = "More long-term thinking"
+m9_consider_others = "More consideration for others"
+m9_help_others = "Greater willingness to help others"
+m9_forgiveness = "Greater willingness to forgive"
+
+[questionnaire.m8]
+yes_values = ["Medium", "Intensely", "Extremely"]
+no_values = ["Not at all", "Slightly"]
+
+[questionnaire.m8.columns]
+m8_out_of_body = "q_m8_out_of_body"
+m8_bright_light = "q_m8_bright_light"
+m8_peace = "q_m8_peace"
+m8_time_distortion = "q_m8_time_distortion"
+m8_presence = "q_m8_presence"
+
+[questionnaire.m9]
+yes_values = ["Increased", "Strongly increased"]
+no_values = ["Strongly diminished", "Decreased", "Not changed"]
+
+[questionnaire.m9.columns]
+m9_moral_rules = "q_m9_moral_rules"
+m9_long_term_thinking = "q_m9_long_term_thinking"
+m9_consider_others = "q_m9_consider_others"
+m9_help_others = "q_m9_help_others"
+m9_forgiveness = "q_m9_forgiveness"

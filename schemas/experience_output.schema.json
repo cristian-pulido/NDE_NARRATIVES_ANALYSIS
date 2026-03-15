@@ -1,0 +1,40 @@
+{
+  "": "https://json-schema.org/draft/2020-12/schema",
+  "title": "nde_experience_output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "experience_tone",
+    "m8_out_of_body",
+    "m8_bright_light",
+    "m8_peace",
+    "m8_time_distortion",
+    "m8_presence"
+  ],
+  "properties": {
+    "experience_tone": {
+      "type": "string",
+      "enum": ["positive", "negative", "mixed"]
+    },
+    "m8_out_of_body": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m8_bright_light": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m8_peace": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m8_time_distortion": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    },
+    "m8_presence": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    }
+  }
+}
