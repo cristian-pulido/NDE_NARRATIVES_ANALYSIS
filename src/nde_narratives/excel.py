@@ -96,6 +96,34 @@ def add_excel_validation_and_formatting(xlsx_path: Path, study: StudyConfig) -> 
     workbook.save(xlsx_path)
 
 
+def annotation_output_paths(study: StudyConfig, paths: PathsConfig) -> dict[str, Path]:
+    return {
+        "annotator_file": paths.annotation_output_dir / study.outputs["annotator_filename"],
+        "mapping_file": paths.annotation_output_dir / study.outputs["mapping_filename"],
+        "column_map_file": paths.annotation_output_dir / study.outputs["column_map_filename"],
+    }
+
+
+def ensure_annotation_outputs_writable(study: StudyConfig, paths: PathsConfig, force: bool = False) -> dict[str, Path]:
+    output_paths = annotation_output_paths(study, paths)
+    if force:
+        return output_paths
+
+    existing = {name: path for name, path in output_paths.items() if path.exists()}
+    if existing:
+        existing_paths = ", ".join(str(path) for path in existing.values())
+        raise FileExistsError(
+            "Refusing to overwrite existing annotation artifacts: "
+            f"{existing_paths}. "
+            "The generated annotator workbook is separate from the completed human annotation workbook used by "
+            f"'nde evaluate' (default: {paths.human_annotation_workbook}). "
+            "Move or rename the existing files, or rerun 'nde build-annotation-sample --force' to overwrite them "
+            "intentionally."
+        )
+
+    return output_paths
+
+
 def write_annotation_outputs(
     annotation_df: pd.DataFrame,
     mapping_df: pd.DataFrame,
@@ -103,13 +131,15 @@ def write_annotation_outputs(
     sampled_private_df: pd.DataFrame,
     study: StudyConfig,
     paths: PathsConfig,
+    force: bool = False,
 ) -> dict[str, str]:
     paths.annotation_output_dir.mkdir(parents=True, exist_ok=True)
     paths.sampled_private_workbook.parent.mkdir(parents=True, exist_ok=True)
+    output_paths = ensure_annotation_outputs_writable(study, paths, force=force)
 
-    annotator_path = paths.annotation_output_dir / study.outputs["annotator_filename"]
-    mapping_path = paths.annotation_output_dir / study.outputs["mapping_filename"]
-    column_map_path = paths.annotation_output_dir / study.outputs["column_map_filename"]
+    annotator_path = output_paths["annotator_file"]
+    mapping_path = output_paths["mapping_file"]
+    column_map_path = output_paths["column_map_file"]
 
     with pd.ExcelWriter(annotator_path, engine="openpyxl") as writer:
         annotation_df.to_excel(writer, sheet_name=ANNOTATION_SHEET, index=False)

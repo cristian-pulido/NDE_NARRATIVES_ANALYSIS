@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build_annotation.add_argument("--n-total", type=int, default=None)
     build_annotation.add_argument("--random-state", type=int, default=None)
+    build_annotation.add_argument("--force", action="store_true", help="Overwrite existing annotation output files.")
     build_annotation.set_defaults(handler=cmd_build_annotation_sample)
 
     build_batch = subparsers.add_parser(
@@ -125,6 +126,7 @@ def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
         sampled_private_df=sampled_private_df,
         study=study,
         paths=paths,
+        force=args.force,
     )
     print(json.dumps({**summary, **written}, indent=2))
     return 0
