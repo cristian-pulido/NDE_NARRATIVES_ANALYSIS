@@ -1,4 +1,4 @@
-# Output Contract
+﻿# Output Contract
 
 The repository normalizes human annotations, LLM outputs, questionnaire-derived labels, and VADER tone outputs to comparable field names where appropriate.
 
@@ -24,16 +24,55 @@ The repository normalizes human annotations, LLM outputs, questionnaire-derived 
 - Tone fields: `positive`, `negative`, `mixed`
 - Binary fields: `yes`, `no`
 
-## Human Annotation Workbook Behavior
+## Human Annotation Artifact Contract
 
-For `nde evaluate`, the human workbook is interpreted row by row using the shared fields above:
+`nde evaluate` can now read either:
+
+- a single workbook passed explicitly with `--human-annotation-workbook`, or
+- a folder of candidate workbooks discovered under `human_annotations_dir`
+
+Each candidate workbook is validated independently.
+
+For any accepted workbook:
 
 - rows with all required label fields blank are treated as not evaluated and are skipped
-- rows with all required label fields completed are included in evaluation
-- rows with only some required label fields completed are invalid and cause evaluation to fail
-- `participant_code` must still be present for every remaining row in the workbook
+- rows with all required label fields completed are included
+- rows with only some required label fields completed are invalid and cause that workbook to be rejected
+- `participant_code` must be present for every remaining row
 
-This allows experts to leave a case unevaluated by clearing the row or by removing the row from the completed workbook, without introducing a special label value.
+Rejected workbooks are reported in `human_artifacts_manifest.json` and do not abort the whole evaluation run.
+
+## Human Artifact Identity
+
+Human artifact identity is resolved in this order:
+
+1. sibling `<filename>.manifest.json` / `<filename>.manifest.toml`
+2. folder-level `manifest.json` / `manifest.toml`
+3. workbook filename stem
+
+For human artifacts, manifests may define:
+
+- `annotator_id`
+
+Folder-level manifests apply to every artifact in that folder.
+
+## Majority Human Reference Contract
+
+Evaluation no longer uses a single human workbook as the default reference.
+
+Instead:
+
+- valid human workbooks are consolidated by `annotator_id`
+- a field-level majority vote is computed for each `participant_code`
+- ties remain unresolved for that field/participant pair
+- unresolved cells are excluded only from the affected field metrics
+
+`nde evaluate` writes:
+
+- `human_reference_majority.csv`
+- `adjudication_summary.csv`
+- `human_agreement_pairwise.csv`
+- `human_agreement_summary.csv`
 
 ## LLM Batch Format
 
@@ -44,17 +83,52 @@ Each JSONL record produced by `nde build-llm-batch` contains:
 - `input_text`
 - `prompt`
 - `response_schema`
+- `experiment`
+
+`experiment` includes:
+
+- `experiment_id`
+- `artifact_id`
+- optional `prompt_variant`
+- optional `run_id`
+- optional `model_variant`
+
+Each batch directory also writes a `manifest.json` with the same metadata plus the resolved prompt root and section batch paths.
 
 ## LLM Prediction Format for Evaluation
 
-`nde evaluate` accepts:
+`nde evaluate` accepts either:
 
-- JSONL with one record per `participant_code` and section, or
-- CSV/XLSX with one wide row per `participant_code`
+- a single prediction artifact passed explicitly with `--llm-predictions`, or
+- a folder of candidate artifacts discovered under `llm_results_dir`
+
+Supported artifact formats remain:
+
+- `.jsonl`
+- `.csv`
+- `.xlsx`
+- `.xls`
 
 For JSONL, the record may either expose normalized fields directly or wrap them under a `prediction` object. In both cases, keys must follow the shared field names above.
 
-During evaluation, LLM rows are filtered to the human-evaluable participant subset. Extra LLM rows outside that subset are ignored, but missing LLM rows for human-evaluable participants still cause evaluation to fail when LLM comparisons are requested.
+Each candidate artifact is validated independently. Invalid artifacts are reported in `llm_artifacts_manifest.json` and skipped.
+
+## LLM Artifact Identity
+
+LLM artifact identity is resolved in this order:
+
+1. sibling `<filename>.manifest.json` / `<filename>.manifest.toml`
+2. folder-level `manifest.json` / `manifest.toml`
+3. parent folder name / filename stem fallback
+
+LLM manifests may define:
+
+- `experiment_id`
+- optional `prompt_variant`
+- optional `run_id`
+- optional `model_variant`
+
+The effective comparison key written into metrics is `artifact_id`, which is `experiment_id` or `experiment_id__run_id` when a run id is present.
 
 ## VADER Sensitivity Output Format
 
@@ -84,24 +158,36 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 
 ## Evaluation Alignment Rules
 
-`nde evaluate` aligns all comparison sources to the participant codes that are fully annotated in the human workbook.
+`nde evaluate` aligns comparison sources to the participant codes present in the majority human reference.
 
-- Questionnaire-derived labels and VADER tone labels are filtered to that human-evaluable subset.
-- Optional LLM predictions are filtered to that same subset.
-- Extra rows in automated sources are ignored.
-- Missing rows in automated sources for human-evaluable participants still trigger a participant mismatch error.
+- questionnaire-derived labels are filtered to that participant subset
+- VADER tone labels are filtered to that participant subset
+- each accepted LLM artifact is evaluated separately against that same subset
+- extra rows in automated sources are ignored naturally by field-level overlap
+- unresolved human majority cells reduce field-level `n` instead of aborting evaluation
 
 ## Evaluation Report Outputs
 
-`nde evaluate` continues to write `evaluation_metrics.csv` and `evaluation_summary.json`, and now also produces:
+`nde evaluate` writes:
 
+- `evaluation_metrics.csv`
+- `evaluation_summary.json`
+- `human_reference_majority.csv`
+- `adjudication_summary.csv`
+- `human_agreement_pairwise.csv`
+- `human_agreement_summary.csv`
+- `human_artifacts_manifest.json`
+- `llm_artifacts_manifest.json`
 - `alignment_report.md`
 - `alignment_metrics_long.csv`
 - `figures/alignment/*.png`
+- `experiments/<artifact_id>/evaluation_metrics.csv`
+- `experiments/<artifact_id>/evaluation_summary.json`
 
-The alignment report is built from the available comparisons in each run. At minimum it supports `human_vs_questionnaire` and `human_vs_vader`, and it incorporates LLM comparisons automatically when LLM predictions are present.
+`evaluation_summary.json` now contains these top-level sections:
 
-`evaluation_summary.json` now contains two top-level sections:
-
-- `coverage`: counts for sampled rows, rows still present in the human workbook, fully evaluable human rows, and skipped blank rows
+- `coverage`: counts for sampled rows, valid/rejected human artifacts, reference participants, and valid/rejected LLM artifacts
+- `adjudication`: majority-reference coverage and unresolved counts
 - `comparisons`: mean metric summaries by comparison name
+- `human_artifacts`: accepted and rejected human artifact registry
+- `llm_artifacts`: accepted and rejected LLM artifact registry
