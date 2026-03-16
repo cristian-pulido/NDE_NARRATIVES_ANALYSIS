@@ -29,6 +29,12 @@ Information must not be transferred across sections.
 - If an element is denied, code `no`.
 - Prioritize the participant's framing of the event.
 
+## Evaluation Workflow Note
+
+- If a case should not be evaluated, leave the full row unlabeled or remove the row from the completed workbook.
+- Do not leave a row partially completed. `nde evaluate` treats partially filled rows as invalid and will stop with an error.
+- Do not edit `Participant Code`.
+
 ## Tone Labels
 
 - `positive`: peace, relief, clarity, insight, beneficial meaning, favorable transformation
