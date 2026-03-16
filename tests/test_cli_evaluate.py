@@ -57,8 +57,12 @@ def test_evaluate_reuses_existing_vader_scores_and_reports_vader_metrics(tmp_pat
 
     metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "evaluation_metrics.csv")
     report_path = tmp_path / "evaluation_outputs" / "alignment_report.md"
+    help_others = metrics[(metrics["comparison"] == "human_vs_llm") & (metrics["field"] == "m9_help_others")].iloc[0]
     assert set(metrics["comparison"]).issuperset({"human_vs_vader", "llm_vs_vader"})
     assert len(metrics[metrics["comparison"] == "human_vs_vader"]) == 3
+    assert help_others["accuracy"] == 2 / 3
+    assert round(help_others["cohen_kappa"], 4) == 0.4
+    assert round(help_others["macro_f1"], 4) == 0.6667
     assert report_path.exists()
     report_text = report_path.read_text(encoding="utf-8")
     assert "## Objective" in report_text

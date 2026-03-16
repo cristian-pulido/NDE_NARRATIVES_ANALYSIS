@@ -36,6 +36,10 @@ Build the annotation workbook sample outside the repository:
 
     nde build-annotation-sample
 
+If the target annotation artifacts already exist, the command stops instead of overwriting them. Use `--force` only when you intentionally want to replace the generated files:
+
+    nde build-annotation-sample --force
+
 Build three JSONL batches, one per narrative section:
 
     nde build-llm-batch --source sampled-private
@@ -56,7 +60,9 @@ Run the test suite:
 
 ## Notes
 
-- `nde build-annotation-sample` writes three external files: the annotator workbook, the private mapping workbook, and the private column map workbook.
+- `nde build-annotation-sample` writes three external files: the generated annotator workbook, the private mapping workbook, and the private column map workbook.
+- The generated annotator workbook is the base file for coding. The completed human-annotation workbook used by `nde evaluate` is a separate artifact configured through `paths.human_annotation_workbook`.
+- `nde build-annotation-sample` protects existing annotation artifacts by default and requires `--force` for intentional overwrites.
 - `nde build-llm-batch` expects either the private sampled workbook or the external survey CSV as input.
 - `nde sentiment-sensitivity` writes a reusable `vader_sentiment_scores.csv`, per-section PNG figures, a Markdown report, and a JSON summary under the chosen output directory. Raw text is excluded by default and included only with `--include-text`.
 - `nde evaluate` always requires completed human annotations. LLM predictions are optional unless you pass an explicit `--llm-predictions` path, in which case the file must exist and follow the contract documented in `docs/output_contract.md`.

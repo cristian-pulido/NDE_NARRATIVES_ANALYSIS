@@ -51,6 +51,43 @@ def test_build_annotation_sample_creates_workbooks(tmp_path: Path) -> None:
     assert "participant_code" in sampled_private.columns
 
 
+def test_build_annotation_sample_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    first_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert first_result.returncode == 0, first_result.stderr
+
+    second_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+
+    assert second_result.returncode == 1
+    assert "Refusing to overwrite existing annotation artifacts" in second_result.stderr
+    assert "nde build-annotation-sample --force" in second_result.stderr
+    assert "completed human annotation workbook" in second_result.stderr
+
+
+
+def test_build_annotation_sample_force_allows_intentional_overwrite(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    first_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert first_result.returncode == 0, first_result.stderr
+
+    force_result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--force",
+    )
+
+    assert force_result.returncode == 0, force_result.stderr
+
+
 def test_build_llm_batch_creates_three_section_files(tmp_path: Path) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
