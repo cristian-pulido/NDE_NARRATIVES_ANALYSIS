@@ -143,6 +143,7 @@ def load_optional_llm_predictions(
         return None
     return load_llm_predictions(resolved_llm_predictions, study)
 
+
 def _map_questionnaire_value(value: object, yes_values: list[str], no_values: list[str], source_column: str) -> str:
     if _is_blank(value):
         raise ValueError(f"Questionnaire column {source_column} contains blank values.")
@@ -160,7 +161,17 @@ def load_sampled_private_data(sampled_private_workbook: Path) -> pd.DataFrame:
     return pd.read_excel(sampled_private_workbook, sheet_name=SAMPLED_PRIVATE_SHEET)
 
 
-def load_questionnaire_labels(sampled_private_workbook: Path, study: StudyConfig) -> pd.DataFrame:
+def _filter_participant_subset(df: pd.DataFrame, participant_codes: set[str] | None) -> pd.DataFrame:
+    if participant_codes is None:
+        return df.copy()
+    return df[df["participant_code"].isin(participant_codes)].copy()
+
+
+def load_questionnaire_labels(
+    sampled_private_workbook: Path,
+    study: StudyConfig,
+    participant_codes: set[str] | None = None,
+) -> pd.DataFrame:
     placeholder_columns = study.placeholder_questionnaire_columns()
     if placeholder_columns:
         raise ValueError(f"Replace questionnaire placeholders before evaluation: {placeholder_columns}")
@@ -168,6 +179,7 @@ def load_questionnaire_labels(sampled_private_workbook: Path, study: StudyConfig
     df = load_sampled_private_data(sampled_private_workbook)
     if "participant_code" not in df.columns:
         raise ValueError("Sampled private workbook must include participant_code.")
+    df = _filter_participant_subset(df, participant_codes)
 
     out = pd.DataFrame({"participant_code": df["participant_code"]})
     for block_name in ("m8", "m9"):
@@ -187,10 +199,11 @@ def load_vader_predictions(
     study: StudyConfig,
     paths: PathsConfig,
     sampled_private_workbook: Path,
+    participant_codes: set[str] | None = None,
     vader_scores_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
-    sampled_private_df = load_sampled_private_data(sampled_private_workbook)
+    sampled_private_df = _filter_participant_subset(load_sampled_private_data(sampled_private_workbook), participant_codes)
     resolved_vader_scores = Path(vader_scores_path or default_vader_scores_path(paths))
 
     if vader_scores_path is not None and not resolved_vader_scores.exists():
@@ -318,16 +331,18 @@ def evaluate_outputs(
     resolved_sampled_private = Path(sampled_private_workbook or paths.sampled_private_workbook)
 
     human_df, human_coverage = load_human_annotations(resolved_annotation_workbook, study)
+    human_codes = set(human_df["participant_code"])
     llm_df = load_optional_llm_predictions(
         study,
         paths,
         llm_predictions_path=Path(llm_predictions_path) if llm_predictions_path else None,
     )
-    questionnaire_df = load_questionnaire_labels(resolved_sampled_private, study)
+    questionnaire_df = load_questionnaire_labels(resolved_sampled_private, study, participant_codes=human_codes)
     vader_df, vader_summary = load_vader_predictions(
         study,
         paths,
         resolved_sampled_private,
+        participant_codes=human_codes,
         vader_scores_path=Path(vader_scores_path) if vader_scores_path else None,
         output_dir=Path(output_dir) if output_dir else None,
     )

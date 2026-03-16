@@ -257,6 +257,33 @@ def test_evaluate_skips_fully_blank_human_rows(tmp_path: Path) -> None:
 
 
 
+def test_evaluate_ignores_invalid_questionnaire_values_for_skipped_human_rows(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    build_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert build_result.returncode == 0, build_result.stderr
+
+    annotation_workbook = tmp_path / "annotation_outputs" / "nde_annotation_sample.xlsx"
+    mapping_workbook = tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+
+    populate_human_annotation_workbook(annotation_workbook, mapping_workbook, study_config)
+    _clear_annotation_row(annotation_workbook, 2)
+
+    study = load_study_config(study_config)
+    workbook = load_workbook(mapping_workbook)
+    worksheet = workbook["sampled_private"]
+    headers = _annotation_headers(worksheet)
+    questionnaire_column = study.questionnaire["m8"]["columns"]["m8_out_of_body"]
+    worksheet.cell(row=2, column=headers[questionnaire_column], value="INVALID")
+    workbook.save(mapping_workbook)
+
+    eval_result = run_cli("evaluate", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "evaluation_metrics.csv")
+    assert set(metrics["n"]) == {2}
 def test_evaluate_fails_for_partially_completed_human_row(tmp_path: Path) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
@@ -374,4 +401,6 @@ def test_evaluate_fails_when_vader_missing_human_evaluable_participant(tmp_path:
     )
     assert eval_result.returncode == 1
     assert "Participant mismatch between human annotations and VADER predictions" in eval_result.stderr
+
+
 
