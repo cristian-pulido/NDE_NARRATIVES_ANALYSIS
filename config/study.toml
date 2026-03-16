@@ -63,8 +63,8 @@ m9_help_others = "Greater willingness to help others"
 m9_forgiveness = "Greater willingness to forgive"
 
 [questionnaire.m8]
-yes_values = ["Medium", "Intensely", "Extremely"]
-no_values = ["Not at all", "Slightly"]
+yes_values = ["Medium", "Intensively", "Extremely"]
+no_values = ["Not at all - absence", "Slightly"]
 
 [questionnaire.m8.columns]
 m8_out_of_body = "outside_of_body_experience"
@@ -75,7 +75,7 @@ m8_presence = "presence_encounter"
 
 [questionnaire.m9]
 yes_values = ["Increased", "Strongly increased"]
-no_values = ["Strongly diminished", "Decreased", "Not changed"]
+no_values = ["Strongly diminished", "Decreased", "Not changed", "Missing"]
 
 [questionnaire.m9.columns]
 m9_moral_rules = "NDE-MCQ_02_Since_NDE"
