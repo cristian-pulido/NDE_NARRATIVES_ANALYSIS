@@ -18,18 +18,44 @@ def is_meaningful_text(value: object) -> bool:
     return normalized.lower() not in {"n/a", "na", "none", "nothing", "see above", "-", "--"}
 
 
-def filter_source_data(df: pd.DataFrame, study: StudyConfig) -> pd.DataFrame:
+def apply_dataset_row_filters(
+    df: pd.DataFrame,
+    study: StudyConfig,
+    *,
+    apply_quality_filter: bool = True,
+    quality_values: list[str] | None = None,
+    apply_to_drop_filter: bool = True,
+    drop_missing_strata: bool | None = None,
+) -> pd.DataFrame:
     out = df.copy()
 
     quality_column = study.dataset.get("quality_label_column")
-    quality_values = study.dataset.get("quality_values_to_use")
-    if quality_column and quality_values:
-        out = out[out[str(quality_column)].isin(quality_values)].copy()
+    effective_quality_values = quality_values if quality_values is not None else study.dataset.get("quality_values_to_use")
+    if apply_quality_filter and quality_column and effective_quality_values:
+        out = out[out[str(quality_column)].isin(effective_quality_values)].copy()
 
     to_drop_column = study.dataset.get("to_drop_column")
     to_drop_value = study.dataset.get("to_drop_exclude_value")
-    if to_drop_column and to_drop_column in out.columns:
+    if apply_to_drop_filter and to_drop_column and to_drop_column in out.columns:
         out = out[out[str(to_drop_column)] != to_drop_value].copy()
+
+    effective_drop_missing_strata = (
+        bool(study.dataset.get("drop_missing_strata", True))
+        if drop_missing_strata is None
+        else drop_missing_strata
+    )
+    if effective_drop_missing_strata:
+        stratify_column = study.stratify_column
+        missing_label = study.dataset.get("missing_label")
+        out = out[out[stratify_column].notna()].copy()
+        if missing_label is not None:
+            out = out[out[stratify_column] != missing_label].copy()
+
+    return out
+
+
+def filter_source_data(df: pd.DataFrame, study: StudyConfig) -> pd.DataFrame:
+    out = apply_dataset_row_filters(df, study)
 
     for source_column in study.text_columns().values():
         out[f"__valid_{source_column}"] = out[source_column].apply(is_meaningful_text)
@@ -40,13 +66,6 @@ def filter_source_data(df: pd.DataFrame, study: StudyConfig) -> pd.DataFrame:
         out = out[out[valid_columns].all(axis=1)].copy()
     else:
         out = out[out[valid_columns].any(axis=1)].copy()
-
-    if bool(study.dataset.get("drop_missing_strata", True)):
-        stratify_column = study.stratify_column
-        missing_label = study.dataset.get("missing_label")
-        out = out[out[stratify_column].notna()].copy()
-        if missing_label is not None:
-            out = out[out[stratify_column] != missing_label].copy()
 
     helper_columns = [column for column in out.columns if column.startswith("__valid_")]
     if helper_columns:

@@ -1,6 +1,6 @@
 # NDE Narratives Analysis
 
-Structured coding workflow for Near-Death Experience (NDE) narratives with human annotation, LLM-ready batches, and evaluation against questionnaire-derived labels.
+Structured coding workflow for Near-Death Experience (NDE) narratives with human annotation, LLM-ready batches, VADER-based sensitivity analysis, and evaluation against questionnaire-derived labels.
 
 ## Repository Principles
 
@@ -11,7 +11,7 @@ Structured coding workflow for Near-Death Experience (NDE) narratives with human
 ## Layout
 
 - `config/`: Study configuration and local path templates.
-- `docs/`: Research proposal and annotation guidelines.
+- `docs/`: Research proposal, annotation guidelines, and output contracts.
 - `prompts/`: Section-specific LLM prompt templates.
 - `schemas/`: Versioned JSON schemas for normalized LLM outputs.
 - `src/`: Python package and CLI.
@@ -44,7 +44,13 @@ Build three JSONL batches, one per narrative section:
 
     nde build-llm-batch --source sampled-private
 
-Run evaluation against human annotations, LLM predictions, and questionnaire-derived labels:
+Run a first-layer VADER sensitivity analysis over the configured narrative text columns:
+
+    nde sentiment-sensitivity
+
+Use `--all-records` to bypass the study-level row filters, repeat `--quality-value` to override the configured quality subset, and add `--include-text` only when you want the raw text echoed into the score file.
+
+Run evaluation against human annotations, questionnaire-derived labels, and VADER tone labels. If LLM predictions are available, they are included automatically as extra comparisons:
 
     nde evaluate
 
@@ -58,4 +64,7 @@ Run the test suite:
 - The generated annotator workbook is the base file for coding. The completed human-annotation workbook used by `nde evaluate` is a separate artifact configured through `paths.human_annotation_workbook`.
 - `nde build-annotation-sample` protects existing annotation artifacts by default and requires `--force` for intentional overwrites.
 - `nde build-llm-batch` expects either the private sampled workbook or the external survey CSV as input.
-- `nde evaluate` expects completed human annotations and normalized LLM predictions that use the versioned field contract documented in `docs/output_contract.md`.
+- `nde sentiment-sensitivity` writes a reusable `vader_sentiment_scores.csv`, per-section PNG figures, a Markdown report, and a JSON summary under the chosen output directory. Raw text is excluded by default and included only with `--include-text`.
+- `nde evaluate` always requires completed human annotations. LLM predictions are optional unless you pass an explicit `--llm-predictions` path, in which case the file must exist and follow the contract documented in `docs/output_contract.md`.
+- `nde evaluate` will reuse a previously generated VADER score file when available, or generate sample-level VADER scores automatically for the annotated subset.
+- `nde evaluate` now also writes an alignment-focused Markdown report, comparison figures, and an auxiliary long-format metrics table under the evaluation output directory.
