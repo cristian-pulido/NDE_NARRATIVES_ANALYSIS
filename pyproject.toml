@@ -8,9 +8,11 @@ description = "CLI tools for structured coding and evaluation of Near-Death Expe
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "matplotlib>=3.8,<4",
   "numpy>=1.26,<3",
   "openpyxl>=3.1,<4",
   "pandas>=2.2,<3",
+  "vaderSentiment>=3.3.2,<4",
 ]
 [project.optional-dependencies]
 dev = [

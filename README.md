@@ -1,6 +1,6 @@
 # NDE Narratives Analysis
 
-Structured coding workflow for Near-Death Experience (NDE) narratives with human annotation, LLM-ready batches, and evaluation against questionnaire-derived labels.
+Structured coding workflow for Near-Death Experience (NDE) narratives with human annotation, LLM-ready batches, VADER-based sensitivity analysis, and evaluation against questionnaire-derived labels.
 
 ## Repository Principles
 
@@ -11,7 +11,7 @@ Structured coding workflow for Near-Death Experience (NDE) narratives with human
 ## Layout
 
 - `config/`: Study configuration and local path templates.
-- `docs/`: Research proposal and annotation guidelines.
+- `docs/`: Research proposal, annotation guidelines, and output contracts.
 - `prompts/`: Section-specific LLM prompt templates.
 - `schemas/`: Versioned JSON schemas for normalized LLM outputs.
 - `src/`: Python package and CLI.
@@ -40,7 +40,13 @@ Build three JSONL batches, one per narrative section:
 
     nde build-llm-batch --source sampled-private
 
-Run evaluation against human annotations, LLM predictions, and questionnaire-derived labels:
+Run a first-layer VADER sensitivity analysis over the configured narrative text columns:
+
+    nde sentiment-sensitivity
+
+Use `--all-records` to bypass the study-level row filters, or repeat `--quality-value` to override the configured quality subset.
+
+Run evaluation against human annotations, LLM predictions, questionnaire-derived labels, and VADER tone labels:
 
     nde evaluate
 
@@ -52,4 +58,6 @@ Run the test suite:
 
 - `nde build-annotation-sample` writes three external files: the annotator workbook, the private mapping workbook, and the private column map workbook.
 - `nde build-llm-batch` expects either the private sampled workbook or the external survey CSV as input.
+- `nde sentiment-sensitivity` writes a reusable `vader_sentiment_scores.csv`, per-section PNG figures, a Markdown report, and a JSON summary under the chosen output directory.
 - `nde evaluate` expects completed human annotations and normalized LLM predictions that use the versioned field contract documented in `docs/output_contract.md`.
+- `nde evaluate` will reuse a previously generated VADER score file when available, or generate sample-level VADER scores automatically for the annotated subset.

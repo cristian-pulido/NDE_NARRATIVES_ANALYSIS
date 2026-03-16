@@ -8,6 +8,12 @@ import pandas as pd
 
 from .config import PathsConfig, StudyConfig
 from .constants import ANNOTATION_SHEET, SAMPLED_PRIVATE_SHEET
+from .vader_analysis import (
+    default_vader_scores_path,
+    load_vader_scores,
+    run_vader_sensitivity,
+    vader_scores_to_tone_predictions,
+)
 
 
 def _is_blank(value: object) -> bool:
@@ -104,15 +110,18 @@ def _map_questionnaire_value(value: object, yes_values: list[str], no_values: li
     raise ValueError(f"Unexpected questionnaire value in {source_column}: {normalized}")
 
 
-def load_questionnaire_labels(sampled_private_workbook: Path, study: StudyConfig) -> pd.DataFrame:
+def load_sampled_private_data(sampled_private_workbook: Path) -> pd.DataFrame:
     if not sampled_private_workbook.exists():
         raise FileNotFoundError(f"Sampled private workbook not found: {sampled_private_workbook}")
+    return pd.read_excel(sampled_private_workbook, sheet_name=SAMPLED_PRIVATE_SHEET)
 
+
+def load_questionnaire_labels(sampled_private_workbook: Path, study: StudyConfig) -> pd.DataFrame:
     placeholder_columns = study.placeholder_questionnaire_columns()
     if placeholder_columns:
         raise ValueError(f"Replace questionnaire placeholders before evaluation: {placeholder_columns}")
 
-    df = pd.read_excel(sampled_private_workbook, sheet_name=SAMPLED_PRIVATE_SHEET)
+    df = load_sampled_private_data(sampled_private_workbook)
     if "participant_code" not in df.columns:
         raise ValueError("Sampled private workbook must include participant_code.")
 
@@ -128,6 +137,33 @@ def load_questionnaire_labels(sampled_private_workbook: Path, study: StudyConfig
 
     _validate_labels(out, study.binary_columns(), study, "Questionnaire labels")
     return out
+
+
+def load_vader_predictions(
+    study: StudyConfig,
+    paths: PathsConfig,
+    sampled_private_workbook: Path,
+    vader_scores_path: Path | None = None,
+    output_dir: Path | None = None,
+) -> pd.DataFrame:
+    sampled_private_df = load_sampled_private_data(sampled_private_workbook)
+    resolved_vader_scores = Path(vader_scores_path or default_vader_scores_path(paths))
+
+    if resolved_vader_scores.exists():
+        scores_df = load_vader_scores(resolved_vader_scores, study)
+    else:
+        sample_output_dir = Path(output_dir or paths.evaluation_output_dir) / "vader_sentiment_sample"
+        scores_df, _, _ = run_vader_sensitivity(
+            study,
+            paths,
+            output_dir=sample_output_dir,
+            all_records=True,
+            source_df=sampled_private_df,
+        )
+
+    predictions = vader_scores_to_tone_predictions(scores_df, sampled_private_df, study)
+    _validate_labels(predictions, study.tone_columns(), study, "VADER predictions")
+    return predictions
 
 
 def _ensure_same_participants(reference: pd.DataFrame, other: pd.DataFrame, reference_name: str, other_name: str) -> None:
@@ -158,7 +194,7 @@ def cohen_kappa_score(y_true: pd.Series, y_pred: pd.Series, labels: list[str]) -
     observed = float(matrix.to_numpy().trace()) / total
     row_totals = matrix.sum(axis=1).to_numpy(dtype=float)
     column_totals = matrix.sum(axis=0).to_numpy(dtype=float)
-    expected = float((row_totals * column_totals).sum()) / (total ** 2)
+    expected = float((row_totals * column_totals).sum()) / (total**2)
     denominator = 1.0 - expected
     if denominator == 0:
         return 1.0 if observed == 1.0 else 0.0
@@ -213,18 +249,33 @@ def evaluate_outputs(
     llm_predictions_path: Path | None = None,
     sampled_private_workbook: Path | None = None,
     output_dir: Path | None = None,
+    vader_scores_path: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, str]]:
-    human_df = load_human_annotations(Path(human_annotation_workbook or paths.human_annotation_workbook), study)
-    llm_df = load_llm_predictions(Path(llm_predictions_path or paths.llm_predictions_path), study)
-    questionnaire_df = load_questionnaire_labels(Path(sampled_private_workbook or paths.sampled_private_workbook), study)
+    resolved_annotation_workbook = Path(human_annotation_workbook or paths.human_annotation_workbook)
+    resolved_llm_predictions = Path(llm_predictions_path or paths.llm_predictions_path)
+    resolved_sampled_private = Path(sampled_private_workbook or paths.sampled_private_workbook)
+
+    human_df = load_human_annotations(resolved_annotation_workbook, study)
+    llm_df = load_llm_predictions(resolved_llm_predictions, study)
+    questionnaire_df = load_questionnaire_labels(resolved_sampled_private, study)
+    vader_df = load_vader_predictions(
+        study,
+        paths,
+        resolved_sampled_private,
+        vader_scores_path=Path(vader_scores_path) if vader_scores_path else None,
+        output_dir=Path(output_dir) if output_dir else None,
+    )
 
     _ensure_same_participants(human_df, llm_df, "human annotations", "LLM predictions")
     _ensure_same_participants(human_df, questionnaire_df, "human annotations", "questionnaire labels")
+    _ensure_same_participants(human_df, vader_df, "human annotations", "VADER predictions")
 
     metrics_frames = [
         compute_comparison_metrics(human_df, llm_df, study.annotation_internal_columns(), study, "human_vs_llm"),
         compute_comparison_metrics(human_df, questionnaire_df, study.binary_columns(), study, "human_vs_questionnaire"),
         compute_comparison_metrics(llm_df, questionnaire_df, study.binary_columns(), study, "llm_vs_questionnaire"),
+        compute_comparison_metrics(human_df, vader_df, study.tone_columns(), study, "human_vs_vader"),
+        compute_comparison_metrics(llm_df, vader_df, study.tone_columns(), study, "llm_vs_vader"),
     ]
     metrics_df = pd.concat(metrics_frames, ignore_index=True)
 

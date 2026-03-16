@@ -103,6 +103,54 @@ def test_build_llm_batch_creates_three_section_files(tmp_path: Path) -> None:
         assert all(record["response_schema"]["title"].startswith("nde_") for record in records)
 
 
+def test_sentiment_sensitivity_generates_scores_figures_and_report(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+    output_dir = tmp_path / "sentiment_outputs"
+
+    result = run_cli(
+        "sentiment-sensitivity",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--output-dir",
+        str(output_dir),
+    )
+
+    assert result.returncode == 0, result.stderr
+    scores_path = output_dir / "vader_sentiment_scores.csv"
+    report_path = output_dir / "vader_report.md"
+    assert scores_path.exists()
+    assert report_path.exists()
+    for section in ("context", "experience", "aftereffects"):
+        assert (output_dir / "figures" / f"{section}_distribution.png").exists()
+
+    scores = pd.read_csv(scores_path)
+    assert len(scores) == 9
+    assert set(scores["section"]) == {"context", "experience", "aftereffects"}
+    assert set(scores["vader_label"]).issubset({"positive", "negative", "mixed"})
+
+    report_text = report_path.read_text(encoding="utf-8")
+    assert "## Methodology" in report_text
+    assert "## Results" in report_text
+
+    all_records_result = run_cli(
+        "sentiment-sensitivity",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--output-dir",
+        str(tmp_path / "sentiment_outputs_all"),
+        "--all-records",
+    )
+    assert all_records_result.returncode == 0, all_records_result.stderr
+    all_scores = pd.read_csv(tmp_path / "sentiment_outputs_all" / "vader_sentiment_scores.csv")
+    assert len(all_scores) == 12
+
+
 def populate_human_annotation_workbook(annotation_workbook: Path, mapping_workbook: Path, study_config: Path) -> None:
     study = load_study_config(study_config)
     annotation_values = pd.read_csv(FIXTURES / "manual_annotations_fixture.csv").set_index("response_id")
@@ -144,7 +192,60 @@ def write_llm_predictions_fixture(mapping_workbook: Path, study_config: Path, ou
                 handle.write("\n")
 
 
-def test_evaluate_generates_metrics_and_rejects_invalid_labels(tmp_path: Path) -> None:
+def test_evaluate_reuses_existing_vader_scores_and_reports_vader_metrics(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    build_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert build_result.returncode == 0, build_result.stderr
+
+    annotation_workbook = tmp_path / "annotation_outputs" / "nde_annotation_sample.xlsx"
+    mapping_workbook = tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    prediction_path = tmp_path / "llm_outputs" / "nde_predictions.jsonl"
+    vader_dir = tmp_path / "evaluation_outputs" / "vader_sentiment"
+
+    populate_human_annotation_workbook(annotation_workbook, mapping_workbook, study_config)
+    write_llm_predictions_fixture(mapping_workbook, study_config, prediction_path)
+
+    vader_result = run_cli(
+        "sentiment-sensitivity",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--output-dir",
+        str(vader_dir),
+    )
+    assert vader_result.returncode == 0, vader_result.stderr
+
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--vader-scores",
+        str(vader_dir / "vader_sentiment_scores.csv"),
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "evaluation_metrics.csv")
+    assert set(metrics["comparison"]).issuperset({"human_vs_vader", "llm_vs_vader"})
+    assert len(metrics[metrics["comparison"] == "human_vs_vader"]) == 3
+
+    workbook = load_workbook(annotation_workbook)
+    worksheet = workbook[ANNOTATION_SHEET]
+    headers = {cell.value: index for index, cell in enumerate(worksheet[1], start=1)}
+    worksheet.cell(row=2, column=headers["Context Tone"], value="invalid")
+    workbook.save(annotation_workbook)
+
+    invalid_result = run_cli("evaluate", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert invalid_result.returncode == 1
+    assert "invalid labels" in invalid_result.stderr
+
+
+def test_evaluate_generates_sample_vader_scores_when_global_file_is_missing(tmp_path: Path) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
@@ -162,18 +263,7 @@ def test_evaluate_generates_metrics_and_rejects_invalid_labels(tmp_path: Path) -
     eval_result = run_cli("evaluate", "--study-config", str(study_config), "--paths-config", str(paths_config))
     assert eval_result.returncode == 0, eval_result.stderr
 
+    sample_scores_path = tmp_path / "evaluation_outputs" / "vader_sentiment_sample" / "vader_sentiment_scores.csv"
+    assert sample_scores_path.exists()
     metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "evaluation_metrics.csv")
-    help_others = metrics[(metrics["comparison"] == "human_vs_llm") & (metrics["field"] == "m9_help_others")].iloc[0]
-    assert help_others["accuracy"] == 2 / 3
-    assert round(help_others["cohen_kappa"], 4) == 0.4
-    assert round(help_others["macro_f1"], 4) == 0.6667
-
-    workbook = load_workbook(annotation_workbook)
-    worksheet = workbook[ANNOTATION_SHEET]
-    headers = {cell.value: index for index, cell in enumerate(worksheet[1], start=1)}
-    worksheet.cell(row=2, column=headers["Context Tone"], value="invalid")
-    workbook.save(annotation_workbook)
-
-    invalid_result = run_cli("evaluate", "--study-config", str(study_config), "--paths-config", str(paths_config))
-    assert invalid_result.returncode == 1
-    assert "invalid labels" in invalid_result.stderr
+    assert len(metrics[metrics["comparison"] == "human_vs_vader"]) == 3

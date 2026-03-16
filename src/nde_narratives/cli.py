@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import json
@@ -11,6 +11,7 @@ from .excel import write_annotation_outputs
 from .io_utils import read_tabular_file
 from .prompting import write_llm_batches
 from .sampling import create_annotation_frames
+from .vader_analysis import run_vader_sensitivity
 
 
 def _config_parent() -> argparse.ArgumentParser:
@@ -47,14 +48,27 @@ def build_parser() -> argparse.ArgumentParser:
     build_batch.add_argument("--limit", type=int, default=None)
     build_batch.set_defaults(handler=cmd_build_llm_batch)
 
+    sentiment = subparsers.add_parser(
+        "sentiment-sensitivity",
+        parents=[_config_parent()],
+        help="Run VADER sentiment sensitivity analysis across narrative text columns.",
+    )
+    sentiment.add_argument("--input-path", default=None)
+    sentiment.add_argument("--output-dir", default=None)
+    sentiment.add_argument("--all-records", action="store_true")
+    sentiment.add_argument("--quality-value", dest="quality_values", action="append", default=None)
+    sentiment.add_argument("--limit", type=int, default=None)
+    sentiment.set_defaults(handler=cmd_sentiment_sensitivity)
+
     evaluate = subparsers.add_parser(
         "evaluate",
         parents=[_config_parent()],
-        help="Compare human annotations, LLM predictions, and questionnaire-derived labels.",
+        help="Compare human annotations, LLM predictions, questionnaire-derived labels, and VADER tone labels.",
     )
     evaluate.add_argument("--human-annotation-workbook", default=None)
     evaluate.add_argument("--llm-predictions", default=None)
     evaluate.add_argument("--sampled-private-workbook", default=None)
+    evaluate.add_argument("--vader-scores", default=None)
     evaluate.add_argument("--output-dir", default=None)
     evaluate.set_defaults(handler=cmd_evaluate)
 
@@ -145,6 +159,22 @@ def cmd_build_llm_batch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sentiment_sensitivity(args: argparse.Namespace) -> int:
+    study = load_study_config(args.study_config)
+    paths = load_paths_config(args.paths_config)
+    scores_df, summary, written = run_vader_sensitivity(
+        study,
+        paths,
+        input_path=Path(args.input_path).resolve() if args.input_path else None,
+        output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        all_records=args.all_records,
+        quality_values=list(args.quality_values) if args.quality_values else None,
+        limit=args.limit,
+    )
+    print(json.dumps({"rows": len(scores_df), "summary": summary, **written}, indent=2))
+    return 0
+
+
 def cmd_evaluate(args: argparse.Namespace) -> int:
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
@@ -154,6 +184,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         human_annotation_workbook=Path(args.human_annotation_workbook).resolve() if args.human_annotation_workbook else None,
         llm_predictions_path=Path(args.llm_predictions).resolve() if args.llm_predictions else None,
         sampled_private_workbook=Path(args.sampled_private_workbook).resolve() if args.sampled_private_workbook else None,
+        vader_scores_path=Path(args.vader_scores).resolve() if args.vader_scores else None,
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
     )
     print(json.dumps({"rows": len(metrics_df), "summary": summary, **written}, indent=2))
