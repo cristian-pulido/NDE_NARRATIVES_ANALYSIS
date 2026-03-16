@@ -190,9 +190,29 @@ def _available_sources(metrics_df: pd.DataFrame) -> list[str]:
     return sources
 
 
-def _ranking_lines(summary: dict[str, Any]) -> list[str]:
+def _coverage_lines(coverage: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Evaluation Coverage",
+        "",
+        f"- Sampled rows available in private mapping: {coverage['n_sampled_total']}",
+        f"- Rows still present in the human workbook: {coverage['n_human_rows_total']}",
+        f"- Fully annotated human rows included in metrics: {coverage['n_human_evaluable']}",
+        f"- Human rows skipped because all labels were blank: {coverage['n_skipped_unannotated']}",
+        "- Evaluation is computed against what humans actually completed; fully blank rows are skipped and partially completed rows fail validation.",
+        "",
+    ]
+    removed_rows = coverage["n_sampled_total"] - coverage["n_human_rows_total"]
+    if removed_rows > 0:
+        lines.extend([
+            f"- Sampled rows removed from the workbook before evaluation: {removed_rows}",
+            "",
+        ])
+    return lines
+
+
+def _ranking_lines(comparison_summary: dict[str, Any]) -> list[str]:
     ranking = sorted(
-        summary.items(),
+        comparison_summary.items(),
         key=lambda item: (item[1]["cohen_kappa_mean"], item[1]["accuracy_mean"], item[1]["macro_f1_mean"]),
         reverse=True,
     )
@@ -243,8 +263,8 @@ def _tone_result_lines(metrics_df: pd.DataFrame, study: StudyConfig) -> list[str
     return lines
 
 
-def _interpretation_lines(metrics_df: pd.DataFrame, summary: dict[str, Any]) -> list[str]:
-    ranking = sorted(summary.items(), key=lambda item: item[1]["cohen_kappa_mean"], reverse=True)
+def _interpretation_lines(metrics_df: pd.DataFrame, comparison_summary: dict[str, Any]) -> list[str]:
+    ranking = sorted(comparison_summary.items(), key=lambda item: item[1]["cohen_kappa_mean"], reverse=True)
     best_name, best_values = ranking[0]
     worst_name, worst_values = ranking[-1]
     tone_df = metrics_df[metrics_df["field"].str.endswith("_tone")]
@@ -294,6 +314,8 @@ def write_alignment_report(
 ) -> Path:
     report_path = output_dir / ALIGNMENT_REPORT_FILENAME
     sources = ", ".join(_available_sources(metrics_df))
+    coverage = summary["coverage"]
+    comparison_summary = summary["comparisons"]
     lines = [
         "# Alignment Report Across Sources",
         "",
@@ -308,9 +330,10 @@ def write_alignment_report(
         f"- Binary questionnaire-derived fields: {len(study.binary_columns())}",
         "- Metrics reported: accuracy, Cohen kappa, and macro F1.",
         "- VADER is applied with its lexicon-and-rules model and then discretized into positive, negative, and mixed labels using the standard compound thresholds.",
-        "- The evaluation only runs when the human annotation workbook is complete for the required fields.",
+        "- The evaluation runs on the subset of participant codes that humans fully annotated; fully blank human rows are skipped and partially completed rows fail validation.",
         "",
     ]
+    lines.extend(_coverage_lines(coverage))
     if vader_summary:
         lines.extend(
             [
@@ -322,7 +345,7 @@ def write_alignment_report(
             ]
         )
 
-    lines.extend(_ranking_lines(summary))
+    lines.extend(_ranking_lines(comparison_summary))
     lines.extend(
         [
             "### Figures",
@@ -339,7 +362,7 @@ def write_alignment_report(
     )
     lines.extend(_field_result_lines(metrics_df, study))
     lines.extend(_tone_result_lines(metrics_df, study))
-    lines.extend(_interpretation_lines(metrics_df, summary))
+    lines.extend(_interpretation_lines(metrics_df, comparison_summary))
     lines.extend(_llm_section_lines(metrics_df))
 
     report_path.write_text("\n".join(lines), encoding="utf-8")

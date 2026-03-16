@@ -54,6 +54,13 @@ Run evaluation against human annotations, questionnaire-derived labels, and VADE
 
     nde evaluate
 
+`nde evaluate` now works against the subset of participant codes that were fully annotated by humans. This means:
+
+- fully blank annotation rows are skipped
+- rows removed from the completed workbook are also excluded from evaluation
+- partially completed rows still fail validation with an explicit error
+- questionnaire, VADER, and optional LLM comparisons are filtered to the human-evaluable subset only
+
 Run the test suite:
 
     python -m pytest
@@ -65,6 +72,8 @@ Run the test suite:
 - `nde build-annotation-sample` protects existing annotation artifacts by default and requires `--force` for intentional overwrites.
 - `nde build-llm-batch` expects either the private sampled workbook or the external survey CSV as input.
 - `nde sentiment-sensitivity` writes a reusable `vader_sentiment_scores.csv`, per-section PNG figures, a Markdown report, and a JSON summary under the chosen output directory. Raw text is excluded by default and included only with `--include-text`.
-- `nde evaluate` always requires completed human annotations. LLM predictions are optional unless you pass an explicit `--llm-predictions` path, in which case the file must exist and follow the contract documented in `docs/output_contract.md`.
+- `nde evaluate` requires human annotations, but it no longer requires that every sampled row remain present and fully coded in the completed workbook.
+- For `nde evaluate`, a row with all label cells blank is treated as not evaluated, while a row with only some labels filled is treated as an error.
 - `nde evaluate` will reuse a previously generated VADER score file when available, or generate sample-level VADER scores automatically for the annotated subset.
-- `nde evaluate` now also writes an alignment-focused Markdown report, comparison figures, and an auxiliary long-format metrics table under the evaluation output directory.
+- `nde evaluate` writes `evaluation_metrics.csv`, `evaluation_summary.json`, an alignment-focused Markdown report, comparison figures, and an auxiliary long-format metrics table under the evaluation output directory.
+- `evaluation_summary.json` now includes coverage counts for sampled rows, rows present in the human workbook, fully evaluable human rows, and skipped unannotated rows.

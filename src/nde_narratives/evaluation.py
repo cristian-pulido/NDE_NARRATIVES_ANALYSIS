@@ -34,7 +34,7 @@ def _validate_labels(df: pd.DataFrame, columns: list[str], study: StudyConfig, s
             raise ValueError(f"{source_name} contains invalid labels in {column}: {invalid}")
 
 
-def load_human_annotations(annotation_workbook: Path, study: StudyConfig) -> pd.DataFrame:
+def _normalize_human_annotations(annotation_workbook: Path, study: StudyConfig) -> pd.DataFrame:
     if not annotation_workbook.exists():
         raise FileNotFoundError(f"Human annotation workbook not found: {annotation_workbook}")
 
@@ -45,9 +45,39 @@ def load_human_annotations(annotation_workbook: Path, study: StudyConfig) -> pd.
     if missing_visible:
         raise ValueError(f"Human annotation workbook is missing columns: {missing_visible}")
 
-    normalized = df[required_visible].rename(columns=rename_map)
-    _validate_labels(normalized, study.annotation_internal_columns(), study, "Human annotations")
+    normalized = df[required_visible].rename(columns=rename_map).copy()
+    normalized["participant_code"] = normalized["participant_code"].apply(lambda value: "" if pd.isna(value) else str(value).strip())
+    blank_codes = normalized["participant_code"] == ""
+    if blank_codes.any():
+        raise ValueError("Human annotation workbook contains blank participant_code values.")
     return normalized
+
+
+def load_human_annotations(annotation_workbook: Path, study: StudyConfig) -> tuple[pd.DataFrame, dict[str, int]]:
+    normalized = _normalize_human_annotations(annotation_workbook, study)
+    label_columns = study.annotation_internal_columns()
+    blank_matrix = normalized[label_columns].map(_is_blank)
+    fully_blank_mask = blank_matrix.all(axis=1)
+    partially_complete_mask = blank_matrix.any(axis=1) & ~fully_blank_mask
+
+    if partially_complete_mask.any():
+        partial_codes = normalized.loc[partially_complete_mask, "participant_code"].tolist()
+        raise ValueError(
+            "Human annotations contain partially completed rows. "
+            f"Complete or clear all required labels for participant_code: {partial_codes}."
+        )
+
+    evaluable = normalized.loc[~fully_blank_mask].copy()
+    _validate_labels(evaluable, label_columns, study, "Human annotations")
+
+    coverage = {
+        "n_human_rows_total": int(len(normalized)),
+        "n_human_evaluable": int(len(evaluable)),
+        "n_skipped_unannotated": int(fully_blank_mask.sum()),
+    }
+    if coverage["n_human_evaluable"] == 0:
+        raise ValueError("Human annotation workbook does not contain any fully annotated rows to evaluate.")
+    return evaluable, coverage
 
 
 def _jsonl_records(path: Path) -> list[dict[str, Any]]:
@@ -98,7 +128,6 @@ def load_llm_predictions(prediction_path: Path, study: StudyConfig) -> pd.DataFr
     normalized = predictions[required].copy()
     _validate_labels(normalized, study.annotation_internal_columns(), study, "LLM predictions")
     return normalized
-
 
 
 
@@ -200,6 +229,18 @@ def _ensure_same_participants(reference: pd.DataFrame, other: pd.DataFrame, refe
         )
 
 
+def _restrict_to_human_participants(
+    human_df: pd.DataFrame,
+    other_df: pd.DataFrame,
+    human_name: str,
+    other_name: str,
+) -> pd.DataFrame:
+    human_codes = set(human_df["participant_code"])
+    filtered = other_df[other_df["participant_code"].isin(human_codes)].copy()
+    _ensure_same_participants(human_df, filtered, human_name, other_name)
+    return filtered
+
+
 def accuracy_score(y_true: pd.Series, y_pred: pd.Series) -> float:
     return float((y_true == y_pred).mean())
 
@@ -276,7 +317,7 @@ def evaluate_outputs(
     resolved_annotation_workbook = Path(human_annotation_workbook or paths.human_annotation_workbook)
     resolved_sampled_private = Path(sampled_private_workbook or paths.sampled_private_workbook)
 
-    human_df = load_human_annotations(resolved_annotation_workbook, study)
+    human_df, human_coverage = load_human_annotations(resolved_annotation_workbook, study)
     llm_df = load_optional_llm_predictions(
         study,
         paths,
@@ -291,8 +332,15 @@ def evaluate_outputs(
         output_dir=Path(output_dir) if output_dir else None,
     )
 
-    _ensure_same_participants(human_df, questionnaire_df, "human annotations", "questionnaire labels")
-    _ensure_same_participants(human_df, vader_df, "human annotations", "VADER predictions")
+    coverage = {
+        "n_sampled_total": int(len(load_sampled_private_data(resolved_sampled_private))),
+        "n_human_rows_total": human_coverage["n_human_rows_total"],
+        "n_human_evaluable": human_coverage["n_human_evaluable"],
+        "n_skipped_unannotated": human_coverage["n_skipped_unannotated"],
+    }
+
+    questionnaire_df = _restrict_to_human_participants(human_df, questionnaire_df, "human annotations", "questionnaire labels")
+    vader_df = _restrict_to_human_participants(human_df, vader_df, "human annotations", "VADER predictions")
 
     metrics_frames = [
         compute_comparison_metrics(human_df, questionnaire_df, study.binary_columns(), study, "human_vs_questionnaire"),
@@ -300,7 +348,7 @@ def evaluate_outputs(
     ]
 
     if llm_df is not None:
-        _ensure_same_participants(human_df, llm_df, "human annotations", "LLM predictions")
+        llm_df = _restrict_to_human_participants(human_df, llm_df, "human annotations", "LLM predictions")
         metrics_frames.extend(
             [
                 compute_comparison_metrics(human_df, llm_df, study.annotation_internal_columns(), study, "human_vs_llm"),
@@ -311,7 +359,7 @@ def evaluate_outputs(
 
     metrics_df = pd.concat(metrics_frames, ignore_index=True)
 
-    summary = {
+    comparison_summary = {
         comparison: {
             "fields": int(len(group)),
             "accuracy_mean": float(group["accuracy"].mean()),
@@ -319,6 +367,10 @@ def evaluate_outputs(
             "macro_f1_mean": float(group["macro_f1"].mean()),
         }
         for comparison, group in metrics_df.groupby("comparison")
+    }
+    summary = {
+        "coverage": coverage,
+        "comparisons": comparison_summary,
     }
 
     evaluation_dir = Path(output_dir or paths.evaluation_output_dir)
