@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     build_batch.add_argument("--input-path", default=None)
     build_batch.add_argument("--output-dir", default=None)
     build_batch.add_argument("--limit", type=int, default=None)
+    build_batch.add_argument("--experiment-id", default=None)
+    build_batch.add_argument("--prompt-variant", default=None)
+    build_batch.add_argument("--run-id", default=None)
+    build_batch.add_argument("--model-variant", default=None)
+    build_batch.add_argument("--prompt-root", default=None)
     build_batch.set_defaults(handler=cmd_build_llm_batch)
 
     sentiment = subparsers.add_parser(
@@ -65,10 +70,14 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser(
         "evaluate",
         parents=[_config_parent()],
-        help="Compare human annotations, LLM predictions, questionnaire-derived labels, and VADER tone labels.",
+        help="Compare consolidated human annotations, LLM predictions, questionnaire-derived labels, and VADER tone labels.",
     )
     evaluate.add_argument("--human-annotation-workbook", default=None)
+    evaluate.add_argument("--human-annotations-dir", default=None)
     evaluate.add_argument("--llm-predictions", default=None)
+    evaluate.add_argument("--llm-results-dir", default=None)
+    evaluate.add_argument("--annotator-id", action="append", default=None)
+    evaluate.add_argument("--experiment-id", action="append", default=None)
     evaluate.add_argument("--sampled-private-workbook", default=None)
     evaluate.add_argument("--vader-scores", default=None)
     evaluate.add_argument("--output-dir", default=None)
@@ -83,6 +92,8 @@ def _ensure_output_locations(paths_config) -> list[str]:
         paths_config.annotation_output_dir,
         paths_config.llm_batch_dir,
         paths_config.evaluation_output_dir,
+        paths_config.human_annotations_dir,
+        paths_config.llm_results_dir,
         paths_config.sampled_private_workbook.parent,
         paths_config.human_annotation_workbook.parent,
         paths_config.llm_predictions_path.parent,
@@ -157,6 +168,11 @@ def cmd_build_llm_batch(args: argparse.Namespace) -> int:
         input_path=Path(args.input_path).resolve() if args.input_path else None,
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
         limit=args.limit,
+        experiment_id=args.experiment_id,
+        prompt_variant=args.prompt_variant,
+        run_id=args.run_id,
+        model_variant=args.model_variant,
+        prompt_root=Path(args.prompt_root).resolve() if args.prompt_root else None,
     )
     print(json.dumps(written, indent=2))
     return 0
@@ -186,7 +202,11 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         study=study,
         paths=paths,
         human_annotation_workbook=Path(args.human_annotation_workbook).resolve() if args.human_annotation_workbook else None,
+        human_annotations_dir=Path(args.human_annotations_dir).resolve() if args.human_annotations_dir else None,
         llm_predictions_path=Path(args.llm_predictions).resolve() if args.llm_predictions else None,
+        llm_results_dir=Path(args.llm_results_dir).resolve() if args.llm_results_dir else None,
+        annotator_ids=list(args.annotator_id) if args.annotator_id else None,
+        experiment_ids=list(args.experiment_id) if args.experiment_id else None,
         sampled_private_workbook=Path(args.sampled_private_workbook).resolve() if args.sampled_private_workbook else None,
         vader_scores_path=Path(args.vader_scores).resolve() if args.vader_scores else None,
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,

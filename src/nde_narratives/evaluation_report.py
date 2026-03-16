@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 from pathlib import Path
@@ -18,7 +18,11 @@ ALIGNMENT_LONG_FILENAME = "alignment_metrics_long.csv"
 
 
 def _comparison_label(comparison: str) -> str:
-    return comparison.replace("_vs_", " vs ").replace("_", " ").title()
+    base, _, detail = comparison.partition(":")
+    label = base.replace("_vs_", " vs ").replace("_", " ").title()
+    if detail:
+        return f"{label} ({detail})"
+    return label
 
 
 def _field_group(field: str) -> str:
@@ -30,6 +34,8 @@ def _field_display_label(field: str, study: StudyConfig) -> str:
 
 
 def _interpret_alignment(value: float) -> str:
+    if math.isnan(value):
+        return "unavailable"
     if value >= 0.75:
         return "high"
     if value >= 0.5:
@@ -40,6 +46,8 @@ def _interpret_alignment(value: float) -> str:
 
 
 def _interpret_kappa(value: float) -> str:
+    if math.isnan(value):
+        return "agreement unavailable"
     if value >= 0.6:
         return "substantial agreement"
     if value >= 0.4:
@@ -63,7 +71,7 @@ def build_alignment_long_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
                     "field_group": _field_group(str(row["field"])),
                     "n": int(row["n"]),
                     "metric": metric_name,
-                    "value": float(row[metric_name]),
+                    "value": float(row[metric_name]) if not pd.isna(row[metric_name]) else float("nan"),
                 }
             )
     return pd.DataFrame(rows)
@@ -78,17 +86,17 @@ def _style_axes(ax) -> None:
 def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path) -> None:
     summary_df = (
         metrics_df.groupby("comparison", as_index=False)[["accuracy", "cohen_kappa", "macro_f1"]]
-        .mean()
-        .sort_values("cohen_kappa", ascending=True)
+        .mean(numeric_only=True)
+        .sort_values("cohen_kappa", ascending=True, na_position="first")
     )
     labels = [_comparison_label(value) for value in summary_df["comparison"]]
     y = list(range(len(summary_df)))
     height = 0.22
 
     fig, ax = plt.subplots(figsize=(10, max(4.5, 1.2 * len(summary_df))))
-    ax.barh([value - height for value in y], summary_df["accuracy"], height=height, color="#2A6F97", label="Accuracy")
-    ax.barh(y, summary_df["cohen_kappa"], height=height, color="#C1666B", label="Cohen kappa")
-    ax.barh([value + height for value in y], summary_df["macro_f1"], height=height, color="#6C9A8B", label="Macro F1")
+    ax.barh([value - height for value in y], summary_df["accuracy"].fillna(0.0), height=height, color="#2A6F97", label="Accuracy")
+    ax.barh(y, summary_df["cohen_kappa"].fillna(0.0), height=height, color="#C1666B", label="Cohen kappa")
+    ax.barh([value + height for value in y], summary_df["macro_f1"].fillna(0.0), height=height, color="#6C9A8B", label="Macro F1")
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
     ax.set_xlabel("Mean metric value")
@@ -111,7 +119,8 @@ def plot_metric_heatmap(metrics_df: pd.DataFrame, study: StudyConfig, metric_nam
     fig_width = max(7.5, 1.5 * len(display_columns))
     fig_height = max(5.0, 0.45 * len(pivot.index) + 2.0)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    image = ax.imshow(matrix, cmap="YlGnBu", aspect="auto", vmin=min(0.0, float(pd.DataFrame(matrix).min().min())), vmax=1.0)
+    min_value = min(0.0, float(pd.DataFrame(matrix).min().min())) if matrix.size else 0.0
+    image = ax.imshow(matrix, cmap="YlGnBu", aspect="auto", vmin=min_value, vmax=1.0)
     ax.set_xticks(range(len(display_columns)))
     ax.set_xticklabels([_comparison_label(value) for value in display_columns], rotation=20, ha="right")
     ax.set_yticks(range(len(pivot.index)))
@@ -144,7 +153,7 @@ def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_pat
 
     for index, comparison in enumerate(comparisons):
         subset = tone_df[tone_df["comparison"] == comparison].set_index("field")
-        values = [float(subset.loc[field, "cohen_kappa"]) for field in fields]
+        values = [float(subset.loc[field, "cohen_kappa"]) if field in subset.index else 0.0 for field in fields]
         offsets = [value - 0.4 + width / 2 + index * width for value in x]
         ax.bar(offsets, values, width=width, label=_comparison_label(comparison), color=colors[index % len(colors)])
 
@@ -182,32 +191,22 @@ def write_alignment_figures(metrics_df: pd.DataFrame, study: StudyConfig, figure
     }
 
 
-def _available_sources(metrics_df: pd.DataFrame) -> list[str]:
-    comparisons = set(metrics_df["comparison"])
-    sources = ["human annotations", "questionnaire-derived labels", "VADER tone labels"]
-    if any(comparison.startswith("human_vs_llm") or comparison.startswith("llm_") for comparison in comparisons):
-        sources.append("LLM predictions")
-    return sources
-
-
-def _coverage_lines(coverage: dict[str, Any]) -> list[str]:
-    lines = [
+def _coverage_lines(summary: dict[str, Any]) -> list[str]:
+    coverage = summary["coverage"]
+    adjudication = summary["adjudication"]
+    return [
         "## Evaluation Coverage",
         "",
         f"- Sampled rows available in private mapping: {coverage['n_sampled_total']}",
-        f"- Rows still present in the human workbook: {coverage['n_human_rows_total']}",
-        f"- Fully annotated human rows included in metrics: {coverage['n_human_evaluable']}",
-        f"- Human rows skipped because all labels were blank: {coverage['n_skipped_unannotated']}",
-        "- Evaluation is computed against what humans actually completed; fully blank rows are skipped and partially completed rows fail validation.",
+        f"- Valid human annotation artifacts: {coverage['n_valid_human_artifacts']}",
+        f"- Rejected human annotation artifacts: {coverage['n_rejected_human_artifacts']}",
+        f"- Participants carried into the majority human reference: {coverage['n_reference_participants']}",
+        f"- Valid LLM artifacts evaluated: {coverage['n_valid_llm_artifacts']}",
+        f"- Rejected LLM artifacts: {coverage['n_rejected_llm_artifacts']}",
+        f"- Unresolved field/participant pairs after majority voting: {adjudication['n_unresolved_field_participant_pairs']}",
+        "- The reference set is computed by field-level majority vote across valid human artifacts. Unresolved ties remain blank and are excluded from the affected field metrics.",
         "",
     ]
-    removed_rows = coverage["n_sampled_total"] - coverage["n_human_rows_total"]
-    if removed_rows > 0:
-        lines.extend([
-            f"- Sampled rows removed from the workbook before evaluation: {removed_rows}",
-            "",
-        ])
-    return lines
 
 
 def _ranking_lines(comparison_summary: dict[str, Any]) -> list[str]:
@@ -220,11 +219,6 @@ def _ranking_lines(comparison_summary: dict[str, Any]) -> list[str]:
     for comparison, values in ranking:
         lines.append(
             f"| {_comparison_label(comparison)} | {values['fields']} | {values['accuracy_mean']:.3f} | {values['cohen_kappa_mean']:.3f} | {values['macro_f1_mean']:.3f} |"
-        )
-    lines.extend(["", "### Alignment Ranking", ""])
-    for index, (comparison, values) in enumerate(ranking, start=1):
-        lines.append(
-            f"{index}. {_comparison_label(comparison)}: {_interpret_kappa(values['cohen_kappa_mean'])} with {_interpret_alignment(values['accuracy_mean'])} mean alignment (accuracy {values['accuracy_mean']:.3f})."
         )
     lines.append("")
     return lines
@@ -239,68 +233,56 @@ def _field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig) -> list[st
             lines.append(
                 f"| {_field_display_label(str(row['field']), study)} | {_field_group(str(row['field']))} | {int(row['n'])} | {float(row['accuracy']):.3f} | {float(row['cohen_kappa']):.3f} | {float(row['macro_f1']):.3f} |"
             )
-        best_row = subset.sort_values(["cohen_kappa", "accuracy"], ascending=False).iloc[0]
-        worst_row = subset.sort_values(["cohen_kappa", "accuracy"], ascending=True).iloc[0]
-        lines.extend(
-            [
-                "",
-                f"Best aligned field: `{_field_display_label(str(best_row['field']), study)}` ({_interpret_kappa(float(best_row['cohen_kappa']))}, accuracy {float(best_row['accuracy']):.3f}).",
-                f"Lowest aligned field: `{_field_display_label(str(worst_row['field']), study)}` ({_interpret_kappa(float(worst_row['cohen_kappa']))}, accuracy {float(worst_row['accuracy']):.3f}).",
-                "",
-            ]
-        )
+        lines.append("")
     return lines
 
 
-def _tone_result_lines(metrics_df: pd.DataFrame, study: StudyConfig) -> list[str]:
-    tone_df = metrics_df[metrics_df["field"].str.endswith("_tone")].copy()
-    lines = ["## Narrative Section Results", ""]
-    for _, row in tone_df.sort_values(["comparison", "field"]).iterrows():
-        lines.append(
-            f"- {_comparison_label(str(row['comparison']))} on `{_field_display_label(str(row['field']), study)}`: accuracy {float(row['accuracy']):.3f}, kappa {float(row['cohen_kappa']):.3f}, macro F1 {float(row['macro_f1']):.3f}."
-        )
+def _human_agreement_lines(summary: dict[str, Any], output_dir: Path) -> list[str]:
+    accepted = summary["human_artifacts"]["accepted"]
+    rejected = summary["human_artifacts"]["rejected"]
+    lines = ["## Human Annotation Agreement", ""]
+    if accepted:
+        lines.append("Valid annotators included in the majority reference:")
+        lines.append("")
+        for artifact in accepted:
+            lines.append(f"- `{artifact['annotator_id']}` from `{Path(artifact['artifact_path']).name}`")
+        lines.append("")
+    if rejected:
+        lines.append("Rejected human artifacts:")
+        lines.append("")
+        for artifact in rejected:
+            lines.append(f"- `{Path(artifact['artifact_path']).name}`: {artifact['reason']}")
+        lines.append("")
+    lines.append(f"Pairwise agreement details: `{Path(output_dir / 'human_agreement_pairwise.csv').name}`")
+    lines.append(f"Agreement summary by field: `{Path(output_dir / 'human_agreement_summary.csv').name}`")
     lines.append("")
     return lines
 
 
-def _interpretation_lines(metrics_df: pd.DataFrame, comparison_summary: dict[str, Any]) -> list[str]:
-    ranking = sorted(comparison_summary.items(), key=lambda item: item[1]["cohen_kappa_mean"], reverse=True)
-    best_name, best_values = ranking[0]
-    worst_name, worst_values = ranking[-1]
-    tone_df = metrics_df[metrics_df["field"].str.endswith("_tone")]
-    binary_df = metrics_df[~metrics_df["field"].str.endswith("_tone")]
-    tone_kappa = float(tone_df["cohen_kappa"].mean()) if not tone_df.empty else float("nan")
-    binary_kappa = float(binary_df["cohen_kappa"].mean()) if not binary_df.empty else float("nan")
-
-    lines = [
-        "## Interpretation",
-        "",
-        f"The strongest overall alignment in this run was {_comparison_label(best_name)} with {_interpret_kappa(best_values['cohen_kappa_mean'])}.",
-        f"The weakest overall alignment was {_comparison_label(worst_name)} with {_interpret_kappa(worst_values['cohen_kappa_mean'])}.",
-    ]
-    if not math.isnan(tone_kappa) and not math.isnan(binary_kappa):
-        relation = "higher" if tone_kappa > binary_kappa else "lower"
-        lines.append(
-            f"Average tone-field agreement was {relation} than binary-field agreement (mean kappa {tone_kappa:.3f} vs {binary_kappa:.3f})."
-        )
-    if (metrics_df["n"] < metrics_df["n"].max()).any():
-        lines.append("Some fields were evaluated with fewer complete observations than others; this should be considered when comparing alignment magnitudes.")
-    lines.append(
-        "These results should be read as alignment between sources rather than proof that one source is the definitive target."
-    )
-    lines.append("")
-    return lines
-
-
-def _llm_section_lines(metrics_df: pd.DataFrame) -> list[str]:
-    comparisons = set(metrics_df["comparison"])
-    lines = ["## LLM Integration Readiness", ""]
-    llm_present = any(comparison.startswith("human_vs_llm") or comparison.startswith("llm_") for comparison in comparisons)
-    if llm_present:
-        lines.append("LLM-derived comparisons were available in this run and have been integrated into the same reporting structure.")
+def _llm_lines(summary: dict[str, Any]) -> list[str]:
+    accepted = summary["llm_artifacts"]["accepted"]
+    rejected = summary["llm_artifacts"]["rejected"]
+    lines = ["## LLM Experiments", ""]
+    if accepted:
+        lines.append("Accepted experiments evaluated against the human majority reference:")
+        lines.append("")
+        for artifact in accepted:
+            descriptor = artifact["artifact_id"]
+            if artifact.get("prompt_variant"):
+                descriptor += f", prompt={artifact['prompt_variant']}"
+            if artifact.get("model_variant"):
+                descriptor += f", model={artifact['model_variant']}"
+            lines.append(f"- `{descriptor}`")
+        lines.append("")
     else:
-        lines.append("LLM-derived comparisons were not available in this run. The report structure already reserves space for them, so future LLM outputs can be added without changing the format.")
-    lines.append("")
+        lines.append("No valid LLM artifacts were available for this run.")
+        lines.append("")
+    if rejected:
+        lines.append("Rejected LLM artifacts:")
+        lines.append("")
+        for artifact in rejected:
+            lines.append(f"- `{Path(artifact['artifact_path']).name}`: {artifact['reason']}")
+        lines.append("")
     return lines
 
 
@@ -313,27 +295,23 @@ def write_alignment_report(
     vader_summary: dict[str, Any] | None = None,
 ) -> Path:
     report_path = output_dir / ALIGNMENT_REPORT_FILENAME
-    sources = ", ".join(_available_sources(metrics_df))
-    coverage = summary["coverage"]
     comparison_summary = summary["comparisons"]
     lines = [
         "# Alignment Report Across Sources",
         "",
         "## Objective",
         "",
-        "Quantify how strongly the available annotation and derived-signal sources align with one another across NDE narratives, rather than treating any one source as a definitive ground truth.",
+        "Quantify alignment across a majority-vote human reference, questionnaire-derived labels, VADER tone labels, and any accepted LLM experiments.",
         "",
         "## Methodology",
         "",
-        f"- Sources included in this run: {sources}",
-        f"- Narrative tone sections: {', '.join(_field_display_label(field, study) for field in study.tone_columns())}",
-        f"- Binary questionnaire-derived fields: {len(study.binary_columns())}",
+        "- Human reference: field-level majority vote across valid human annotation artifacts.",
+        "- Unresolved ties remain blank and are excluded only from the affected field metrics.",
         "- Metrics reported: accuracy, Cohen kappa, and macro F1.",
         "- VADER is applied with its lexicon-and-rules model and then discretized into positive, negative, and mixed labels using the standard compound thresholds.",
-        "- The evaluation runs on the subset of participant codes that humans fully annotated; fully blank human rows are skipped and partially completed rows fail validation.",
         "",
     ]
-    lines.extend(_coverage_lines(coverage))
+    lines.extend(_coverage_lines(summary))
     if vader_summary:
         lines.extend(
             [
@@ -344,7 +322,6 @@ def write_alignment_report(
                 "",
             ]
         )
-
     lines.extend(_ranking_lines(comparison_summary))
     lines.extend(
         [
@@ -361,10 +338,8 @@ def write_alignment_report(
         ]
     )
     lines.extend(_field_result_lines(metrics_df, study))
-    lines.extend(_tone_result_lines(metrics_df, study))
-    lines.extend(_interpretation_lines(metrics_df, comparison_summary))
-    lines.extend(_llm_section_lines(metrics_df))
-
+    lines.extend(_human_agreement_lines(summary, output_dir))
+    lines.extend(_llm_lines(summary))
     report_path.write_text("\n".join(lines), encoding="utf-8")
     return report_path
 

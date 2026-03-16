@@ -1,8 +1,14 @@
-[paths]
+﻿[paths]
+data_dir = "D:/data/nde"
 survey_csv = "D:/data/nde/results-survey.csv"
-annotation_output_dir = "D:/data/nde/annotation_outputs"
-llm_batch_dir = "D:/data/nde/llm_batches"
-evaluation_output_dir = "D:/data/nde/evaluation_outputs"
-sampled_private_workbook = "D:/data/nde/annotation_outputs/nde_annotation_mapping_private.xlsx"
-human_annotation_workbook = "D:/data/nde/annotation_outputs/nde_annotation_sample_completed.xlsx"
-llm_predictions_path = "D:/data/nde/llm_outputs/nde_predictions.jsonl"
+
+# Optional overrides. If omitted, they are resolved relative to data_dir.
+# annotation_output_dir = "D:/data/nde/annotation_outputs"
+# human_annotations_dir = "D:/data/nde/human_annotations"
+# llm_batch_dir = "D:/data/nde/llm_batches"
+# llm_results_dir = "D:/data/nde/llm_outputs"
+# evaluation_output_dir = "D:/data/nde/evaluation_outputs"
+# prompt_variants_dir = "D:/data/nde/prompt_variants"
+# sampled_private_workbook = "D:/data/nde/annotation_outputs/nde_annotation_mapping_private.xlsx"
+# human_annotation_workbook = "D:/data/nde/human_annotations/nde_annotation_sample_completed.xlsx"
+# llm_predictions_path = "D:/data/nde/llm_outputs/nde_predictions.jsonl"

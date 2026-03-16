@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,6 +6,19 @@ from typing import Any
 import tomllib
 
 from .constants import PARTICIPANT_CODE_HEADER, PLACEHOLDER_PREFIX, PROJECT_ROOT
+
+
+DEFAULT_PATH_LAYOUT = {
+    "annotation_output_dir": "annotation_outputs",
+    "human_annotations_dir": "human_annotations",
+    "llm_batch_dir": "llm_batches",
+    "llm_results_dir": "llm_outputs",
+    "evaluation_output_dir": "evaluation_outputs",
+    "prompt_variants_dir": "prompt_variants",
+    "sampled_private_workbook": "annotation_outputs/nde_annotation_mapping_private.xlsx",
+    "human_annotation_workbook": "human_annotations/nde_annotation_sample_completed.xlsx",
+    "llm_predictions_path": "llm_outputs/nde_predictions.jsonl",
+}
 
 
 @dataclass(frozen=True)
@@ -119,9 +132,37 @@ class PathsConfig:
     annotation_output_dir: Path
     llm_batch_dir: Path
     evaluation_output_dir: Path
+    human_annotations_dir: Path
+    llm_results_dir: Path
     sampled_private_workbook: Path
     human_annotation_workbook: Path
     llm_predictions_path: Path
+    prompt_variants_dir: Path | None = None
+    data_dir: Path | None = None
+
+
+@dataclass(frozen=True)
+class ExperimentMetadata:
+    experiment_id: str
+    prompt_variant: str | None = None
+    run_id: str | None = None
+    model_variant: str | None = None
+
+    @property
+    def artifact_id(self) -> str:
+        if self.run_id:
+            return f"{self.experiment_id}__{self.run_id}"
+        return self.experiment_id
+
+    def to_dict(self) -> dict[str, str]:
+        data = {"experiment_id": self.experiment_id, "artifact_id": self.artifact_id}
+        if self.prompt_variant:
+            data["prompt_variant"] = self.prompt_variant
+        if self.run_id:
+            data["run_id"] = self.run_id
+        if self.model_variant:
+            data["model_variant"] = self.model_variant
+        return data
 
 
 def default_study_config_path() -> Path:
@@ -142,6 +183,13 @@ def _resolve_path(raw_path: str, base_dir: Path) -> Path:
     if path.is_absolute():
         return path
     return (base_dir / path).resolve()
+
+
+def _path_with_default(paths: dict[str, Any], key: str, base_dir: Path, default_base: Path) -> Path:
+    raw_value = paths.get(key)
+    if raw_value:
+        return _resolve_path(str(raw_value), base_dir)
+    return (default_base / DEFAULT_PATH_LAYOUT[key]).resolve()
 
 
 def load_study_config(path: str | Path | None = None) -> StudyConfig:
@@ -189,13 +237,32 @@ def load_paths_config(path: str | Path | None = None) -> PathsConfig:
     raw = _load_toml(resolved)
     base_dir = resolved.parent
     paths = raw["paths"]
+
+    data_dir_raw = paths.get("data_dir")
+    default_base = _resolve_path(str(data_dir_raw), base_dir) if data_dir_raw else base_dir
+
+    survey_csv = _resolve_path(paths["survey_csv"], base_dir)
+    annotation_output_dir = _path_with_default(paths, "annotation_output_dir", base_dir, default_base)
+    llm_batch_dir = _path_with_default(paths, "llm_batch_dir", base_dir, default_base)
+    evaluation_output_dir = _path_with_default(paths, "evaluation_output_dir", base_dir, default_base)
+    human_annotations_dir = _path_with_default(paths, "human_annotations_dir", base_dir, default_base)
+    llm_results_dir = _path_with_default(paths, "llm_results_dir", base_dir, default_base)
+    sampled_private_workbook = _path_with_default(paths, "sampled_private_workbook", base_dir, default_base)
+    human_annotation_workbook = _path_with_default(paths, "human_annotation_workbook", base_dir, default_base)
+    llm_predictions_path = _path_with_default(paths, "llm_predictions_path", base_dir, default_base)
+    prompt_variants_dir = _path_with_default(paths, "prompt_variants_dir", base_dir, default_base)
+
     return PathsConfig(
         path=resolved,
-        survey_csv=_resolve_path(paths["survey_csv"], base_dir),
-        annotation_output_dir=_resolve_path(paths["annotation_output_dir"], base_dir),
-        llm_batch_dir=_resolve_path(paths["llm_batch_dir"], base_dir),
-        evaluation_output_dir=_resolve_path(paths["evaluation_output_dir"], base_dir),
-        sampled_private_workbook=_resolve_path(paths["sampled_private_workbook"], base_dir),
-        human_annotation_workbook=_resolve_path(paths["human_annotation_workbook"], base_dir),
-        llm_predictions_path=_resolve_path(paths["llm_predictions_path"], base_dir),
+        survey_csv=survey_csv,
+        annotation_output_dir=annotation_output_dir,
+        llm_batch_dir=llm_batch_dir,
+        evaluation_output_dir=evaluation_output_dir,
+        human_annotations_dir=human_annotations_dir,
+        llm_results_dir=llm_results_dir,
+        sampled_private_workbook=sampled_private_workbook,
+        human_annotation_workbook=human_annotation_workbook,
+        llm_predictions_path=llm_predictions_path,
+        prompt_variants_dir=prompt_variants_dir,
+        data_dir=default_base if data_dir_raw else None,
     )
