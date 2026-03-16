@@ -8,6 +8,7 @@ import pandas as pd
 
 from .config import PathsConfig, StudyConfig
 from .constants import ANNOTATION_SHEET, SAMPLED_PRIVATE_SHEET
+from .evaluation_report import write_alignment_outputs
 from .vader_analysis import (
     default_vader_scores_path,
     load_vader_scores,
@@ -99,6 +100,20 @@ def load_llm_predictions(prediction_path: Path, study: StudyConfig) -> pd.DataFr
     return normalized
 
 
+
+
+def load_optional_llm_predictions(
+    study: StudyConfig,
+    paths: PathsConfig,
+    llm_predictions_path: Path | None = None,
+) -> pd.DataFrame | None:
+    resolved_llm_predictions = Path(llm_predictions_path or paths.llm_predictions_path)
+    if llm_predictions_path is not None and not resolved_llm_predictions.exists():
+        raise FileNotFoundError(f"LLM predictions file not found: {resolved_llm_predictions}")
+    if not resolved_llm_predictions.exists():
+        return None
+    return load_llm_predictions(resolved_llm_predictions, study)
+
 def _map_questionnaire_value(value: object, yes_values: list[str], no_values: list[str], source_column: str) -> str:
     if _is_blank(value):
         raise ValueError(f"Questionnaire column {source_column} contains blank values.")
@@ -145,15 +160,22 @@ def load_vader_predictions(
     sampled_private_workbook: Path,
     vader_scores_path: Path | None = None,
     output_dir: Path | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, Any] | None]:
     sampled_private_df = load_sampled_private_data(sampled_private_workbook)
     resolved_vader_scores = Path(vader_scores_path or default_vader_scores_path(paths))
 
+    if vader_scores_path is not None and not resolved_vader_scores.exists():
+        raise FileNotFoundError(f"VADER scores file not found: {resolved_vader_scores}")
+
+    vader_summary: dict[str, Any] | None = None
     if resolved_vader_scores.exists():
         scores_df = load_vader_scores(resolved_vader_scores, study)
+        summary_path = resolved_vader_scores.with_name("vader_summary.json")
+        if summary_path.exists():
+            vader_summary = json.loads(summary_path.read_text(encoding="utf-8"))
     else:
         sample_output_dir = Path(output_dir or paths.evaluation_output_dir) / "vader_sentiment_sample"
-        scores_df, _, _ = run_vader_sensitivity(
+        scores_df, vader_summary, _ = run_vader_sensitivity(
             study,
             paths,
             output_dir=sample_output_dir,
@@ -163,7 +185,7 @@ def load_vader_predictions(
 
     predictions = vader_scores_to_tone_predictions(scores_df, sampled_private_df, study)
     _validate_labels(predictions, study.tone_columns(), study, "VADER predictions")
-    return predictions
+    return predictions, vader_summary
 
 
 def _ensure_same_participants(reference: pd.DataFrame, other: pd.DataFrame, reference_name: str, other_name: str) -> None:
@@ -252,13 +274,16 @@ def evaluate_outputs(
     vader_scores_path: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, str]]:
     resolved_annotation_workbook = Path(human_annotation_workbook or paths.human_annotation_workbook)
-    resolved_llm_predictions = Path(llm_predictions_path or paths.llm_predictions_path)
     resolved_sampled_private = Path(sampled_private_workbook or paths.sampled_private_workbook)
 
     human_df = load_human_annotations(resolved_annotation_workbook, study)
-    llm_df = load_llm_predictions(resolved_llm_predictions, study)
+    llm_df = load_optional_llm_predictions(
+        study,
+        paths,
+        llm_predictions_path=Path(llm_predictions_path) if llm_predictions_path else None,
+    )
     questionnaire_df = load_questionnaire_labels(resolved_sampled_private, study)
-    vader_df = load_vader_predictions(
+    vader_df, vader_summary = load_vader_predictions(
         study,
         paths,
         resolved_sampled_private,
@@ -266,17 +291,24 @@ def evaluate_outputs(
         output_dir=Path(output_dir) if output_dir else None,
     )
 
-    _ensure_same_participants(human_df, llm_df, "human annotations", "LLM predictions")
     _ensure_same_participants(human_df, questionnaire_df, "human annotations", "questionnaire labels")
     _ensure_same_participants(human_df, vader_df, "human annotations", "VADER predictions")
 
     metrics_frames = [
-        compute_comparison_metrics(human_df, llm_df, study.annotation_internal_columns(), study, "human_vs_llm"),
         compute_comparison_metrics(human_df, questionnaire_df, study.binary_columns(), study, "human_vs_questionnaire"),
-        compute_comparison_metrics(llm_df, questionnaire_df, study.binary_columns(), study, "llm_vs_questionnaire"),
         compute_comparison_metrics(human_df, vader_df, study.tone_columns(), study, "human_vs_vader"),
-        compute_comparison_metrics(llm_df, vader_df, study.tone_columns(), study, "llm_vs_vader"),
     ]
+
+    if llm_df is not None:
+        _ensure_same_participants(human_df, llm_df, "human annotations", "LLM predictions")
+        metrics_frames.extend(
+            [
+                compute_comparison_metrics(human_df, llm_df, study.annotation_internal_columns(), study, "human_vs_llm"),
+                compute_comparison_metrics(llm_df, questionnaire_df, study.binary_columns(), study, "llm_vs_questionnaire"),
+                compute_comparison_metrics(llm_df, vader_df, study.tone_columns(), study, "llm_vs_vader"),
+            ]
+        )
+
     metrics_df = pd.concat(metrics_frames, ignore_index=True)
 
     summary = {
@@ -295,5 +327,12 @@ def evaluate_outputs(
     summary_path = evaluation_dir / "evaluation_summary.json"
     metrics_df.to_csv(metrics_path, index=False)
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    reporting_outputs = write_alignment_outputs(
+        study=study,
+        metrics_df=metrics_df,
+        summary=summary,
+        output_dir=evaluation_dir,
+        vader_summary=vader_summary,
+    )
 
-    return metrics_df, summary, {"metrics_file": str(metrics_path), "summary_file": str(summary_path)}
+    return metrics_df, summary, {"metrics_file": str(metrics_path), "summary_file": str(summary_path), **reporting_outputs}

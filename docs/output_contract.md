@@ -68,3 +68,14 @@ Optional field:
 - otherwise -> `mixed`
 
 VADER outputs apply only to section tone fields and are not used for binary questionnaire-derived labels.
+
+
+## Evaluation Report Outputs
+
+`nde evaluate` continues to write `evaluation_metrics.csv` and `evaluation_summary.json`, and now also produces:
+
+- `alignment_report.md`
+- `alignment_metrics_long.csv`
+- `figures/alignment/*.png`
+
+The alignment report is built from the available comparisons in each run. At minimum it supports `human_vs_questionnaire` and `human_vs_vader`, and it incorporates LLM comparisons automatically when LLM predictions are present.

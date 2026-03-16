@@ -23,6 +23,23 @@ DEFAULT_REPORT_FILENAME = "vader_report.md"
 DEFAULT_SUMMARY_FILENAME = "vader_summary.json"
 
 
+
+
+def vader_score_columns(include_text: bool = False) -> list[str]:
+    columns = [
+        "participant_code",
+        "section",
+        "source_column",
+        "neg",
+        "neu",
+        "pos",
+        "compound",
+        "vader_label",
+    ]
+    if include_text:
+        columns.append("text")
+    return columns
+
 def derive_vader_label(compound: float) -> str:
     if compound >= VADER_POSITIVE_THRESHOLD:
         return "positive"
@@ -109,7 +126,7 @@ def build_vader_scores(
                 row["text"] = str(record[section.source_column])
             rows.append(row)
 
-    scores_df = pd.DataFrame(rows)
+    scores_df = pd.DataFrame(rows, columns=[study.id_column] + vader_score_columns(include_text=include_text))
     summary = {
         "n_input": int(len(source_df)),
         "n_rows_after_filters": int(len(prepared)),
