@@ -74,6 +74,7 @@ def build_vader_scores(
     all_records: bool = False,
     quality_values: list[str] | None = None,
     limit: int | None = None,
+    include_text: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     analyzer = SentimentIntensityAnalyzer()
     prepared = _prepare_source_rows(
@@ -93,20 +94,20 @@ def build_vader_scores(
         section_df = prepared.loc[prepared[section.source_column].apply(is_meaningful_text)].copy()
         for _, record in section_df.iterrows():
             scores = analyzer.polarity_scores(str(record[section.source_column]))
-            rows.append(
-                {
-                    study.id_column: record[study.id_column],
-                    "participant_code": record.get("participant_code", ""),
-                    "section": section_name,
-                    "source_column": section.source_column,
-                    "text": str(record[section.source_column]),
-                    "neg": float(scores["neg"]),
-                    "neu": float(scores["neu"]),
-                    "pos": float(scores["pos"]),
-                    "compound": float(scores["compound"]),
-                    "vader_label": derive_vader_label(float(scores["compound"])),
-                }
-            )
+            row = {
+                study.id_column: record[study.id_column],
+                "participant_code": record.get("participant_code", ""),
+                "section": section_name,
+                "source_column": section.source_column,
+                "neg": float(scores["neg"]),
+                "neu": float(scores["neu"]),
+                "pos": float(scores["pos"]),
+                "compound": float(scores["compound"]),
+                "vader_label": derive_vader_label(float(scores["compound"])),
+            }
+            if include_text:
+                row["text"] = str(record[section.source_column])
+            rows.append(row)
 
     scores_df = pd.DataFrame(rows)
     summary = {
@@ -202,7 +203,7 @@ def _report_lines(
             "- Label mapping used in this report: `compound >= 0.05 -> positive`, "
             "`compound <= -0.05 -> negative`, otherwise `mixed`"
         ),
-        "- Output format: reusable CSV scores, section-level PNG distributions, and this Markdown report.",
+        "- Output format: reusable CSV scores keyed by source ID, section-level PNG distributions, and this Markdown report.",
         "",
         "## Results",
         "",
@@ -267,6 +268,7 @@ def run_vader_sensitivity(
     all_records: bool = False,
     quality_values: list[str] | None = None,
     limit: int | None = None,
+    include_text: bool = False,
     source_df: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, str]]:
     source = source_df if source_df is not None else read_tabular_file(Path(input_path or paths.survey_csv))
@@ -280,6 +282,7 @@ def run_vader_sensitivity(
         all_records=all_records,
         quality_values=quality_values,
         limit=limit,
+        include_text=include_text,
     )
 
     scores_path = resolved_output_dir / DEFAULT_SCORES_FILENAME

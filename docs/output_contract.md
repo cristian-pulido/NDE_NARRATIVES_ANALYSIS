@@ -51,12 +51,15 @@ For JSONL, the record may either expose normalized fields directly or wrap them 
 - `participant_code` when available in the input source; blank otherwise
 - `section`
 - `source_column`
-- `text`
 - `neg`
 - `neu`
 - `pos`
 - `compound`
 - `vader_label`
+
+Optional field:
+
+- `text` only when the command is run with `--include-text`
 
 `vader_label` is mapped only for tone comparison using the standard VADER thresholds:
 

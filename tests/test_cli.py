@@ -131,6 +131,7 @@ def test_sentiment_sensitivity_generates_scores_figures_and_report(tmp_path: Pat
     assert len(scores) == 9
     assert set(scores["section"]) == {"context", "experience", "aftereffects"}
     assert set(scores["vader_label"]).issubset({"positive", "negative", "mixed"})
+    assert "text" not in scores.columns
 
     report_text = report_path.read_text(encoding="utf-8")
     assert "## Methodology" in report_text
@@ -149,6 +150,21 @@ def test_sentiment_sensitivity_generates_scores_figures_and_report(tmp_path: Pat
     assert all_records_result.returncode == 0, all_records_result.stderr
     all_scores = pd.read_csv(tmp_path / "sentiment_outputs_all" / "vader_sentiment_scores.csv")
     assert len(all_scores) == 12
+
+
+    include_text_result = run_cli(
+        "sentiment-sensitivity",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--output-dir",
+        str(tmp_path / "sentiment_outputs_text"),
+        "--include-text",
+    )
+    assert include_text_result.returncode == 0, include_text_result.stderr
+    include_text_scores = pd.read_csv(tmp_path / "sentiment_outputs_text" / "vader_sentiment_scores.csv")
+    assert "text" in include_text_scores.columns
 
 
 def populate_human_annotation_workbook(annotation_workbook: Path, mapping_workbook: Path, study_config: Path) -> None:

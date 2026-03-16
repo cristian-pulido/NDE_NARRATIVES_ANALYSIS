@@ -58,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     sentiment.add_argument("--all-records", action="store_true")
     sentiment.add_argument("--quality-value", dest="quality_values", action="append", default=None)
     sentiment.add_argument("--limit", type=int, default=None)
+    sentiment.add_argument("--include-text", action="store_true")
     sentiment.set_defaults(handler=cmd_sentiment_sensitivity)
 
     evaluate = subparsers.add_parser(
@@ -170,6 +171,7 @@ def cmd_sentiment_sensitivity(args: argparse.Namespace) -> int:
         all_records=args.all_records,
         quality_values=list(args.quality_values) if args.quality_values else None,
         limit=args.limit,
+        include_text=args.include_text,
     )
     print(json.dumps({"rows": len(scores_df), "summary": summary, **written}, indent=2))
     return 0

@@ -44,7 +44,7 @@ Run a first-layer VADER sensitivity analysis over the configured narrative text 
 
     nde sentiment-sensitivity
 
-Use `--all-records` to bypass the study-level row filters, or repeat `--quality-value` to override the configured quality subset.
+Use `--all-records` to bypass the study-level row filters, repeat `--quality-value` to override the configured quality subset, and add `--include-text` only when you want the raw text echoed into the score file.
 
 Run evaluation against human annotations, LLM predictions, questionnaire-derived labels, and VADER tone labels:
 
@@ -58,6 +58,6 @@ Run the test suite:
 
 - `nde build-annotation-sample` writes three external files: the annotator workbook, the private mapping workbook, and the private column map workbook.
 - `nde build-llm-batch` expects either the private sampled workbook or the external survey CSV as input.
-- `nde sentiment-sensitivity` writes a reusable `vader_sentiment_scores.csv`, per-section PNG figures, a Markdown report, and a JSON summary under the chosen output directory.
+- `nde sentiment-sensitivity` writes a reusable `vader_sentiment_scores.csv`, per-section PNG figures, a Markdown report, and a JSON summary under the chosen output directory. Raw text is excluded by default and included only with `--include-text`.
 - `nde evaluate` expects completed human annotations and normalized LLM predictions that use the versioned field contract documented in `docs/output_contract.md`.
 - `nde evaluate` will reuse a previously generated VADER score file when available, or generate sample-level VADER scores automatically for the annotated subset.
