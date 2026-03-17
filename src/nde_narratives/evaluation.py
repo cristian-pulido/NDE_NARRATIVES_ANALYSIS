@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from itertools import combinations
@@ -11,6 +11,7 @@ import pandas as pd
 from .config import ExperimentMetadata, PathsConfig, StudyConfig
 from .constants import ANNOTATION_SHEET, SAMPLED_PRIVATE_SHEET
 from .evaluation_report import write_alignment_outputs
+from .llm_runner import INTERNAL_ARTIFACT_FILENAMES
 from .vader_analysis import (
     default_vader_scores_path,
     load_vader_scores,
@@ -242,7 +243,7 @@ def discover_llm_prediction_artifacts(
         candidates = [Path(llm_predictions_path)]
     else:
         root = Path(llm_results_dir or paths.llm_results_dir)
-        candidates = _discover_files(root, PREDICTION_SUFFIXES)
+        candidates = [candidate for candidate in _discover_files(root, PREDICTION_SUFFIXES) if candidate.name not in INTERNAL_ARTIFACT_FILENAMES]
 
     seen_artifact_ids: set[str] = set()
     for candidate in candidates:
@@ -695,3 +696,5 @@ def evaluate_outputs(
         "llm_artifacts_manifest_file": str(llm_manifest_path),
         **reporting_outputs,
     }
+
+

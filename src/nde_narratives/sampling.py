@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 from typing import Any
@@ -109,10 +109,11 @@ def proportional_stratified_sample(
     return sampled
 
 
-def make_participant_code(real_id: object, index: int, prefix: str, digits: int, salt: str) -> str:
-    token = f"{salt}|{real_id}|{index}"
-    digest = hashlib.sha1(token.encode("utf-8")).hexdigest()[:6].upper()
-    return f"{prefix}_{index:0{digits}d}_{digest}"
+def make_participant_code(real_id: object, prefix: str, digits: int, salt: str) -> str:
+    token = f"{salt}|{real_id}"
+    digest = hashlib.sha1(token.encode("utf-8")).hexdigest().upper()
+    stable_width = max(int(digits), 6)
+    return f"{prefix}_{digest[:stable_width]}"
 
 
 def assign_participant_codes(df: pd.DataFrame, study: StudyConfig) -> pd.DataFrame:
@@ -124,8 +125,8 @@ def assign_participant_codes(df: pd.DataFrame, study: StudyConfig) -> pd.DataFra
         0,
         "participant_code",
         [
-            make_participant_code(real_id=row[study.id_column], index=index, prefix=prefix, digits=digits, salt=salt)
-            for index, (_, row) in enumerate(out.iterrows(), start=1)
+            make_participant_code(real_id=row[study.id_column], prefix=prefix, digits=digits, salt=salt)
+            for _, row in out.iterrows()
         ],
     )
     return out

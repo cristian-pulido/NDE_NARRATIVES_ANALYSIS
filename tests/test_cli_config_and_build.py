@@ -22,6 +22,55 @@ def test_validate_config_passes_with_synthetic_fixture(tmp_path: Path) -> None:
     assert "Configuration valid." in result.stdout
 
 
+def test_top_level_help_is_more_descriptive() -> None:
+    result = run_cli("--help")
+
+    assert result.returncode == 0, result.stderr
+    assert "Run the NDE narratives workflow" in result.stdout
+    assert "Commands:" in result.stdout
+    assert "Use 'nde <command> --help' for command-specific help." in result.stdout
+    assert "Execute configured LLM experiments and resume" in result.stdout
+
+
+def test_config_help_shows_clean_repo_relative_defaults() -> None:
+    result = run_cli("validate-config", "--help")
+
+    assert result.returncode == 0, result.stderr
+    assert "config/study.toml" in result.stdout
+    assert "config/paths.local.toml" in result.stdout
+
+
+def test_help_supports_forced_color_output() -> None:
+    result = run_cli("--help", env={"FORCE_COLOR": "1"})
+
+    assert result.returncode == 0, result.stderr
+    assert "\x1b[" in result.stdout
+
+
+def test_run_llm_help_includes_selection_and_examples() -> None:
+    result = run_cli("run-llm", "--help")
+
+    assert result.returncode == 0, result.stderr
+    assert "Existing artifacts are resumed in place" in result.stdout
+    assert "Experiment Selection:" in result.stdout
+    assert "Run every enabled [[llm.experiments]] entry" in result.stdout
+    assert "Examples:" in result.stdout
+    assert "nde run-llm --all-experiments" in result.stdout
+
+
+def test_evaluate_help_explains_discovery_and_vader_behavior() -> None:
+    result = run_cli("evaluate", "--help")
+
+    assert result.returncode == 0, result.stderr
+    assert "LLM artifacts are discovered from llm_results_dir" in result.stdout
+    assert "existing VADER scores" in result.stdout
+    assert "default VADER score file" in result.stdout
+    assert "sample-level" in result.stdout
+    assert "automatically" in result.stdout
+    assert "Directory to scan for LLM result artifacts" in result.stdout
+    assert "Examples:" in result.stdout
+
+
 def test_build_annotation_sample_creates_workbooks(tmp_path: Path) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"

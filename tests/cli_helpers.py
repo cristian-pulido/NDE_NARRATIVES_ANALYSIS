@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,12 +17,15 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 
 
-def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+def run_cli(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     command = [sys.executable, "-m", "nde_narratives.cli", *args]
-    return subprocess.run(command, cwd=ROOT, check=False, capture_output=True, text=True)
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    return subprocess.run(command, cwd=ROOT, check=False, capture_output=True, text=True, env=merged_env)
 
 
-def make_paths_config(tmp_path: Path, survey_csv: Path) -> Path:
+def make_paths_config(tmp_path: Path, survey_csv: Path, llm_block: str | None = None) -> Path:
     annotation_dir = tmp_path / "annotation_outputs"
     human_dir = tmp_path / "human_annotations"
     llm_dir = tmp_path / "llm_batches"
@@ -44,6 +48,8 @@ sampled_private_workbook = "{(annotation_dir / 'nde_annotation_mapping_private.x
 human_annotation_workbook = "{(human_dir / 'nde_annotation_sample.xlsx').as_posix()}"
 llm_predictions_path = "{(llm_output_dir / 'nde_predictions.jsonl').as_posix()}"
 '''
+    if llm_block:
+        content += "\n" + llm_block.strip() + "\n"
     path = tmp_path / "paths.local.toml"
     path.write_text(content, encoding="utf-8")
     return path
