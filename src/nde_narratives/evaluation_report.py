@@ -210,10 +210,10 @@ def plot_metric_heatmap(
 def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_path: Path) -> None:
     tone_fields = _field_bucket_order(study)["tone"]
     tone_df = metrics_df[metrics_df["field"].isin(tone_fields)].copy()
+    comparisons = sorted(tone_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
     longest_legend = max((_comparison_label(comparison) for comparison in comparisons), key=len, default="")
     fig_width = max(10.5, 8.5 + 0.06 * len(longest_legend))
     fig, ax = plt.subplots(figsize=(fig_width, 6.2))
-    comparisons = sorted(tone_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
     fields = tone_fields
     x = list(range(len(fields)))
     width = 0.8 / max(1, len(comparisons))
