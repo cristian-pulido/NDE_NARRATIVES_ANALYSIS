@@ -142,6 +142,63 @@ class PathsConfig:
 
 
 @dataclass(frozen=True)
+class LLMRuntimeConfig:
+    provider: str = "ollama"
+    base_url: str = "http://localhost:11434"
+    timeout_seconds: int = 120
+    max_attempts: int = 2
+    temperature: float = 0.0
+    source: str = "survey"
+    all_records: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "timeout_seconds": self.timeout_seconds,
+            "max_attempts": self.max_attempts,
+            "temperature": self.temperature,
+            "source": self.source,
+            "all_records": self.all_records,
+        }
+
+
+@dataclass(frozen=True)
+class LLMExperimentConfig:
+    experiment_id: str
+    enabled: bool = True
+    model: str | None = None
+    prompt_variant: str | None = None
+    run_id: str | None = None
+    model_variant: str | None = None
+    temperature: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "experiment_id": self.experiment_id,
+            "enabled": self.enabled,
+        }
+        if self.model is not None:
+            data["model"] = self.model
+        if self.prompt_variant is not None:
+            data["prompt_variant"] = self.prompt_variant
+        if self.run_id is not None:
+            data["run_id"] = self.run_id
+        if self.model_variant is not None:
+            data["model_variant"] = self.model_variant
+        if self.temperature is not None:
+            data["temperature"] = self.temperature
+        return data
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    path: Path
+    runtime: LLMRuntimeConfig
+    experiments: list[LLMExperimentConfig]
+
+
+@dataclass(frozen=True)
 class ExperimentMetadata:
     experiment_id: str
     prompt_variant: str | None = None
@@ -266,3 +323,70 @@ def load_paths_config(path: str | Path | None = None) -> PathsConfig:
         prompt_variants_dir=prompt_variants_dir,
         data_dir=default_base if data_dir_raw else None,
     )
+
+
+def _coerce_str(value: object, default: str) -> str:
+    if value is None:
+        return default
+    return str(value)
+
+
+def _coerce_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    return bool(value)
+
+
+def _coerce_int(value: object, default: int) -> int:
+    if value is None:
+        return default
+    return int(value)
+
+
+def _coerce_float(value: object, default: float) -> float:
+    if value is None:
+        return default
+    return float(value)
+
+
+def load_llm_config(path: str | Path | None = None) -> LLMConfig:
+    resolved = Path(path or default_paths_config_path()).resolve()
+    raw = _load_toml(resolved)
+    llm_raw = dict(raw.get("llm", {}))
+
+    runtime = LLMRuntimeConfig(
+        provider=_coerce_str(llm_raw.get("provider"), "ollama"),
+        base_url=_coerce_str(llm_raw.get("base_url"), "http://localhost:11434"),
+        timeout_seconds=_coerce_int(llm_raw.get("timeout_seconds"), 120),
+        max_attempts=_coerce_int(llm_raw.get("max_attempts"), 2),
+        temperature=_coerce_float(llm_raw.get("temperature"), 0.0),
+        source=_coerce_str(llm_raw.get("source"), "survey"),
+        all_records=_coerce_bool(llm_raw.get("all_records"), False),
+    )
+    if runtime.source not in {"survey", "sampled-private"}:
+        raise ValueError(f"Unsupported llm.source in {resolved}: {runtime.source}")
+    if runtime.max_attempts < 1:
+        raise ValueError(f"llm.max_attempts must be >= 1 in {resolved}")
+
+    experiments: list[LLMExperimentConfig] = []
+    for index, item in enumerate(llm_raw.get("experiments", []), start=1):
+        experiment = dict(item)
+        experiment_id = experiment.get("experiment_id")
+        model = experiment.get("model")
+        if not experiment_id:
+            raise ValueError(f"Missing llm.experiments[{index}].experiment_id in {resolved}")
+        if not model:
+            raise ValueError(f"Missing llm.experiments[{index}].model in {resolved}")
+        temperature_raw = experiment.get("temperature")
+        experiments.append(
+            LLMExperimentConfig(
+                experiment_id=str(experiment_id),
+                enabled=_coerce_bool(experiment.get("enabled"), True),
+                model=str(model),
+                prompt_variant=(str(experiment["prompt_variant"]) if experiment.get("prompt_variant") is not None else None),
+                run_id=(str(experiment["run_id"]) if experiment.get("run_id") is not None else None),
+                model_variant=(str(experiment["model_variant"]) if experiment.get("model_variant") is not None else None),
+                temperature=(float(temperature_raw) if temperature_raw is not None else None),
+            )
+        )
+    return LLMConfig(path=resolved, runtime=runtime, experiments=experiments)

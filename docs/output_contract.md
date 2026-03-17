@@ -163,6 +163,7 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 - questionnaire-derived labels are filtered to that participant subset
 - VADER tone labels are filtered to that participant subset
 - each accepted LLM artifact is evaluated separately against that same subset
+- internal LLM runner files such as `section_results.jsonl`, `raw_responses.jsonl`, and `errors.jsonl` are ignored during artifact discovery
 - extra rows in automated sources are ignored naturally by field-level overlap
 - unresolved human majority cells reduce field-level `n` instead of aborting evaluation
 
@@ -191,3 +192,4 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 - `comparisons`: mean metric summaries by comparison name
 - `human_artifacts`: accepted and rejected human artifact registry
 - `llm_artifacts`: accepted and rejected LLM artifact registry
+

@@ -45,7 +45,7 @@ def load_prompt_template(
 
 def load_response_schema(section: str, project_root: Path = PROJECT_ROOT) -> dict[str, Any]:
     path = project_root / "schemas" / f"{section}_output.schema.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def render_prompt(
@@ -72,6 +72,7 @@ def load_batch_source(
     source: str,
     input_path: Path | None = None,
     limit: int | None = None,
+    all_records: bool = False,
 ) -> pd.DataFrame:
     if source == "sampled-private":
         workbook = Path(input_path or paths.sampled_private_workbook)
@@ -83,9 +84,9 @@ def load_batch_source(
         if not survey_path.exists():
             raise FileNotFoundError(f"Survey source not found: {survey_path}")
         raw = read_tabular_file(survey_path)
-        filtered = filter_source_data(raw, study)
-        filtered = filtered.sort_values(study.id_column).reset_index(drop=True)
-        df = assign_participant_codes(filtered, study)
+        prepared = raw.copy() if all_records else filter_source_data(raw, study)
+        prepared = prepared.sort_values(study.id_column).reset_index(drop=True)
+        df = assign_participant_codes(prepared, study)
     else:
         raise ValueError(f"Unsupported source: {source}")
 
@@ -95,6 +96,12 @@ def load_batch_source(
     if limit is not None:
         df = df.head(limit).copy()
     return df
+
+
+def _coerce_input_text(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value)
 
 
 def build_llm_batch_records(
@@ -109,7 +116,7 @@ def build_llm_batch_records(
         participant_code = row["participant_code"]
         for section_name in study.section_order:
             section = study.sections[section_name]
-            input_text = str(row[section.source_column])
+            input_text = _coerce_input_text(row.get(section.source_column))
             batches[section_name].append(
                 {
                     "participant_code": participant_code,
@@ -148,8 +155,16 @@ def write_llm_batches(
     run_id: str | None = None,
     model_variant: str | None = None,
     prompt_root: Path | None = None,
+    all_records: bool = False,
 ) -> dict[str, str]:
-    sampled_df = load_batch_source(study=study, paths=paths, source=source, input_path=input_path, limit=limit)
+    sampled_df = load_batch_source(
+        study=study,
+        paths=paths,
+        source=source,
+        input_path=input_path,
+        limit=limit,
+        all_records=all_records,
+    )
     experiment = ExperimentMetadata(
         experiment_id=experiment_id or _default_experiment_id(prompt_variant, run_id),
         prompt_variant=prompt_variant,
@@ -175,6 +190,7 @@ def write_llm_batches(
         **experiment.to_dict(),
         "prompt_root": str(resolved_prompt_root),
         "source": source,
+        "all_records": all_records,
         "records": int(len(sampled_df)),
         "batches": written,
     }
@@ -183,3 +199,4 @@ def write_llm_batches(
     written["manifest_file"] = str(manifest_path)
     written["batch_dir"] = str(batch_dir)
     return written
+

@@ -12,3 +12,21 @@ survey_csv = "D:/data/nde/results-survey.csv"
 # sampled_private_workbook = "D:/data/nde/annotation_outputs/nde_annotation_mapping_private.xlsx"
 # human_annotation_workbook = "D:/data/nde/human_annotations/nde_annotation_sample_completed.xlsx"
 # llm_predictions_path = "D:/data/nde/llm_outputs/nde_predictions.jsonl"
+
+[llm]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+source = "survey"
+all_records = false
+
+[[llm.experiments]]
+experiment_id = "qwen25_baseline"
+enabled = true
+model = "qwen2.5:7b"
+prompt_variant = "baseline"
+run_id = "run-01"
+model_variant = "qwen2.5:7b"
+temperature = 0.0

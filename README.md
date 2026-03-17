@@ -18,14 +18,29 @@ Structured coding workflow for Near-Death Experience (NDE) narratives with multi
 - `src/`: Python package and CLI.
 - `tests/fixtures/`: Synthetic survey, annotation, and prediction fixtures.
 
-## Setup on Windows PowerShell
+## Setup
 
-    python -m venv .venv
-    .\.venv\Scripts\Activate.ps1
-    pip install -e .[dev]
-    Copy-Item config\paths.example.toml config\paths.local.toml
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .[dev]
+Copy-Item config\paths.example.toml config\paths.local.toml
+```
+
+Linux or macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+cp config/paths.example.toml config/paths.local.toml
+```
 
 Then edit `config/paths.local.toml` and replace the questionnaire column placeholders in `config/study.toml`.
+
+After the virtual environment is active, the examples in this repository use `nde ...`. If the `nde` command is not available in your shell, use `python -m nde_narratives.cli ...` on Windows or `python3 -m nde_narratives.cli ...` on Linux/macOS.
 
 ## Minimal Config
 
@@ -50,6 +65,10 @@ If you omit the rest, the repository resolves these defaults relative to `data_d
 - `llm_predictions_path = data_dir/llm_outputs/nde_predictions.jsonl`
 
 `human_annotation_workbook` and `llm_predictions_path` are now optional in the TOML. They remain as compatibility defaults and as useful single-file overrides.
+
+Local LLM runtime settings and experiment registrations now live in the same file under `[llm]` and `[[llm.experiments]]`.
+
+For the practical LLM setup, smoke-test flow, prompt variants layout, and full run instructions, see [LLM Workflow](docs/llm_workflow.md).
 
 ## User Options
 
@@ -174,7 +193,7 @@ If the target annotation artifacts already exist, the command stops instead of o
 
 Build three JSONL batches, one per narrative section, inside an experiment-specific output folder:
 
-    nde build-llm-batch --source sampled-private --experiment-id exp_alpha --prompt-variant baseline --run-id run_01
+    nde build-llm-batch --source survey --experiment-id exp_alpha --prompt-variant baseline --run-id run_01
 
 Useful batch options:
 
@@ -183,6 +202,13 @@ Useful batch options:
 - `--run-id`: run identifier appended to the experiment artifact id.
 - `--model-variant`: optional metadata only.
 - `--prompt-root`: explicit prompt folder override.
+- `--all-records`: bypass study-level row filters and batch the full survey source.
+
+Run configured LLM experiments directly, resume missing or failed rows, and write normalized artifacts under `llm_results_dir`:
+
+    nde run-llm --experiment-id qwen25_baseline
+
+Use `--all-experiments` to execute every enabled `[[llm.experiments]]` entry in `paths.local.toml`. The command preserves successful rows, retries pending or failed rows up to `max_attempts`, and returns a no-op message when the artifact is already complete for that configuration.
 
 Run a first-layer VADER sensitivity analysis over the configured narrative text columns:
 
@@ -250,6 +276,8 @@ Per-experiment outputs are written under:
 - `nde build-annotation-sample` still writes the generated annotator workbook, private mapping workbook, and private column map workbook.
 - The generated annotator workbook is a template for coders; completed workbooks should be stored under `paths.human_annotations_dir` or passed explicitly by CLI.
 - `nde build-llm-batch` writes experiment-specific batch folders and a `manifest.json` describing the batch.
+- `nde run-llm` now persists section-level progress during execution, so interrupted runs can resume from the latest saved state instead of waiting for a single final write.
 - `nde evaluate` no longer assumes a single completed human workbook or a single LLM predictions file.
 - `nde evaluate` will reuse a previously generated VADER score file when available, or generate sample-level VADER scores automatically for the majority-reference participant subset.
-- Provider-specific LLM execution settings are still out of scope in this phase; only lightweight experiment metadata is tracked.
+- LLM execution is now configured locally through `[llm]` and `[[llm.experiments]]` in `paths.local.toml`, with Ollama as the first backend.
+

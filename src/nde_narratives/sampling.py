@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 from typing import Any
@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 
 from .config import StudyConfig
+
+
+SHA1_HEX_LENGTH = len(hashlib.sha1(b"seed").hexdigest())
 
 
 def is_meaningful_text(value: object) -> bool:
@@ -109,25 +112,39 @@ def proportional_stratified_sample(
     return sampled
 
 
-def make_participant_code(real_id: object, index: int, prefix: str, digits: int, salt: str) -> str:
-    token = f"{salt}|{real_id}|{index}"
-    digest = hashlib.sha1(token.encode("utf-8")).hexdigest()[:6].upper()
-    return f"{prefix}_{index:0{digits}d}_{digest}"
+def make_participant_code(real_id: object, prefix: str, digits: int, salt: str) -> str:
+    token = f"{salt}|{real_id}"
+    digest = hashlib.sha1(token.encode("utf-8")).hexdigest().upper()
+    stable_width = max(1, min(int(digits), len(digest)))
+    return f"{prefix}_{digest[:stable_width]}"
 
 
 def assign_participant_codes(df: pd.DataFrame, study: StudyConfig) -> pd.DataFrame:
     out = df.copy().reset_index(drop=True)
+    duplicate_ids = out.loc[out[study.id_column].duplicated(), study.id_column].tolist()
+    if duplicate_ids:
+        raise ValueError(
+            f"Source data contains duplicate {study.id_column} values; cannot assign unique participant_code values: {duplicate_ids}"
+        )
+
     prefix = str(study.sampling["aux_prefix"])
     digits = int(study.sampling["aux_id_digits"])
     salt = str(study.sampling["hash_salt"])
-    out.insert(
-        0,
-        "participant_code",
-        [
-            make_participant_code(real_id=row[study.id_column], index=index, prefix=prefix, digits=digits, salt=salt)
-            for index, (_, row) in enumerate(out.iterrows(), start=1)
-        ],
-    )
+    stable_width = min(max(digits, 12), SHA1_HEX_LENGTH)
+    codes: list[str] = []
+
+    while True:
+        codes = [
+            make_participant_code(real_id=row[study.id_column], prefix=prefix, digits=stable_width, salt=salt)
+            for _, row in out.iterrows()
+        ]
+        if len(set(codes)) == len(codes):
+            break
+        if stable_width >= SHA1_HEX_LENGTH:
+            raise ValueError("Could not assign unique participant_code values after expanding the stable hash width.")
+        stable_width = min(stable_width + 4, SHA1_HEX_LENGTH)
+
+    out.insert(0, "participant_code", codes)
     return out
 
 

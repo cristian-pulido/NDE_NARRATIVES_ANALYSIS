@@ -1,5 +1,5 @@
-{
-  "": "https://json-schema.org/draft/2020-12/schema",
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "nde_experience_output",
   "type": "object",
   "additionalProperties": false,
@@ -38,3 +38,4 @@
     }
   }
 }
+
