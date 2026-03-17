@@ -307,6 +307,20 @@ def load_questionnaire_labels(
     df = _filter_participant_subset(df, participant_codes)
 
     out = pd.DataFrame({"participant_code": df["participant_code"]})
+    stratify_column = study.stratify_column
+    if stratify_column not in df.columns:
+        raise ValueError(f"Sampled private workbook is missing questionnaire tone column: {stratify_column}")
+
+    tone_map = {
+        "positive": "positive",
+        "negative": "negative",
+        "mixed": "mixed",
+    }
+    for tone_column in study.tone_columns():
+        out[tone_column] = df[stratify_column].apply(
+            lambda value: tone_map.get(str(value).strip().lower(), str(value).strip().lower()) if pd.notna(value) else pd.NA
+        )
+
     for block_name in ("m8", "m9"):
         block = study.questionnaire[block_name]
         for internal_column, source_column in block["columns"].items():
@@ -316,6 +330,7 @@ def load_questionnaire_labels(
                 lambda value: _map_questionnaire_value(value, block["yes_values"], block["no_values"], source_column)
             )
 
+    _validate_labels(out, study.tone_columns(), study, "Questionnaire tone labels")
     _validate_labels(out, study.binary_columns(), study, "Questionnaire labels")
     return out
 
@@ -578,6 +593,7 @@ def evaluate_outputs(
     )
 
     metrics_frames = [
+        compute_comparison_metrics(reference_df, questionnaire_df, study.tone_columns(), study, "human_reference_vs_questionnaire"),
         compute_comparison_metrics(reference_df, questionnaire_df, study.binary_columns(), study, "human_reference_vs_questionnaire"),
         compute_comparison_metrics(reference_df, vader_df, study.tone_columns(), study, "human_reference_vs_vader"),
     ]
@@ -696,5 +712,4 @@ def evaluate_outputs(
         "llm_artifacts_manifest_file": str(llm_manifest_path),
         **reporting_outputs,
     }
-
 
