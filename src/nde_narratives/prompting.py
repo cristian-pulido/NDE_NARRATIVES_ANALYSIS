@@ -9,7 +9,7 @@ import pandas as pd
 from .config import ExperimentMetadata, PathsConfig, StudyConfig
 from .constants import PROMPT_INPUT_TOKEN, PROJECT_ROOT, SAMPLED_PRIVATE_SHEET
 from .io_utils import read_tabular_file
-from .sampling import apply_dataset_row_filters, assign_participant_codes
+from .sampling import assign_participant_codes, filter_source_data
 
 
 def resolve_prompt_root(
@@ -84,7 +84,7 @@ def load_batch_source(
         if not survey_path.exists():
             raise FileNotFoundError(f"Survey source not found: {survey_path}")
         raw = read_tabular_file(survey_path)
-        prepared = raw.copy() if all_records else apply_dataset_row_filters(raw, study)
+        prepared = raw.copy() if all_records else filter_source_data(raw, study)
         prepared = prepared.sort_values(study.id_column).reset_index(drop=True)
         df = assign_participant_codes(prepared, study)
     else:

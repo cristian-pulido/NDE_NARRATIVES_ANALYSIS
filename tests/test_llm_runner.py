@@ -11,7 +11,7 @@ from nde_narratives.llm.ollama import OllamaProvider
 from nde_narratives.llm.types import LLMProviderResponse
 from nde_narratives.llm_runner import run_llm_experiments
 from nde_narratives.prompting import load_batch_source
-from nde_narratives.sampling import create_annotation_frames
+from nde_narratives.sampling import assign_participant_codes, create_annotation_frames
 
 from tests.cli_helpers import (
     FIXTURES,
@@ -132,9 +132,43 @@ def test_participant_codes_are_stable_across_sample_and_survey_modes(tmp_path: P
     filtered_codes = filtered_df.set_index(study.id_column)["participant_code"].to_dict()
     all_codes = all_records_df.set_index(study.id_column)["participant_code"].to_dict()
 
+    assert sampled_private_df["participant_code"].is_unique
+    assert filtered_df["participant_code"].is_unique
+    assert all_records_df["participant_code"].is_unique
+
     for response_id, participant_code in sampled_codes.items():
         assert filtered_codes[response_id] == participant_code
         assert all_codes[response_id] == participant_code
+
+
+def test_assign_participant_codes_rejects_duplicate_response_ids(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    source_df = pd.read_csv(FIXTURES / "survey_fixture.csv")
+    duplicated = pd.concat([source_df.iloc[[0]], source_df.iloc[[0]]], ignore_index=True)
+
+    try:
+        assign_participant_codes(duplicated, study)
+    except ValueError as exc:
+        assert f"duplicate {study.id_column} values" in str(exc)
+    else:
+        raise AssertionError("Expected duplicate response ids to be rejected.")
+
+
+def test_survey_batch_source_applies_require_all_texts_by_default(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    raw = pd.read_csv(FIXTURES / "survey_fixture.csv")
+    raw.loc[raw[study.id_column] == 101, study.sections["aftereffects"].source_column] = ""
+    custom_survey = tmp_path / "survey_with_blank.csv"
+    raw.to_csv(custom_survey, index=False)
+
+    paths_config = make_paths_config(tmp_path, custom_survey)
+    paths = load_paths_config(paths_config)
+
+    filtered_df = load_batch_source(study, paths, source="survey", all_records=False)
+    all_records_df = load_batch_source(study, paths, source="survey", all_records=True)
+
+    assert 101 not in set(filtered_df[study.id_column])
+    assert 101 in set(all_records_df[study.id_column])
 
 
 def test_run_llm_resumes_failures_and_emits_noop_when_complete(tmp_path: Path) -> None:
