@@ -114,6 +114,9 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert "majority vote" in report_text.lower()
     assert "rejected human artifacts" in report_text.lower()
     assert "accepted experiments evaluated against the human majority reference" in report_text.lower()
+    assert "interactive navigation" in report_text.lower()
+    assert "quick metric controls" in report_text.lower()
+    assert "<details open>" in report_text
     assert (tmp_path / "evaluation_outputs" / "experiments" / "exp_alpha__run-01" / "evaluation_metrics.csv").exists()
 
 
