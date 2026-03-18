@@ -2,6 +2,12 @@
 
 Structured coding workflow for Near-Death Experience (NDE) narratives with multi-annotator human annotation, experiment-scoped LLM batches, VADER-based sensitivity analysis, and evaluation against a majority-vote human reference.
 
+## Workflow Diagram
+
+The following diagram summarizes how configuration, prompts, schemas, human annotation, LLM execution, VADER scoring, and evaluation artifacts connect across the project workflow.
+
+![NDE narratives analysis workflow](Diagram.png)
+
 ## Repository Principles
 
 - Real participant data is never committed to the repository.
