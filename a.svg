@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" style="font-family: Arial, sans-serif;">
+  <defs>
+    <style>
+      .box { fill: #2c3e50; stroke: #34495e; stroke-width: 2; }
+      .box-light { fill: #34495e; stroke: #5d6d7e; stroke-width: 2; }
+      .box-highlight { fill: #27ae60; stroke: #2ecc71; stroke-width: 3; }
+      .text { fill: #ecf0f1; font-size: 14px; text-anchor: middle; }
+      .text-small { fill: #ecf0f1; font-size: 11px; text-anchor: middle; }
+      .title { fill: #f39c12; font-size: 16px; font-weight: bold; text-anchor: middle; }
+    </style>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="900" height="700" fill="#1a1a2e"/>
+  
+  <!-- Title -->
+  <text x="450" y="30" class="title">NDE Narratives Analysis Workflow</text>
+  
+  <!-- Survey CSV -->
+  <rect x="375" y="50" width="150" height="50" class="box"/>
+  <text x="450" y="80" class="text">Survey CSV</text>
+  
+  <!-- Arrows from Survey -->
+  <line x1="450" y1="100" x2="225" y2="150" stroke="#ecf0f1" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="100" x2="450" y2="150" stroke="#ecf0f1" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="100" x2="675" y2="150" stroke="#ecf0f1" stroke-width="2" marker-end="url(#arrow)"/>
+  
+  <!-- Three main branches -->
+  <rect x="100" y="150" width="150" height="50" class="box"/>
+  <text x="175" y="180" class="text">build-annotation-sample</text>
+  
+  <rect x="375" y="150" width="150" height="50" class="box"/>
+  <text x="450" y="180" class="text">build-llm-batch</text>
+  
+  <rect x="650" y="150" width="150" height="50" class="box"/>
+  <text x="725" y="180" class="text">sentiment-sensitivity</text>
+  
+  <!-- Human Annotation Path -->
+  <rect x="100" y="220" width="150" height="50" class="box-highlight"/>
+  <text x="175" y="250" class="text">Annotation Workbook</text>
+  <text x="175" y="265" class="text-small">(3 sections)</text>
+  
+  <rect x="100" y="280" width="150" height="50" class="box"/>
+  <text x="175" y="310" class="text">Human Annotators</text>
+  
+  <rect x="100" y="340" width="150" height="50" class="box-highlight"/>
+  <text x="175" y="370" class="text">Completed Workbooks</text>
+  
+  <!-- LLM Path -->
+  <rect x="375" y="220" width="150" height="50" class="box"/>
+  <text x="450" y="250" class="text">LLM Batches</text>
+  
+  <rect x="375" y="280" width="150" height="50" class="box"/>
+  <text x="450" y="310" class="text">run-llm</text>
+  
+  <rect x="375" y="340" width="150" height="50" class="box"/>
+  <text x="450" y="370" class="text">LLM Predictions</text>
+  
+  <!-- VADER Path -->
+  <rect x="650" y="220" width="150" height="50" class="box"/>
+  <text x="725" y="250" class="text">VADER Scores</text>
+  
+  <!-- What is annotated section -->
+  <rect x="650" y="280" width="150" height="110" class="box-highlight"/>
+  <text x="725" y="310" class="text">What is Annotated</text>
+  <text x="725" y="330" class="text-small">Context: Tone + Elements</text>
+  <text x="725" y="345" class="text-small">Experience: Tone + M8</text>
+  <text x="725" y="360" class="text-small">Aftereffects: Tone + M9</text>
+  
+  <!-- Arrows to evaluate -->
+  <line x1="175" y1="390" x2="450" y2="450" stroke="#ecf0f1" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="390" x2="450" y2="450" stroke="#ecf0f1" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="725" y1="390" x2="450" y2="450" stroke="#ecf0f1" stroke-width="2" marker-end="url(#arrow)"/>
+  
+  <!-- Evaluate -->
+  <rect x="375" y="450" width="150" height="50" class="box-highlight"/>
+  <text x="450" y="480" class="text">evaluate</text>
+  <text x="450" y="495" class="text-small">(vs Human Ref, M8/M9, VADER)</text>
+  
+  <!-- Evaluation outputs -->
+  <rect x="375" y="520" width="150" height="50" class="box"/>
+  <text x="450" y="550" class="text">Evaluation Outputs</text>
+  
+  <rect x="375" y="580" width="150" height="50" class="box-highlight"/>
+  <text x="450" y="610" class="text">Metrics &amp; Reports</text>
+  
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#ecf0f1"/>
+    </marker>
+  </defs>
+</svg>

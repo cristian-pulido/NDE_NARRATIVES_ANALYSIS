@@ -6,7 +6,7 @@ Structured coding workflow for Near-Death Experience (NDE) narratives with multi
 
 The following diagram summarizes how configuration, prompts, schemas, human annotation, LLM execution, VADER scoring, and evaluation artifacts connect across the project workflow.
 
-![NDE narratives analysis workflow](Diagram.png)
+![NDE narratives analysis workflow](a.svg)
 
 ## Repository Principles
 
