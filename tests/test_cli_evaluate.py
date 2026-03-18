@@ -78,6 +78,7 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     write_human_manifest(invalid_human_dir, "broken")
 
     _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-alpha")
+    _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-beta", run_id="run-02")
     invalid_llm_dir = llm_root / "bad-exp"
     invalid_llm_dir.mkdir(parents=True, exist_ok=True)
     (invalid_llm_dir / "predictions.jsonl").write_text('{"participant_code": "ANN_0001"}\n', encoding="utf-8")
@@ -101,21 +102,32 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert len(reference_df) == 3
     assert summary["coverage"]["n_valid_human_artifacts"] == 2
     assert summary["coverage"]["n_rejected_human_artifacts"] == 1
-    assert summary["coverage"]["n_valid_llm_artifacts"] == 1
+    assert summary["coverage"]["n_valid_llm_artifacts"] == 2
     assert summary["coverage"]["n_rejected_llm_artifacts"] == 1
     assert summary["adjudication"]["n_unresolved_field_participant_pairs"] >= 1
     assert not human_pairwise.empty
     assert set(llm_manifest.keys()) == {"accepted", "rejected"}
-    assert len(llm_manifest["accepted"]) == 1
+    assert len(llm_manifest["accepted"]) == 2
     assert len(llm_manifest["rejected"]) == 1
     assert len(human_manifest["accepted"]) == 2
     assert len(human_manifest["rejected"]) == 1
-    assert set(llm_rows["artifact_id"]) == {"exp_alpha__run-01"}
+    assert set(llm_rows["artifact_id"]) == {"exp_alpha__run-01", "exp_beta__run-02"}
+    assert {"questionnaire_vs_vader", "questionnaire_vs_llm:exp_alpha__run-01", "questionnaire_vs_llm:exp_beta__run-02"}.issubset(set(metrics["comparison"]))
+    assert {"vader_vs_llm:exp_alpha__run-01", "vader_vs_llm:exp_beta__run-02", "llm_vs_llm:exp_alpha__run-01__vs__exp_beta__run-02"}.issubset(set(metrics["comparison"]))
+    questionnaire_vader_fields = set(metrics.loc[metrics["comparison"] == "questionnaire_vs_vader", "field"])
+    assert questionnaire_vader_fields == {"experience_tone"}
     assert "majority vote" in report_text.lower()
     assert "rejected human artifacts" in report_text.lower()
     assert "accepted experiments evaluated against the human majority reference" in report_text.lower()
     assert "interactive navigation" in report_text.lower()
     assert "quick metric controls" in report_text.lower()
+    assert "primary results — human vs all" in report_text.lower()
+    assert "figures — human vs all" in report_text.lower()
+    assert "secondary results — questionnaire vs automated" in report_text.lower()
+    assert "questionnaire vs automated coverage" in report_text.lower()
+    assert "questionnaire-vs-automated comparisons were available" not in report_text.lower()
+    assert "questionnaire vs vader" in report_text.lower()
+    assert "human reference vs questionnaire" in report_text.lower()
     assert "<details open>" in report_text
     assert (tmp_path / "evaluation_outputs" / "experiments" / "exp_alpha__run-01" / "evaluation_metrics.csv").exists()
 
