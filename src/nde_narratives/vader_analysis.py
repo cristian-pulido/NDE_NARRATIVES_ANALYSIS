@@ -254,14 +254,6 @@ def _report_lines(
             lines.append(f"| {label} | {section_summary['label_counts'].get(label, 0)} |")
         lines.extend(["", f"![{section_name} distribution]({rel_path.as_posix()})", ""])
 
-    lines.extend(
-        [
-            "## Next Additions",
-            "",
-            "This report is prepared to grow with direct comparisons against human annotation, LLM outputs, and other sentiment methods.",
-            "",
-        ]
-    )
     return lines
 
 

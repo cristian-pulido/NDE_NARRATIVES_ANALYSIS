@@ -69,13 +69,31 @@ def _field_bucket_order(study: StudyConfig) -> dict[str, list[str]]:
 
 
 def _comparison_sort_key(comparison: str) -> tuple[int, str]:
-    if comparison.startswith("human_reference_vs_llm"):
+    if comparison.startswith("questionnaire_vs_llm"):
         return (0, comparison)
-    if comparison == "human_reference_vs_questionnaire":
+    if comparison == "questionnaire_vs_vader":
         return (1, comparison)
-    if comparison == "human_reference_vs_vader":
+    if comparison.startswith("human_reference_vs_llm"):
         return (2, comparison)
-    return (3, comparison)
+    if comparison == "human_reference_vs_questionnaire":
+        return (3, comparison)
+    if comparison == "human_reference_vs_vader":
+        return (4, comparison)
+    if comparison.startswith("vader_vs_llm"):
+        return (5, comparison)
+    if comparison.startswith("llm_vs_llm"):
+        return (6, comparison)
+    return (7, comparison)
+
+
+def _comparison_tab(comparison: str) -> str:
+    if comparison.startswith("questionnaire_vs_") and (
+        "llm" in comparison or "vader" in comparison or "automated" in comparison
+    ):
+        return "questionnaire_vs_automated"
+    if comparison.startswith("human_reference_vs_"):
+        return "human_vs_all"
+    return "other"
 
 
 def _interpret_alignment(value: float) -> str:
@@ -120,6 +138,14 @@ def build_alignment_long_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+def _comparison_subset(metrics_df: pd.DataFrame, prefix: str) -> pd.DataFrame:
+    return metrics_df[metrics_df["comparison"].astype(str).str.startswith(prefix)].copy()
+
+
+def _questionnaire_automated_subset(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    return metrics_df[metrics_df["comparison"].astype(str).str.startswith("questionnaire_vs_")].copy()
 
 
 def _style_axes(ax) -> None:
@@ -241,6 +267,7 @@ def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_pat
 
 def write_alignment_figures(metrics_df: pd.DataFrame, study: StudyConfig, figures_dir: Path) -> dict[str, str]:
     figures_dir.mkdir(parents=True, exist_ok=True)
+    primary_metrics_df = _comparison_subset(metrics_df, "human_reference_vs_")
     summary_path = figures_dir / "comparison_summary.png"
     tone_path = figures_dir / "tone_alignment.png"
     figure_paths = {
@@ -254,11 +281,11 @@ def write_alignment_figures(metrics_df: pd.DataFrame, study: StudyConfig, figure
         "tone_alignment": str(tone_path),
     }
 
-    plot_comparison_summary(metrics_df, summary_path)
+    plot_comparison_summary(primary_metrics_df, summary_path)
     for bucket in ("tone", "m8", "m9"):
-        plot_metric_heatmap(metrics_df, study, "accuracy", Path(figure_paths[f"{bucket}_accuracy_heatmap"]), bucket)
-        plot_metric_heatmap(metrics_df, study, "cohen_kappa", Path(figure_paths[f"{bucket}_cohen_kappa_heatmap"]), bucket)
-    plot_tone_alignment(metrics_df, study, tone_path)
+        plot_metric_heatmap(primary_metrics_df, study, "accuracy", Path(figure_paths[f"{bucket}_accuracy_heatmap"]), bucket)
+        plot_metric_heatmap(primary_metrics_df, study, "cohen_kappa", Path(figure_paths[f"{bucket}_cohen_kappa_heatmap"]), bucket)
+    plot_tone_alignment(primary_metrics_df, study, tone_path)
 
     return figure_paths
 
@@ -296,11 +323,153 @@ def _ranking_lines(comparison_summary: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _summary_table_lines(metrics_df: pd.DataFrame, title: str) -> list[str]:
+    if metrics_df.empty:
+        return [f"## {title}", "", "- No comparisons were available in this run.", ""]
+    grouped = (
+        metrics_df.groupby("comparison", as_index=False)[["accuracy", "cohen_kappa", "macro_f1"]]
+        .mean(numeric_only=True)
+        .copy()
+    )
+    grouped = grouped.sort_values("comparison", key=lambda s: s.map(_comparison_sort_key))
+    lines = [f"## {title}", "", "| Comparison | Fields | Mean Accuracy | Mean Kappa | Mean Macro F1 |", "| --- | ---: | ---: | ---: | ---: |"]
+    for comparison, group in metrics_df.groupby("comparison"):
+        row = grouped[grouped["comparison"] == comparison].iloc[0]
+        lines.append(
+            f"| {_comparison_label(comparison)} | {int(len(group))} | {float(row['accuracy']):.3f} | {float(row['cohen_kappa']):.3f} | {float(row['macro_f1']):.3f} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _comparison_scope_lines(summary: dict[str, Any], metrics_df: pd.DataFrame, title: str) -> list[str]:
+    scopes = summary.get("comparison_scopes", {})
+    comparisons = sorted(metrics_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
+    lines = [f"### {title}", ""]
+    if not comparisons:
+        lines.extend(["- No overlap-based comparisons were available in this run.", ""])
+        return lines
+    for comparison in comparisons:
+        scope = scopes.get(comparison, {})
+        lines.append(
+            f"- {_comparison_label(comparison)}: overlap range across fields = {scope.get('min_overlap_n', 0)}-{scope.get('max_overlap_n', 0)} participants; fields evaluated = {scope.get('fields', 0)}"
+        )
+    lines.append("")
+    return lines
+
+
+def _comparison_navigation_lines(metrics_df: pd.DataFrame) -> list[str]:
+    comparisons = sorted(metrics_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
+    groups: dict[str, list[str]] = {"human_vs_all": [], "questionnaire_vs_automated": [], "other": []}
+    for comparison in comparisons:
+        groups[_comparison_tab(comparison)].append(comparison)
+
+    lines = [
+        "## Interactive Navigation",
+        "",
+        "The report uses Markdown + native HTML (`<details>` and anchor links) so navigation is preserved when rendered as HTML, in exported notebooks, and in shared Markdown viewers.",
+        "",
+        "### Highlighted tabs",
+        "",
+        "<details open>",
+        "<summary><strong>Human vs All</strong></summary>",
+        "",
+    ]
+    if groups["human_vs_all"]:
+        for comparison in groups["human_vs_all"]:
+            lines.append(f"- [{_comparison_label(comparison)}](#comparison-{comparison})")
+    else:
+        lines.append("- No human-vs-all comparisons were available in this run.")
+    lines.extend(["", "</details>", "", "<details open>", "<summary><strong>Questionnaire vs Automated</strong></summary>", ""])
+    if groups["questionnaire_vs_automated"]:
+        for comparison in groups["questionnaire_vs_automated"]:
+            lines.append(f"- [{_comparison_label(comparison)}](#comparison-{comparison})")
+    else:
+        lines.append("- No questionnaire-vs-automated comparisons were available in this run.")
+    lines.extend(["", "</details>", "", "<details>", "<summary><strong>Other comparisons</strong></summary>", ""])
+    if groups["other"]:
+        for comparison in groups["other"]:
+            lines.append(f"- [{_comparison_label(comparison)}](#comparison-{comparison})")
+    else:
+        lines.append("- No additional comparisons.")
+    lines.extend(["", "</details>", ""])
+    return lines
+
+
+def _metric_toggle_lines(metrics_df: pd.DataFrame) -> list[str]:
+    grouped = (
+        metrics_df.groupby("comparison", as_index=False)[["accuracy", "cohen_kappa", "macro_f1"]]
+        .mean(numeric_only=True)
+        .copy()
+    )
+    grouped["error_rate"] = 1.0 - grouped["accuracy"]
+    grouped = grouped.sort_values("comparison", key=lambda s: s.map(_comparison_sort_key))
+
+    lines = [
+        "## Quick Metric Controls",
+        "",
+        "Jump between metric-focused views:",
+        "",
+        "- [Agreement (Cohen kappa)](#metric-agreement-cohen-kappa)",
+        "- [Correlation proxy (Macro F1)](#metric-correlation-proxy-macro-f1)",
+        "- [Accuracy](#metric-accuracy)",
+        "- [Error rate](#metric-error-rate)",
+        "",
+    ]
+
+    metric_sections = [
+        ("metric-agreement-cohen-kappa", "Agreement (Cohen kappa)", "cohen_kappa"),
+        ("metric-correlation-proxy-macro-f1", "Correlation proxy (Macro F1)", "macro_f1"),
+        ("metric-accuracy", "Accuracy", "accuracy"),
+        ("metric-error-rate", "Error rate", "error_rate"),
+    ]
+    for anchor, title, column in metric_sections:
+        section = grouped.sort_values(column, ascending=False)
+        lines.extend(
+            [
+                f"### <a id=\"{anchor}\"></a>{title}",
+                "",
+                "| Comparison | Mean value |",
+                "| --- | ---: |",
+            ]
+        )
+        for _, row in section.iterrows():
+            lines.append(f"| {_comparison_label(str(row['comparison']))} | {float(row[column]):.3f} |")
+        lines.extend(["", "[Back to metric controls](#quick-metric-controls)", ""])
+    return lines
+
+
 def _field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig) -> list[str]:
     lines = ["## Field-Level Results", ""]
     for comparison in metrics_df["comparison"].drop_duplicates().tolist():
         subset = metrics_df[metrics_df["comparison"] == comparison].copy().sort_values("field")
+        accordion_open = _comparison_tab(comparison) in {"human_vs_all", "questionnaire_vs_automated"}
+        lines.append("<details open>" if accordion_open else "<details>")
+        lines.append("")
+        lines.append(f"<summary><strong><a id=\"comparison-{comparison}\"></a>{_comparison_label(comparison)}</strong></summary>")
+        lines.append("")
         lines.extend([f"### {_comparison_label(comparison)}", "", "| Field | Type | N | Accuracy | Kappa | Macro F1 |", "| --- | --- | ---: | ---: | ---: | ---: |"])
+        for _, row in subset.iterrows():
+            lines.append(
+                f"| {_field_display_label(str(row['field']), study)} | {_field_group(str(row['field']))} | {int(row['n'])} | {float(row['accuracy']):.3f} | {float(row['cohen_kappa']):.3f} | {float(row['macro_f1']):.3f} |"
+            )
+        lines.extend(["", "</details>", ""])
+    return lines
+
+
+def _compact_field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig, heading: str) -> list[str]:
+    lines = [f"## {heading}", ""]
+    if metrics_df.empty:
+        lines.extend(["- No comparisons were available in this run.", ""])
+        return lines
+    for comparison in sorted(metrics_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key):
+        subset = metrics_df[metrics_df["comparison"] == comparison].copy().sort_values(["field"])
+        lines.extend([
+            f"### <a id=\"comparison-{comparison}\"></a>{_comparison_label(comparison)}",
+            "",
+            "| Field | Type | N | Accuracy | Kappa | Macro F1 |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+        ])
         for _, row in subset.iterrows():
             lines.append(
                 f"| {_field_display_label(str(row['field']), study)} | {_field_group(str(row['field']))} | {int(row['n'])} | {float(row['accuracy']):.3f} | {float(row['cohen_kappa']):.3f} | {float(row['macro_f1']):.3f} |"
@@ -368,6 +537,8 @@ def write_alignment_report(
 ) -> Path:
     report_path = output_dir / ALIGNMENT_REPORT_FILENAME
     comparison_summary = summary["comparisons"]
+    primary_metrics_df = _comparison_subset(metrics_df, "human_reference_vs_")
+    questionnaire_metrics_df = _questionnaire_automated_subset(metrics_df)
     lines = [
         "# Alignment Report Across Sources",
         "",
@@ -394,10 +565,12 @@ def write_alignment_report(
                 "",
             ]
         )
-    lines.extend(_ranking_lines(comparison_summary))
+    lines.extend(_summary_table_lines(primary_metrics_df, "Primary Results — Human vs All"))
+    lines.extend(_comparison_navigation_lines(metrics_df))
+    lines.extend(_metric_toggle_lines(primary_metrics_df))
     lines.extend(
         [
-            "### Figures",
+            "## Figures — Human vs All",
             "",
             f"![Alignment summary]({Path(figure_paths['comparison_summary']).relative_to(output_dir).as_posix()})",
             "",
@@ -423,7 +596,10 @@ def write_alignment_report(
             "",
         ]
     )
-    lines.extend(_field_result_lines(metrics_df, study))
+    lines.extend(_field_result_lines(primary_metrics_df, study))
+    lines.extend(_summary_table_lines(questionnaire_metrics_df, "Secondary Results — Questionnaire vs Automated"))
+    lines.extend(_comparison_scope_lines(summary, questionnaire_metrics_df, "Questionnaire vs Automated Coverage"))
+    lines.extend(_compact_field_result_lines(questionnaire_metrics_df, study, "Questionnaire vs Automated Details"))
     lines.extend(_human_agreement_lines(summary, output_dir))
     lines.extend(_llm_lines(summary))
     report_path.write_text("\n".join(lines), encoding="utf-8")

@@ -11,7 +11,9 @@ import pandas as pd
 from .config import ExperimentMetadata, PathsConfig, StudyConfig
 from .constants import ANNOTATION_SHEET, SAMPLED_PRIVATE_SHEET
 from .evaluation_report import write_alignment_outputs
+from .io_utils import read_tabular_file
 from .llm_runner import INTERNAL_ARTIFACT_FILENAMES
+from .sampling import assign_participant_codes, filter_source_data
 from .vader_analysis import (
     default_vader_scores_path,
     load_vader_scores,
@@ -293,7 +295,7 @@ def _filter_participant_subset(df: pd.DataFrame, participant_codes: set[str] | N
 
 
 def load_questionnaire_labels(
-    sampled_private_workbook: Path,
+    source_path: Path,
     study: StudyConfig,
     participant_codes: set[str] | None = None,
 ) -> pd.DataFrame:
@@ -301,9 +303,10 @@ def load_questionnaire_labels(
     if placeholder_columns:
         raise ValueError(f"Replace questionnaire placeholders before evaluation: {placeholder_columns}")
 
-    df = load_sampled_private_data(sampled_private_workbook)
+    df = read_tabular_file(source_path)
+    df = filter_source_data(df, study)
     if "participant_code" not in df.columns:
-        raise ValueError("Sampled private workbook must include participant_code.")
+        df = assign_participant_codes(df, study)
     df = _filter_participant_subset(df, participant_codes)
 
     out = pd.DataFrame({"participant_code": df["participant_code"]})
@@ -316,10 +319,10 @@ def load_questionnaire_labels(
         "negative": "negative",
         "mixed": "mixed",
     }
-    for tone_column in study.tone_columns():
-        out[tone_column] = df[stratify_column].apply(
-            lambda value: tone_map.get(str(value).strip().lower(), str(value).strip().lower()) if pd.notna(value) else pd.NA
-        )
+    experience_tone_column = study.sections["experience"].tone_internal_column
+    out[experience_tone_column] = df[stratify_column].apply(
+        lambda value: tone_map.get(str(value).strip().lower(), str(value).strip().lower()) if pd.notna(value) else pd.NA
+    )
 
     for block_name in ("m8", "m9"):
         block = study.questionnaire[block_name]
@@ -330,7 +333,7 @@ def load_questionnaire_labels(
                 lambda value: _map_questionnaire_value(value, block["yes_values"], block["no_values"], source_column)
             )
 
-    _validate_labels(out, study.tone_columns(), study, "Questionnaire tone labels")
+    _validate_labels(out, [experience_tone_column], study, "Questionnaire tone labels")
     _validate_labels(out, study.binary_columns(), study, "Questionnaire labels")
     return out
 
@@ -343,6 +346,9 @@ def load_vader_predictions(
     vader_scores_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
+    survey_df = read_tabular_file(paths.survey_csv)
+    survey_df = filter_source_data(survey_df, study)
+    survey_df = assign_participant_codes(survey_df, study)
     sampled_private_df = _filter_participant_subset(load_sampled_private_data(sampled_private_workbook), participant_codes)
     resolved_vader_scores = Path(vader_scores_path or default_vader_scores_path(paths))
 
@@ -361,11 +367,21 @@ def load_vader_predictions(
             study,
             paths,
             output_dir=sample_output_dir,
-            all_records=True,
-            source_df=sampled_private_df,
+            all_records=False,
+            source_df=survey_df,
         )
 
-    predictions = vader_scores_to_tone_predictions(scores_df, sampled_private_df, study)
+    if "participant_code" in scores_df.columns:
+        blank_codes = scores_df["participant_code"].fillna("").astype(str).str.strip() == ""
+        if blank_codes.any() and study.id_column in scores_df.columns and study.id_column in survey_df.columns:
+            participant_lookup = survey_df[[study.id_column, "participant_code"]].drop_duplicates()
+            scores_df = scores_df.drop(columns=["participant_code"]).merge(
+                participant_lookup,
+                on=study.id_column,
+                how="left",
+            )
+
+    predictions = vader_scores_to_tone_predictions(scores_df, survey_df, study)
     _validate_labels(predictions, study.tone_columns(), study, "VADER predictions")
     return predictions, vader_summary
 
@@ -550,6 +566,62 @@ def _comparison_summary(metrics_df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+def _comparison_source(
+    kind: str,
+    df: pd.DataFrame,
+    study: StudyConfig,
+    *,
+    artifact_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "df": df,
+        "columns": [column for column in study.annotation_internal_columns() if column in df.columns],
+        "artifact_id": artifact_id,
+        "metadata": metadata or {},
+    }
+
+
+def _pairwise_comparison_name(left: dict[str, Any], right: dict[str, Any]) -> str:
+    left_kind = str(left["kind"])
+    right_kind = str(right["kind"])
+    if left_kind == "llm" and right_kind == "llm":
+        return f"llm_vs_llm:{left['artifact_id']}__vs__{right['artifact_id']}"
+    if right_kind == "llm":
+        return f"{left_kind}_vs_llm:{right['artifact_id']}"
+    return f"{left_kind}_vs_{right_kind}"
+
+
+def _pairwise_comparison_metadata(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    left_kind = str(left["kind"])
+    right_kind = str(right["kind"])
+    metadata: dict[str, Any] = {}
+    if left_kind == "llm":
+        metadata.update({f"left_{key}": value for key, value in dict(left.get("metadata", {})).items()})
+    if right_kind == "llm":
+        right_metadata = dict(right.get("metadata", {}))
+        if left_kind == "llm":
+            metadata.update({f"right_{key}": value for key, value in right_metadata.items()})
+        else:
+            metadata.update(right_metadata)
+    return metadata
+
+
+def _compute_source_pair_metrics(left: dict[str, Any], right: dict[str, Any], study: StudyConfig) -> pd.DataFrame | None:
+    shared_columns = [column for column in left["columns"] if column in right["columns"]]
+    if not shared_columns:
+        return None
+    return compute_comparison_metrics(
+        left["df"],
+        right["df"],
+        shared_columns,
+        study,
+        comparison_name=_pairwise_comparison_name(left, right),
+        metadata=_pairwise_comparison_metadata(left, right),
+    )
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> str:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return str(path)
@@ -582,18 +654,21 @@ def evaluate_outputs(
     reference_df, adjudication_summary, human_long_df = consolidate_majority_human_reference(human_artifacts, study)
     participant_codes = set(reference_df["participant_code"])
 
-    questionnaire_df = load_questionnaire_labels(resolved_sampled_private, study, participant_codes=participant_codes)
+    questionnaire_df = load_questionnaire_labels(paths.survey_csv, study)
     vader_df, vader_summary = load_vader_predictions(
         study,
         paths,
         resolved_sampled_private,
-        participant_codes=participant_codes,
         vader_scores_path=Path(vader_scores_path) if vader_scores_path else None,
         output_dir=evaluation_dir,
     )
 
+    questionnaire_source = _comparison_source("questionnaire", questionnaire_df, study)
+    vader_source = _comparison_source("vader", vader_df, study)
+
+    questionnaire_tone_columns = [study.sections["experience"].tone_internal_column]
     metrics_frames = [
-        compute_comparison_metrics(reference_df, questionnaire_df, study.tone_columns(), study, "human_reference_vs_questionnaire"),
+        compute_comparison_metrics(reference_df, questionnaire_df, questionnaire_tone_columns, study, "human_reference_vs_questionnaire"),
         compute_comparison_metrics(reference_df, questionnaire_df, study.binary_columns(), study, "human_reference_vs_questionnaire"),
         compute_comparison_metrics(reference_df, vader_df, study.tone_columns(), study, "human_reference_vs_vader"),
     ]
@@ -606,6 +681,7 @@ def evaluate_outputs(
         experiment_ids=experiment_ids,
     )
     accepted_llm: list[dict[str, Any]] = []
+    accepted_llm_sources: list[dict[str, Any]] = []
     experiment_output_dir = evaluation_dir / "experiments"
     experiment_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -631,6 +707,15 @@ def evaluate_outputs(
             rejected_llm.append({**{k: v for k, v in artifact.items() if k != "data"}, "reason": "No overlap with adjudicated human reference."})
             continue
         accepted_llm.append({k: v for k, v in artifact.items() if k != "data"})
+        accepted_llm_sources.append(
+            _comparison_source(
+                "llm",
+                llm_df,
+                study,
+                artifact_id=str(artifact["artifact_id"]),
+                metadata=metadata,
+            )
+        )
         metrics_frames.append(experiment_metrics)
 
         artifact_dir = experiment_output_dir / artifact["artifact_id"]
@@ -644,6 +729,12 @@ def evaluate_outputs(
             "comparisons": _comparison_summary(artifact_metrics),
         }
         artifact_summary_path.write_text(json.dumps(artifact_summary, indent=2), encoding="utf-8")
+
+    additional_sources = [questionnaire_source, vader_source, *accepted_llm_sources]
+    for left_source, right_source in combinations(additional_sources, 2):
+        pair_metrics = _compute_source_pair_metrics(left_source, right_source, study)
+        if pair_metrics is not None:
+            metrics_frames.append(pair_metrics)
 
     metrics_df = pd.concat(metrics_frames, ignore_index=True)
     human_pairwise_df, human_summary_df = compute_human_agreement_metrics(human_long_df, study)
@@ -665,6 +756,14 @@ def evaluate_outputs(
             "fields": human_summary_df.to_dict(orient="records") if not human_summary_df.empty else [],
         },
         "comparisons": _comparison_summary(metrics_df),
+        "comparison_scopes": {
+            comparison: {
+                "fields": int(len(group)),
+                "max_overlap_n": int(group["n"].max()) if not group.empty else 0,
+                "min_overlap_n": int(group["n"].min()) if not group.empty else 0,
+            }
+            for comparison, group in metrics_df.groupby("comparison")
+        },
         "human_artifacts": {
             "accepted": [{k: v for k, v in artifact.items() if k != "data"} for artifact in human_artifacts],
             "rejected": rejected_humans,
@@ -712,4 +811,3 @@ def evaluate_outputs(
         "llm_artifacts_manifest_file": str(llm_manifest_path),
         **reporting_outputs,
     }
-
