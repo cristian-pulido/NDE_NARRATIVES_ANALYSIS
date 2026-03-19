@@ -180,8 +180,11 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 - `human_artifacts_manifest.json`
 - `llm_artifacts_manifest.json`
 - `alignment_report.md`
+- `alignment_report_questionnaire.md`
 - `alignment_metrics_long.csv`
+- `alignment_family_metrics.csv`
 - `figures/alignment/*.png`
+- `figures/alignment/*.pdf` when `nde evaluate --export-figures-pdf` is used
 - `experiments/<artifact_id>/evaluation_metrics.csv`
 - `experiments/<artifact_id>/evaluation_summary.json`
 
@@ -192,4 +195,3 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 - `comparisons`: mean metric summaries by comparison name
 - `human_artifacts`: accepted and rejected human artifact registry
 - `llm_artifacts`: accepted and rejected LLM artifact registry
-

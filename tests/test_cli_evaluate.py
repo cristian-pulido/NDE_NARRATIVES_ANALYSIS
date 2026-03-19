@@ -90,7 +90,9 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "evaluation_metrics.csv")
     summary = json.loads((tmp_path / "evaluation_outputs" / "evaluation_summary.json").read_text(encoding="utf-8"))
     report_text = (tmp_path / "evaluation_outputs" / "alignment_report.md").read_text(encoding="utf-8")
+    questionnaire_report_text = (tmp_path / "evaluation_outputs" / "alignment_report_questionnaire.md").read_text(encoding="utf-8")
     reference_df = pd.read_csv(tmp_path / "evaluation_outputs" / "human_reference_majority.csv")
+    family_metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "alignment_family_metrics.csv")
     human_pairwise = pd.read_csv(tmp_path / "evaluation_outputs" / "human_agreement_pairwise.csv")
     llm_manifest = json.loads((tmp_path / "evaluation_outputs" / "llm_artifacts_manifest.json").read_text(encoding="utf-8"))
     human_manifest = json.loads((tmp_path / "evaluation_outputs" / "human_artifacts_manifest.json").read_text(encoding="utf-8"))
@@ -119,17 +121,53 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert "majority vote" in report_text.lower()
     assert "rejected human artifacts" in report_text.lower()
     assert "accepted experiments evaluated against the human majority reference" in report_text.lower()
-    assert "interactive navigation" in report_text.lower()
-    assert "quick metric controls" in report_text.lower()
-    assert "primary results — human vs all" in report_text.lower()
-    assert "figures — human vs all" in report_text.lower()
-    assert "secondary results — questionnaire vs automated" in report_text.lower()
-    assert "questionnaire vs automated coverage" in report_text.lower()
-    assert "questionnaire-vs-automated comparisons were available" not in report_text.lower()
-    assert "questionnaire vs vader" in report_text.lower()
-    assert "human reference vs questionnaire" in report_text.lower()
+    assert "general results" in report_text.lower()
+    assert "family-level results" in report_text.lower()
+    assert "item-level detail" in report_text.lower()
+    assert "family-level summary" in report_text.lower()
+    assert "questionnaire vs automated" in questionnaire_report_text.lower()
+    assert set(family_metrics["family"]) >= {"tone", "m8", "m9"}
     assert "<details open>" in report_text
     assert (tmp_path / "evaluation_outputs" / "experiments" / "exp_alpha__run-01" / "evaluation_metrics.csv").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_family_summary.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_family_summary.png").exists()
+    assert "questionnaire_comparison_summary.png" in questionnaire_report_text
+    assert "questionnaire_family_summary.png" in questionnaire_report_text
+
+
+def test_evaluate_can_export_pdf_figures(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    build_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert build_result.returncode == 0, build_result.stderr
+
+    source_workbook = tmp_path / "annotation_outputs" / "nde_annotation_sample.xlsx"
+    mapping_workbook = tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    human_root = tmp_path / "human_annotations"
+    llm_root = tmp_path / "llm_outputs"
+
+    populate_human_annotation_workbook(source_workbook, mapping_workbook, study_config)
+    _prepare_human_artifact(source_workbook, human_root, "ann_a")
+    _prepare_human_artifact(source_workbook, human_root, "ann_b")
+    _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-alpha")
+
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--export-figures-pdf",
+        "--figure-dpi",
+        "360",
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_comparison_summary.pdf").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_family_summary.pdf").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_comparison_summary.pdf").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_family_summary.pdf").exists()
 
 
 def test_evaluate_can_filter_to_selected_experiment_and_annotator(tmp_path: Path) -> None:
