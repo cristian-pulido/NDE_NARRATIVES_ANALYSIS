@@ -428,6 +428,25 @@ def macro_f1_score(y_true: pd.Series, y_pred: pd.Series, labels: list[str]) -> f
     return float(sum(scores) / len(scores))
 
 
+def binary_positive_metrics(y_true: pd.Series, y_pred: pd.Series, positive_label: str = "yes") -> dict[str, float]:
+    tp = int(((y_true == positive_label) & (y_pred == positive_label)).sum())
+    fp = int(((y_true != positive_label) & (y_pred == positive_label)).sum())
+    fn = int(((y_true == positive_label) & (y_pred != positive_label)).sum())
+    precision = tp / (tp + fp) if (tp + fp) else float("nan")
+    recall = tp / (tp + fn) if (tp + fn) else float("nan")
+    f1 = (2 * precision * recall) / (precision + recall) if not (pd.isna(precision) or pd.isna(recall) or (precision + recall) == 0) else float("nan")
+    prevalence_reference = float((y_true == positive_label).mean()) if len(y_true) else float("nan")
+    prevalence_candidate = float((y_pred == positive_label).mean()) if len(y_pred) else float("nan")
+    return {
+        "precision_yes": precision,
+        "recall_yes": recall,
+        "f1_yes": f1,
+        "prevalence_reference_yes": prevalence_reference,
+        "prevalence_candidate_yes": prevalence_candidate,
+        "prevalence_gap_yes": abs(prevalence_candidate - prevalence_reference) if len(y_true) else float("nan"),
+    }
+
+
 def compute_comparison_metrics(
     reference_df: pd.DataFrame,
     candidate_df: pd.DataFrame,
@@ -449,10 +468,26 @@ def compute_comparison_metrics(
             accuracy = float("nan")
             kappa = float("nan")
             macro_f1 = float("nan")
+            extra_metrics = {
+                "precision_yes": float("nan"),
+                "recall_yes": float("nan"),
+                "f1_yes": float("nan"),
+                "prevalence_reference_yes": float("nan"),
+                "prevalence_candidate_yes": float("nan"),
+                "prevalence_gap_yes": float("nan"),
+            }
         else:
             accuracy = accuracy_score(y_true, y_pred)
             kappa = cohen_kappa_score(y_true, y_pred, labels)
             macro_f1 = macro_f1_score(y_true, y_pred, labels)
+            extra_metrics = binary_positive_metrics(y_true, y_pred) if labels == ["yes", "no"] or labels == ["no", "yes"] else {
+                "precision_yes": float("nan"),
+                "recall_yes": float("nan"),
+                "f1_yes": float("nan"),
+                "prevalence_reference_yes": float("nan"),
+                "prevalence_candidate_yes": float("nan"),
+                "prevalence_gap_yes": float("nan"),
+            }
         row: dict[str, Any] = {
             "comparison": comparison_name,
             "field": column,
@@ -460,6 +495,7 @@ def compute_comparison_metrics(
             "accuracy": accuracy,
             "cohen_kappa": kappa,
             "macro_f1": macro_f1,
+            **extra_metrics,
         }
         if metadata:
             row.update(metadata)
@@ -639,6 +675,8 @@ def evaluate_outputs(
     sampled_private_workbook: Path | None = None,
     output_dir: Path | None = None,
     vader_scores_path: Path | None = None,
+    figure_dpi: int = 300,
+    export_figures_pdf: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, str]]:
     resolved_sampled_private = Path(sampled_private_workbook or paths.sampled_private_workbook)
     evaluation_dir = Path(output_dir or paths.evaluation_output_dir)
@@ -798,6 +836,8 @@ def evaluate_outputs(
         summary=summary,
         output_dir=evaluation_dir,
         vader_summary=vader_summary,
+        figure_dpi=figure_dpi,
+        export_figures_pdf=export_figures_pdf,
     )
 
     return metrics_df, summary, {

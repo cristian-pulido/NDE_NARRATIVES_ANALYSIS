@@ -524,6 +524,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Directory where evaluation tables, manifests, figures, and reports should be written.",
     )
+    auxiliary_group.add_argument(
+        "--figure-dpi",
+        metavar="N",
+        type=int,
+        default=300,
+        help="Resolution for saved evaluation figures in raster formats. Use higher values for manuscript-quality exports.",
+    )
+    auxiliary_group.add_argument(
+        "--export-figures-pdf",
+        action="store_true",
+        help="Also save evaluation figures as PDF alongside the default PNG files for article-ready vector export.",
+    )
     evaluate.set_defaults(handler=cmd_evaluate)
 
     return parser
@@ -677,6 +689,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         sampled_private_workbook=Path(args.sampled_private_workbook).resolve() if args.sampled_private_workbook else None,
         vader_scores_path=Path(args.vader_scores).resolve() if args.vader_scores else None,
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        figure_dpi=int(args.figure_dpi),
+        export_figures_pdf=bool(args.export_figures_pdf),
     )
     print(json.dumps({"rows": len(metrics_df), "summary": summary, **written}, indent=2))
     return 0

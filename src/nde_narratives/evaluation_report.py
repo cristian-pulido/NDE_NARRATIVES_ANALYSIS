@@ -14,8 +14,10 @@ from .config import StudyConfig
 
 
 ALIGNMENT_REPORT_FILENAME = "alignment_report.md"
+ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME = "alignment_report_questionnaire.md"
 ALIGNMENT_FIGURES_SUBDIR = Path("figures") / "alignment"
 ALIGNMENT_LONG_FILENAME = "alignment_metrics_long.csv"
+ALIGNMENT_FAMILY_FILENAME = "alignment_family_metrics.csv"
 
 
 def _comparison_label(comparison: str) -> str:
@@ -28,6 +30,10 @@ def _comparison_label(comparison: str) -> str:
 
 def _wrap_label(label: str, width: int = 24) -> str:
     return fill(label, width=width, break_long_words=False, break_on_hyphens=False)
+
+
+def _bar_label_y(value: float, min_offset: float = 0.01, scale: float = 0.04) -> float:
+    return value + max(min_offset, abs(value) * scale)
 
 
 def _field_group(field: str) -> str:
@@ -56,6 +62,11 @@ def _field_bucket_title(bucket: str) -> str:
         "other": "Other",
     }
     return titles.get(bucket, bucket.replace("_", " ").title())
+
+
+def _family_sort_key(bucket: str) -> tuple[int, str]:
+    order = {"tone": 0, "m8": 1, "m9": 2, "other": 3}
+    return (order.get(bucket, 99), bucket)
 
 
 def _field_bucket_order(study: StudyConfig) -> dict[str, list[str]]:
@@ -125,7 +136,17 @@ def _interpret_kappa(value: float) -> str:
 def build_alignment_long_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for _, row in metrics_df.iterrows():
-        for metric_name in ("accuracy", "cohen_kappa", "macro_f1"):
+        for metric_name in (
+            "accuracy",
+            "cohen_kappa",
+            "macro_f1",
+            "precision_yes",
+            "recall_yes",
+            "f1_yes",
+            "prevalence_reference_yes",
+            "prevalence_candidate_yes",
+            "prevalence_gap_yes",
+        ):
             rows.append(
                 {
                     "comparison": row["comparison"],
@@ -154,7 +175,20 @@ def _style_axes(ax) -> None:
     ax.set_axisbelow(True)
 
 
-def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path) -> None:
+def _save_figure(fig, figure_path: Path, dpi: int = 300, export_pdf: bool = False) -> list[str]:
+    figure_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout(pad=1.2)
+    fig.savefig(figure_path, dpi=dpi, bbox_inches="tight")
+    written = [str(figure_path)]
+    if export_pdf:
+        pdf_path = figure_path.with_suffix(".pdf")
+        fig.savefig(pdf_path, bbox_inches="tight")
+        written.append(str(pdf_path))
+    plt.close(fig)
+    return written
+
+
+def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path, dpi: int = 300, export_pdf: bool = False) -> list[str]:
     summary_df = (
         metrics_df.groupby("comparison", as_index=False)[["accuracy", "cohen_kappa", "macro_f1"]]
         .mean(numeric_only=True)
@@ -175,10 +209,208 @@ def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path) -> None
     ax.legend(frameon=False, loc="lower right")
     _style_axes(ax)
     fig.patch.set_facecolor("#FFFDF8")
-    figure_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout(pad=1.2)
-    fig.savefig(figure_path, dpi=180, bbox_inches="tight")
-    plt.close(fig)
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def build_family_summary_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
+    if metrics_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "comparison",
+                "comparison_label",
+                "family",
+                "family_label",
+                "field_count",
+                "n_mean",
+                "n_min",
+                "n_max",
+                "accuracy_mean",
+                "cohen_kappa_mean",
+                "macro_f1_mean",
+                "precision_yes_mean",
+                "recall_yes_mean",
+                "f1_yes_mean",
+                "prevalence_reference_yes_mean",
+                "prevalence_candidate_yes_mean",
+                "prevalence_gap_yes_mean",
+            ]
+        )
+    family_df = metrics_df.copy()
+    family_df["family"] = family_df["field"].map(lambda value: _field_bucket(str(value)))
+    grouped = (
+        family_df.groupby(["comparison", "family"], as_index=False)
+        .agg(
+            field_count=("field", "count"),
+            n_mean=("n", "mean"),
+            n_min=("n", "min"),
+            n_max=("n", "max"),
+            accuracy_mean=("accuracy", "mean"),
+            cohen_kappa_mean=("cohen_kappa", "mean"),
+            macro_f1_mean=("macro_f1", "mean"),
+            precision_yes_mean=("precision_yes", "mean"),
+            recall_yes_mean=("recall_yes", "mean"),
+            f1_yes_mean=("f1_yes", "mean"),
+            prevalence_reference_yes_mean=("prevalence_reference_yes", "mean"),
+            prevalence_candidate_yes_mean=("prevalence_candidate_yes", "mean"),
+            prevalence_gap_yes_mean=("prevalence_gap_yes", "mean"),
+        )
+        .copy()
+    )
+    grouped["comparison_label"] = grouped["comparison"].map(lambda value: _comparison_label(str(value)))
+    grouped["family_label"] = grouped["family"].map(lambda value: _field_bucket_title(str(value)))
+    return grouped.sort_values(
+        ["comparison", "family"],
+        key=lambda col: col.map(_comparison_sort_key) if col.name == "comparison" else col.map(_family_sort_key),
+    )
+
+
+def plot_family_summary(
+    family_df: pd.DataFrame,
+    figure_path: Path,
+    metric_name: str = "cohen_kappa_mean",
+    title: str = "Family-level alignment summary",
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    plot_df = family_df.copy()
+    plot_df = plot_df[plot_df["family"].isin(["tone", "m8", "m9"])]
+    families = sorted(plot_df["family"].drop_duplicates().tolist(), key=_family_sort_key)
+    recall_families = [
+        family
+        for family in families
+        if not plot_df.loc[plot_df["family"] == family, "recall_yes_mean"].isna().all()
+    ]
+    comparisons = sorted(plot_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
+    fig, axes = plt.subplots(1, 2, figsize=(14.5, 7.0))
+    x = list(range(len(families)))
+    recall_x = list(range(len(recall_families)))
+    width = 0.82 / max(1, len(comparisons))
+    colors = ["#355070", "#6D597A", "#B56576", "#2A9D8F", "#457B9D"]
+    for index, comparison in enumerate(comparisons):
+        subset = plot_df[plot_df["comparison"] == comparison].set_index("family")
+        values = [float(subset.loc[family, metric_name]) if family in subset.index else float("nan") for family in families]
+        recall_values = [float(subset.loc[family, "recall_yes_mean"]) if family in subset.index else float("nan") for family in recall_families]
+        offsets = [value - 0.41 + width / 2 + index * width for value in x]
+        recall_offsets = [value - 0.41 + width / 2 + index * width for value in recall_x]
+        axes[0].bar(
+            offsets,
+            [float("nan") if math.isnan(value) else value for value in values],
+            width=width,
+            label=_wrap_label(_comparison_label(comparison), width=28),
+            color=colors[index % len(colors)],
+            edgecolor="#F8F5F0",
+            linewidth=0.8,
+        )
+        for offset, value in zip(offsets, values, strict=False):
+            if not math.isnan(value):
+                axes[0].text(
+                    offset,
+                    _bar_label_y(value, min_offset=0.008, scale=0.06),
+                    f"{value:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    color="#2B2D42",
+                    clip_on=False,
+                )
+        if recall_families:
+            axes[1].bar(
+                recall_offsets,
+                [float("nan") if math.isnan(value) else value for value in recall_values],
+                width=width,
+                color=colors[index % len(colors)],
+                edgecolor="#F8F5F0",
+                linewidth=0.8,
+            )
+            for offset, value in zip(recall_offsets, recall_values, strict=False):
+                if not math.isnan(value):
+                    axes[1].text(
+                        offset,
+                        _bar_label_y(value, min_offset=0.012, scale=0.05),
+                        f"{value:.2f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=7,
+                        color="#2B2D42",
+                        clip_on=False,
+                    )
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels([_wrap_label(_field_bucket_title(family), width=18) for family in families])
+    _style_axes(axes[0])
+    axes[1].set_xticks(recall_x)
+    axes[1].set_xticklabels([_wrap_label(_field_bucket_title(family), width=18) for family in recall_families])
+    _style_axes(axes[1])
+    axes[0].tick_params(axis="x", labelsize=9)
+    axes[1].tick_params(axis="x", labelsize=9)
+    axes[0].set_ylabel("Mean Cohen kappa")
+    axes[0].set_title(title)
+    axes[0].axhline(0.0, color="#2B2D42", linewidth=1.0, linestyle="--")
+    left_max = float(pd.Series(plot_df[metric_name]).max()) if not plot_df.empty else 0.0
+    axes[0].set_ylim(0.0, max(0.42, _bar_label_y(left_max, min_offset=0.02, scale=0.12)))
+    axes[0].legend(frameon=False, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    axes[1].set_ylabel("Mean recall for 'yes'")
+    axes[1].set_title("Positive-class recovery by binary family")
+    right_max = float(plot_df[plot_df["family"].isin(recall_families)]["recall_yes_mean"].max()) if recall_families else 0.0
+    axes[1].set_ylim(0.0, min(1.0, max(0.8, _bar_label_y(right_max, min_offset=0.04, scale=0.08))))
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def plot_single_field_metric_summary(
+    metrics_df: pd.DataFrame,
+    field: str,
+    study: StudyConfig,
+    figure_path: Path,
+    title: str,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    field_df = metrics_df[metrics_df["field"] == field].copy()
+    comparisons = sorted(field_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
+    labels = [_wrap_label(_comparison_label(comparison), width=24) for comparison in comparisons]
+    x = list(range(len(comparisons)))
+    width = 0.22
+    fig, ax = plt.subplots(figsize=(max(8.5, 1.9 * len(comparisons) + 2.8), 6.1))
+    metric_specs = [
+        ("accuracy", "Accuracy", "#2A6F97", -width),
+        ("cohen_kappa", "Cohen kappa", "#C1666B", 0.0),
+        ("macro_f1", "Macro F1", "#6C9A8B", width),
+    ]
+    for metric_name, metric_label, color, offset in metric_specs:
+        values = [
+            float(field_df.loc[field_df["comparison"] == comparison, metric_name].iloc[0]) if comparison in set(field_df["comparison"]) else float("nan")
+            for comparison in comparisons
+        ]
+        positions = [value + offset for value in x]
+        ax.bar(positions, [0.0 if math.isnan(value) else value for value in values], width=width, label=metric_label, color=color)
+        for position, value in zip(positions, values, strict=False):
+            if not math.isnan(value):
+                ax.text(
+                    position,
+                    _bar_label_y(value, min_offset=0.012, scale=0.05),
+                    f"{value:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    color="#2B2D42",
+                    clip_on=False,
+                )
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.tick_params(axis="x", labelsize=9)
+    ax.set_ylabel("Metric value")
+    ax.set_title(title)
+    ax.axhline(0.0, color="#2B2D42", linewidth=1.0, linestyle="--")
+    max_value = max((float(field_df[metric].max()) for metric, _, _, _ in metric_specs if metric in field_df.columns), default=0.0)
+    ax.set_ylim(0.0, min(1.0, max(0.75, _bar_label_y(max_value, min_offset=0.04, scale=0.08))))
+    ax.legend(frameon=False)
+    _style_axes(ax)
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def _figure_basename(scope_prefix: str) -> str:
+    return "human" if scope_prefix == "human_reference_vs_" else "questionnaire"
 
 
 def plot_metric_heatmap(
@@ -187,7 +419,9 @@ def plot_metric_heatmap(
     metric_name: str,
     figure_path: Path,
     bucket: str,
-) -> None:
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
     bucket_fields = _field_bucket_order(study).get(bucket, [])
     bucket_df = metrics_df[metrics_df["field"].map(_field_bucket) == bucket].copy()
     if bucket_fields:
@@ -227,13 +461,10 @@ def plot_metric_heatmap(
     cbar = fig.colorbar(image, ax=ax, shrink=0.85)
     cbar.set_label(metric_name.replace("_", " ").title())
     fig.patch.set_facecolor("#FFFDF8")
-    figure_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout(pad=1.5)
-    fig.savefig(figure_path, dpi=180, bbox_inches="tight")
-    plt.close(fig)
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
-def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_path: Path) -> None:
+def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_path: Path, dpi: int = 300, export_pdf: bool = False) -> list[str]:
     tone_fields = _field_bucket_order(study)["tone"]
     tone_df = metrics_df[metrics_df["field"].isin(tone_fields)].copy()
     comparisons = sorted(tone_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
@@ -259,35 +490,60 @@ def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_pat
     ax.legend(frameon=False)
     _style_axes(ax)
     fig.patch.set_facecolor("#FFFDF8")
-    figure_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout(pad=1.4)
-    fig.savefig(figure_path, dpi=180, bbox_inches="tight")
-    plt.close(fig)
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
-def write_alignment_figures(metrics_df: pd.DataFrame, study: StudyConfig, figures_dir: Path) -> dict[str, str]:
+def write_alignment_figures(
+    metrics_df: pd.DataFrame,
+    study: StudyConfig,
+    figures_dir: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> dict[str, str]:
     figures_dir.mkdir(parents=True, exist_ok=True)
-    primary_metrics_df = _comparison_subset(metrics_df, "human_reference_vs_")
-    summary_path = figures_dir / "comparison_summary.png"
-    tone_path = figures_dir / "tone_alignment.png"
-    figure_paths = {
-        "comparison_summary": str(summary_path),
-        "tone_accuracy_heatmap": str(figures_dir / "tone_accuracy_heatmap.png"),
-        "tone_cohen_kappa_heatmap": str(figures_dir / "tone_cohen_kappa_heatmap.png"),
-        "m8_accuracy_heatmap": str(figures_dir / "m8_accuracy_heatmap.png"),
-        "m8_cohen_kappa_heatmap": str(figures_dir / "m8_cohen_kappa_heatmap.png"),
-        "m9_accuracy_heatmap": str(figures_dir / "m9_accuracy_heatmap.png"),
-        "m9_cohen_kappa_heatmap": str(figures_dir / "m9_cohen_kappa_heatmap.png"),
-        "tone_alignment": str(tone_path),
-    }
+    scoped_paths: dict[str, str] = {}
+    for scope_prefix in ("human_reference_vs_", "questionnaire_vs_"):
+        scoped_metrics_df = _comparison_subset(metrics_df, scope_prefix)
+        if scoped_metrics_df.empty:
+            continue
+        family_df = build_family_summary_table(scoped_metrics_df)
+        base = _figure_basename(scope_prefix)
+        summary_path = figures_dir / f"{base}_comparison_summary.png"
+        family_summary_path = figures_dir / f"{base}_family_summary.png"
+        path_map = {
+            f"{base}_comparison_summary": str(summary_path),
+            f"{base}_family_summary": str(family_summary_path),
+            f"{base}_tone_summary": str(figures_dir / f"{base}_tone_summary.png"),
+            f"{base}_tone_accuracy_heatmap": str(figures_dir / f"{base}_tone_accuracy_heatmap.png"),
+            f"{base}_tone_cohen_kappa_heatmap": str(figures_dir / f"{base}_tone_cohen_kappa_heatmap.png"),
+            f"{base}_m8_accuracy_heatmap": str(figures_dir / f"{base}_m8_accuracy_heatmap.png"),
+            f"{base}_m8_cohen_kappa_heatmap": str(figures_dir / f"{base}_m8_cohen_kappa_heatmap.png"),
+            f"{base}_m9_accuracy_heatmap": str(figures_dir / f"{base}_m9_accuracy_heatmap.png"),
+            f"{base}_m9_cohen_kappa_heatmap": str(figures_dir / f"{base}_m9_cohen_kappa_heatmap.png"),
+        }
+        plot_comparison_summary(scoped_metrics_df, summary_path, dpi=dpi, export_pdf=export_pdf)
+        scope_title = "Human vs all — family-level alignment summary" if scope_prefix == "human_reference_vs_" else "Questionnaire vs automated — family-level alignment summary"
+        plot_family_summary(family_df, family_summary_path, title=scope_title, dpi=dpi, export_pdf=export_pdf)
+        tone_summary_title = "Human vs all — tone summary" if scope_prefix == "human_reference_vs_" else "Questionnaire vs automated — Experience Tone summary"
+        plot_single_field_metric_summary(
+            scoped_metrics_df,
+            field=study.sections["experience"].tone_internal_column,
+            study=study,
+            figure_path=Path(path_map[f"{base}_tone_summary"]),
+            title=tone_summary_title,
+            dpi=dpi,
+            export_pdf=export_pdf,
+        )
+        for bucket in ("tone", "m8", "m9"):
+            plot_metric_heatmap(scoped_metrics_df, study, "accuracy", Path(path_map[f"{base}_{bucket}_accuracy_heatmap"]), bucket, dpi=dpi, export_pdf=export_pdf)
+            plot_metric_heatmap(scoped_metrics_df, study, "cohen_kappa", Path(path_map[f"{base}_{bucket}_cohen_kappa_heatmap"]), bucket, dpi=dpi, export_pdf=export_pdf)
+        if scope_prefix == "human_reference_vs_":
+            tone_path = figures_dir / f"{base}_tone_alignment.png"
+            path_map[f"{base}_tone_alignment"] = str(tone_path)
+            plot_tone_alignment(scoped_metrics_df, study, tone_path, dpi=dpi, export_pdf=export_pdf)
+        scoped_paths.update(path_map)
 
-    plot_comparison_summary(primary_metrics_df, summary_path)
-    for bucket in ("tone", "m8", "m9"):
-        plot_metric_heatmap(primary_metrics_df, study, "accuracy", Path(figure_paths[f"{bucket}_accuracy_heatmap"]), bucket)
-        plot_metric_heatmap(primary_metrics_df, study, "cohen_kappa", Path(figure_paths[f"{bucket}_cohen_kappa_heatmap"]), bucket)
-    plot_tone_alignment(primary_metrics_df, study, tone_path)
-
-    return figure_paths
+    return scoped_paths
 
 
 def _coverage_lines(summary: dict[str, Any]) -> list[str]:
@@ -339,6 +595,76 @@ def _summary_table_lines(metrics_df: pd.DataFrame, title: str) -> list[str]:
             f"| {_comparison_label(comparison)} | {int(len(group))} | {float(row['accuracy']):.3f} | {float(row['cohen_kappa']):.3f} | {float(row['macro_f1']):.3f} |"
         )
     lines.append("")
+    return lines
+
+
+def _family_summary_lines(family_df: pd.DataFrame, title: str) -> list[str]:
+    lines = [f"## {title}", ""]
+    if family_df.empty:
+        lines.extend(["- No family-level comparisons were available in this run.", ""])
+        return lines
+    lines.extend([
+        "| Comparison | Family | Fields | Mean Kappa | Mean Macro F1 | Recall Yes | Prevalence Gap | Mean N |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    ordered = family_df.sort_values(["comparison", "family"], key=lambda col: col.map(_comparison_sort_key) if col.name == "comparison" else col.map(_family_sort_key))
+    for _, row in ordered.iterrows():
+        lines.append(
+            f"| {_comparison_label(str(row['comparison']))} | {str(row['family_label'])} | {int(row['field_count'])} | {float(row['cohen_kappa_mean']):.3f} | {float(row['macro_f1_mean']):.3f} | {float(row['recall_yes_mean']):.3f} | {float(row['prevalence_gap_yes_mean']):.3f} | {float(row['n_mean']):.1f} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _questionnaire_interpretation_lines(family_df: pd.DataFrame) -> list[str]:
+    lines = ["## Interpretation For The Manuscript", ""]
+    llm_family_df = family_df[family_df["comparison"].astype(str).str.startswith("questionnaire_vs_llm")].copy()
+    if llm_family_df.empty:
+        lines.extend(["- Questionnaire-based family summaries were unavailable in this run.", ""])
+        return lines
+    family_means = (
+        llm_family_df.groupby("family", as_index=False)[["cohen_kappa_mean", "macro_f1_mean", "recall_yes_mean", "prevalence_gap_yes_mean"]]
+        .mean(numeric_only=True)
+        .sort_values("family", key=lambda s: s.map(_family_sort_key))
+    )
+    m8 = family_means[family_means["family"] == "m8"]
+    m9 = family_means[family_means["family"] == "m9"]
+    if not m8.empty and not m9.empty:
+        m8_kappa = float(m8.iloc[0]["cohen_kappa_mean"])
+        m9_kappa = float(m9.iloc[0]["cohen_kappa_mean"])
+        m8_recall = float(m8.iloc[0]["recall_yes_mean"])
+        m9_recall = float(m9.iloc[0]["recall_yes_mean"])
+        kappa_relation = (
+            f"M8 shows stronger agreement than M9 (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
+            if m8_kappa > m9_kappa
+            else f"M9 shows stronger agreement than M8 (mean family kappa {m9_kappa:.3f} vs {m8_kappa:.3f})"
+            if m9_kappa > m8_kappa
+            else f"M8 and M9 show matched agreement at the family level (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
+        )
+        recall_relation = (
+            f"Positive-class recovery is weaker for M9 than for M8 (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
+            if (not pd.isna(m8_recall) and not pd.isna(m9_recall) and m8_recall > m9_recall)
+            else f"Positive-class recovery is stronger for M9 than for M8 (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
+            if (not pd.isna(m8_recall) and not pd.isna(m9_recall) and m9_recall > m8_recall)
+            else f"Positive-class recovery is matched or unavailable across M8 and M9 (mean recall for `yes`: {m8_recall:.3f} vs {m9_recall:.3f})"
+        )
+        if m8_kappa > m9_kappa:
+            interpretation_tail = "- This pattern is consistent with the prompt design: the system marks `yes` only when the construct is explicitly verbalized in the narrative, so lower M9 alignment is compatible with weaker narrative explicitness rather than a pure model-quality failure."
+        elif m9_kappa > m8_kappa:
+            interpretation_tail = "- In this run, the questionnaire-based family pattern does not support the usual expectation that M9 is less recoverable than M8, so the result should be interpreted cautiously and checked against item-level detail and prevalence structure."
+        else:
+            interpretation_tail = "- In this run, the questionnaire-based family comparison does not separate M8 and M9 on agreement, so the interpretation should rely more heavily on item-level detail, recall patterns, and prevalence structure."
+        lines.extend(
+            [
+                f"- Across questionnaire-vs-LLM comparisons, {kappa_relation}.",
+                f"- {recall_relation}.",
+                interpretation_tail,
+                "- The most article-ready interpretation is therefore that lower scores reflect both model limitations and systematic differences in textual recoverability, with reflective aftereffects appearing less recoverable than concrete experiential features.",
+                "",
+            ]
+        )
+        return lines
+    lines.extend(["- The current run did not contain both M8 and M9 family summaries for interpretation.", ""])
     return lines
 
 
@@ -440,8 +766,8 @@ def _metric_toggle_lines(metrics_df: pd.DataFrame) -> list[str]:
 
 
 def _field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig) -> list[str]:
-    lines = ["## Field-Level Results", ""]
-    for comparison in metrics_df["comparison"].drop_duplicates().tolist():
+    lines = ["## Item-Level Detail", "", "The tables below retain the fine-grained item evidence after the general and family-level summaries.", ""]
+    for comparison in sorted(metrics_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key):
         subset = metrics_df[metrics_df["comparison"] == comparison].copy().sort_values("field")
         accordion_open = _comparison_tab(comparison) in {"human_vs_all", "questionnaire_vs_automated"}
         lines.append("<details open>" if accordion_open else "<details>")
@@ -476,6 +802,107 @@ def _compact_field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig, he
             )
         lines.append("")
     return lines
+
+
+def write_alignment_report_for_scope(
+    study: StudyConfig,
+    metrics_df: pd.DataFrame,
+    family_df: pd.DataFrame,
+    summary: dict[str, Any],
+    output_dir: Path,
+    figure_paths: dict[str, str],
+    report_filename: str,
+    title: str,
+    objective: str,
+    include_support_sections: bool,
+    figure_prefix: str,
+    vader_summary: dict[str, Any] | None = None,
+) -> Path:
+    report_path = output_dir / report_filename
+    lines = [
+        f"# {title}",
+        "",
+        "## Objective",
+        "",
+        objective,
+        "",
+        "## Methodology",
+        "",
+        "- Human reference: field-level majority vote across valid human annotation artifacts.",
+        "- Unresolved ties remain blank and are excluded only from the affected field metrics.",
+        "- Metrics reported: accuracy, Cohen kappa, and macro F1.",
+        "- Families are operationalized as Tone, M8, and M9 to support article-oriented interpretation before item-level detail.",
+        "",
+    ]
+    lines.extend(_coverage_lines(summary))
+    if vader_summary and report_filename == ALIGNMENT_REPORT_FILENAME:
+        lines.extend(
+            [
+                "### VADER Context",
+                "",
+                f"- Rows contributing to VADER analysis after filtering: {vader_summary.get('n_rows_after_filters', 'n/a')}",
+                f"- VADER filter description: {vader_summary.get('filter_description', 'n/a')}",
+                "",
+            ]
+        )
+    lines.extend(_summary_table_lines(metrics_df, "General Results"))
+    lines.extend(_family_summary_lines(family_df, "Family-Level Results"))
+    if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
+        lines.extend(_questionnaire_interpretation_lines(family_df))
+    lines.extend(
+        [
+            "## Figures",
+            "",
+            "The figures below follow the same hierarchy as the report: overall comparison first, then family-level comparison, then detailed heatmaps.",
+            "",
+            f"![Overall comparison summary]({Path(figure_paths[f'{figure_prefix}_comparison_summary']).relative_to(output_dir).as_posix()})",
+            "",
+            f"![Family-level summary]({Path(figure_paths[f'{figure_prefix}_family_summary']).relative_to(output_dir).as_posix()})",
+            "",
+        ]
+    )
+    tone_lines = ["#### Tone", "", f"![Tone summary]({Path(figure_paths[f'{figure_prefix}_tone_summary']).relative_to(output_dir).as_posix()})", ""]
+    if figure_prefix == "human":
+        tone_lines.extend(
+            [
+                f"![Tone accuracy heatmap]({Path(figure_paths[f'{figure_prefix}_tone_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![Tone alignment]({Path(figure_paths[f'{figure_prefix}_tone_alignment']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
+    else:
+        tone_lines.extend(
+            [
+                "In the questionnaire scope, only Experience Tone is available, so the tone section is summarized in a single three-metric figure instead of redundant heatmaps.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "### Detailed heatmaps",
+            "",
+            *tone_lines,
+            "#### M8",
+            "",
+            f"![M8 accuracy heatmap]({Path(figure_paths[f'{figure_prefix}_m8_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
+            "",
+            f"![M8 kappa heatmap]({Path(figure_paths[f'{figure_prefix}_m8_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
+            "",
+            "#### M9",
+            "",
+            f"![M9 accuracy heatmap]({Path(figure_paths[f'{figure_prefix}_m9_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
+            "",
+            f"![M9 kappa heatmap]({Path(figure_paths[f'{figure_prefix}_m9_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
+            "",
+        ]
+    )
+    lines.extend(_field_result_lines(metrics_df, study))
+    if include_support_sections:
+        lines.extend(_human_agreement_lines(summary, output_dir))
+        lines.extend(_llm_lines(summary))
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
 
 
 def _human_agreement_lines(summary: dict[str, Any], output_dir: Path) -> list[str]:
@@ -535,75 +962,47 @@ def write_alignment_report(
     figure_paths: dict[str, str],
     vader_summary: dict[str, Any] | None = None,
 ) -> Path:
-    report_path = output_dir / ALIGNMENT_REPORT_FILENAME
-    comparison_summary = summary["comparisons"]
     primary_metrics_df = _comparison_subset(metrics_df, "human_reference_vs_")
-    questionnaire_metrics_df = _questionnaire_automated_subset(metrics_df)
-    lines = [
-        "# Alignment Report Across Sources",
-        "",
-        "## Objective",
-        "",
-        "Quantify alignment across a majority-vote human reference, questionnaire-derived labels, VADER tone labels, and any accepted LLM experiments.",
-        "",
-        "## Methodology",
-        "",
-        "- Human reference: field-level majority vote across valid human annotation artifacts.",
-        "- Unresolved ties remain blank and are excluded only from the affected field metrics.",
-        "- Metrics reported: accuracy, Cohen kappa, and macro F1.",
-        "- VADER is applied with its lexicon-and-rules model and then discretized into positive, negative, and mixed labels using the standard compound thresholds.",
-        "",
-    ]
-    lines.extend(_coverage_lines(summary))
-    if vader_summary:
-        lines.extend(
-            [
-                "### VADER Context",
-                "",
-                f"- Rows contributing to VADER analysis after filtering: {vader_summary.get('n_rows_after_filters', 'n/a')}",
-                f"- VADER filter description: {vader_summary.get('filter_description', 'n/a')}",
-                "",
-            ]
-        )
-    lines.extend(_summary_table_lines(primary_metrics_df, "Primary Results — Human vs All"))
-    lines.extend(_comparison_navigation_lines(metrics_df))
-    lines.extend(_metric_toggle_lines(primary_metrics_df))
-    lines.extend(
-        [
-            "## Figures — Human vs All",
-            "",
-            f"![Alignment summary]({Path(figure_paths['comparison_summary']).relative_to(output_dir).as_posix()})",
-            "",
-            "#### Tone",
-            "",
-            f"![Tone accuracy heatmap]({Path(figure_paths['tone_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            f"![Tone kappa heatmap]({Path(figure_paths['tone_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            f"![Tone alignment]({Path(figure_paths['tone_alignment']).relative_to(output_dir).as_posix()})",
-            "",
-            "#### M8",
-            "",
-            f"![M8 accuracy heatmap]({Path(figure_paths['m8_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            f"![M8 kappa heatmap]({Path(figure_paths['m8_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            "#### M9",
-            "",
-            f"![M9 accuracy heatmap]({Path(figure_paths['m9_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            f"![M9 kappa heatmap]({Path(figure_paths['m9_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-        ]
+    family_df = build_family_summary_table(primary_metrics_df)
+    return write_alignment_report_for_scope(
+        study=study,
+        metrics_df=primary_metrics_df,
+        family_df=family_df,
+        summary=summary,
+        output_dir=output_dir,
+        figure_paths=figure_paths,
+        report_filename=ALIGNMENT_REPORT_FILENAME,
+        title="Alignment Report — Human vs All",
+        objective="Quantify alignment across the majority-vote human reference, questionnaire-derived labels, VADER tone labels, and accepted LLM experiments, with the report organized from global results to families and then individual items.",
+        include_support_sections=True,
+        figure_prefix="human",
+        vader_summary=vader_summary,
     )
-    lines.extend(_field_result_lines(primary_metrics_df, study))
-    lines.extend(_summary_table_lines(questionnaire_metrics_df, "Secondary Results — Questionnaire vs Automated"))
-    lines.extend(_comparison_scope_lines(summary, questionnaire_metrics_df, "Questionnaire vs Automated Coverage"))
-    lines.extend(_compact_field_result_lines(questionnaire_metrics_df, study, "Questionnaire vs Automated Details"))
-    lines.extend(_human_agreement_lines(summary, output_dir))
-    lines.extend(_llm_lines(summary))
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-    return report_path
+
+
+def write_questionnaire_alignment_report(
+    study: StudyConfig,
+    metrics_df: pd.DataFrame,
+    summary: dict[str, Any],
+    output_dir: Path,
+    figure_paths: dict[str, str],
+) -> Path:
+    questionnaire_metrics_df = _questionnaire_automated_subset(metrics_df)
+    family_df = build_family_summary_table(questionnaire_metrics_df)
+    return write_alignment_report_for_scope(
+        study=study,
+        metrics_df=questionnaire_metrics_df,
+        family_df=family_df,
+        summary=summary,
+        output_dir=output_dir,
+        figure_paths=figure_paths,
+        report_filename=ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME,
+        title="Alignment Report — Questionnaire vs Automated",
+        objective="Summarize questionnaire-based comparisons in a separate article-supporting report so the main human-centered report remains clearer and more interpretable.",
+        include_support_sections=False,
+        figure_prefix="questionnaire",
+        vader_summary=None,
+    )
 
 
 def write_alignment_outputs(
@@ -612,16 +1011,24 @@ def write_alignment_outputs(
     summary: dict[str, Any],
     output_dir: Path,
     vader_summary: dict[str, Any] | None = None,
+    figure_dpi: int = 300,
+    export_figures_pdf: bool = False,
 ) -> dict[str, str]:
     figures_dir = output_dir / ALIGNMENT_FIGURES_SUBDIR
-    figure_paths = write_alignment_figures(metrics_df, study, figures_dir)
+    figure_paths = write_alignment_figures(metrics_df, study, figures_dir, dpi=figure_dpi, export_pdf=export_figures_pdf)
     long_df = build_alignment_long_table(metrics_df)
+    family_df = build_family_summary_table(metrics_df)
     long_path = output_dir / ALIGNMENT_LONG_FILENAME
+    family_path = output_dir / ALIGNMENT_FAMILY_FILENAME
     long_df.to_csv(long_path, index=False)
+    family_df.to_csv(family_path, index=False)
     report_path = write_alignment_report(study, metrics_df, summary, output_dir, figure_paths, vader_summary=vader_summary)
+    questionnaire_report_path = write_questionnaire_alignment_report(study, metrics_df, summary, output_dir, figure_paths)
     return {
         "alignment_report_file": str(report_path),
+        "alignment_report_questionnaire_file": str(questionnaire_report_path),
         "alignment_metrics_long_file": str(long_path),
+        "alignment_family_metrics_file": str(family_path),
         "alignment_figures_dir": str(figures_dir),
         **{f"figure_{name}": path for name, path in figure_paths.items()},
     }
