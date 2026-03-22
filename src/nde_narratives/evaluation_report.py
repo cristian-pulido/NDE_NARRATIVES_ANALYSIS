@@ -19,6 +19,13 @@ ALIGNMENT_FIGURES_SUBDIR = Path("figures") / "alignment"
 ALIGNMENT_LONG_FILENAME = "alignment_metrics_long.csv"
 ALIGNMENT_FAMILY_FILENAME = "alignment_family_metrics.csv"
 
+# Constants for bar label positioning
+MIN_OFFSET_FOR_BAR_LABEL = 0.01
+SCALE_FACTOR_FOR_BAR_LABEL = 0.04
+
+# Constants for family sort order
+UNKNOWN_FAMILY_SORT_ORDER = 99
+
 
 def _comparison_label(comparison: str) -> str:
     base, _, detail = comparison.partition(":")
@@ -32,7 +39,7 @@ def _wrap_label(label: str, width: int = 24) -> str:
     return fill(label, width=width, break_long_words=False, break_on_hyphens=False)
 
 
-def _bar_label_y(value: float, min_offset: float = 0.01, scale: float = 0.04) -> float:
+def _bar_label_y(value: float, min_offset: float = MIN_OFFSET_FOR_BAR_LABEL, scale: float = SCALE_FACTOR_FOR_BAR_LABEL) -> float:
     return value + max(min_offset, abs(value) * scale)
 
 
@@ -66,7 +73,7 @@ def _field_bucket_title(bucket: str) -> str:
 
 def _family_sort_key(bucket: str) -> tuple[int, str]:
     order = {"tone": 0, "m8": 1, "m9": 2, "other": 3}
-    return (order.get(bucket, 99), bucket)
+    return (order.get(bucket, UNKNOWN_FAMILY_SORT_ORDER), bucket)
 
 
 def _field_bucket_order(study: StudyConfig) -> dict[str, list[str]]:
