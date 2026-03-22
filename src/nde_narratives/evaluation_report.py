@@ -19,6 +19,13 @@ ALIGNMENT_FIGURES_SUBDIR = Path("figures") / "alignment"
 ALIGNMENT_LONG_FILENAME = "alignment_metrics_long.csv"
 ALIGNMENT_FAMILY_FILENAME = "alignment_family_metrics.csv"
 
+# Constants for bar label positioning
+MIN_OFFSET_FOR_BAR_LABEL = 0.01
+SCALE_FACTOR_FOR_BAR_LABEL = 0.04
+
+# Constants for family sort order
+UNKNOWN_FAMILY_SORT_ORDER = 99
+
 
 def _comparison_label(comparison: str) -> str:
     base, _, detail = comparison.partition(":")
@@ -32,7 +39,7 @@ def _wrap_label(label: str, width: int = 24) -> str:
     return fill(label, width=width, break_long_words=False, break_on_hyphens=False)
 
 
-def _bar_label_y(value: float, min_offset: float = 0.01, scale: float = 0.04) -> float:
+def _bar_label_y(value: float, min_offset: float = MIN_OFFSET_FOR_BAR_LABEL, scale: float = SCALE_FACTOR_FOR_BAR_LABEL) -> float:
     return value + max(min_offset, abs(value) * scale)
 
 
@@ -66,7 +73,7 @@ def _field_bucket_title(bucket: str) -> str:
 
 def _family_sort_key(bucket: str) -> tuple[int, str]:
     order = {"tone": 0, "m8": 1, "m9": 2, "other": 3}
-    return (order.get(bucket, 99), bucket)
+    return (order.get(bucket, UNKNOWN_FAMILY_SORT_ORDER), bucket)
 
 
 def _field_bucket_order(study: StudyConfig) -> dict[str, list[str]]:
@@ -105,6 +112,52 @@ def _comparison_tab(comparison: str) -> str:
     if comparison.startswith("human_reference_vs_"):
         return "human_vs_all"
     return "other"
+
+
+def _select_top_comparisons_for_figure(
+    metrics_df: pd.DataFrame,
+    scope_prefix: str,
+    baseline_comparisons: list[str],
+    top_n: int = 3,
+    ranking_metric: str = "macro_f1",
+) -> list[str]:
+    """Select comparisons for figure display: always include baselines, then top N LLMs by ranking metric.
+
+    Args:
+        metrics_df: Full metrics dataframe.
+        scope_prefix: Scope prefix (e.g., "questionnaire_vs_" or "human_reference_vs_").
+        baseline_comparisons: List of baseline comparison names to always include.
+        top_n: Number of top LLM comparisons to include.
+        ranking_metric: Metric to rank LLMs by ("accuracy", "cohen_kappa", or "macro_f1").
+
+    Returns:
+        List of comparison names to display in figures.
+    """
+    scoped_df = metrics_df[metrics_df["comparison"].astype(str).str.startswith(scope_prefix)].copy()
+    if scoped_df.empty:
+        return baseline_comparisons
+
+    # Get unique comparisons
+    all_comparisons = scoped_df["comparison"].drop_duplicates().tolist()
+
+    # Separate baselines from LLMs
+    baseline_set = set(baseline_comparisons)
+    baselines_present = [c for c in baseline_comparisons if c in all_comparisons]
+    llm_comparisons = [c for c in all_comparisons if c not in baseline_set]
+
+    # Compute mean ranking metric per comparison
+    comparison_means = (
+        scoped_df.groupby("comparison", as_index=False)[[ranking_metric]]
+        .mean(numeric_only=True)
+        .sort_values(ranking_metric, ascending=False)
+    )
+
+    # Select top N LLMs
+    top_llms = comparison_means.head(top_n)["comparison"].tolist()
+
+    # Combine baselines + top LLMs
+    selected = baselines_present + top_llms
+    return selected
 
 
 def _interpret_alignment(value: float) -> str:
@@ -188,11 +241,35 @@ def _save_figure(fig, figure_path: Path, dpi: int = 300, export_pdf: bool = Fals
     return written
 
 
-def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path, dpi: int = 300, export_pdf: bool = False) -> list[str]:
+def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path, dpi: int = 300, export_pdf: bool = False, scope_prefix: str | None = None, baseline_comparisons: list[str] | None = None, top_n: int = 3) -> list[str]:
+    """Plot comparison summary figure, optionally filtered to baselines + top N LLMs by macro_f1.
+
+    Args:
+        metrics_df: Full metrics dataframe.
+        figure_path: Output figure path.
+        dpi: Figure DPI.
+        export_pdf: Whether to also export PDF.
+        scope_prefix: Scope prefix for filtering (e.g., "questionnaire_vs_" or "human_reference_vs_").
+        baseline_comparisons: Baseline comparisons to always include.
+        top_n: Number of top LLMs to include.
+    """
+    # Filter to scope if provided
+    if scope_prefix:
+        filtered_df = metrics_df[metrics_df["comparison"].astype(str).str.startswith(scope_prefix)].copy()
+    else:
+        filtered_df = metrics_df.copy()
+
+    # Select comparisons for figure if filtering is enabled
+    if scope_prefix and baseline_comparisons:
+        selected_comparisons = _select_top_comparisons_for_figure(
+            filtered_df, scope_prefix, baseline_comparisons, top_n=top_n, ranking_metric="macro_f1"
+        )
+        filtered_df = filtered_df[filtered_df["comparison"].isin(selected_comparisons)]
+
     summary_df = (
-        metrics_df.groupby("comparison", as_index=False)[["accuracy", "cohen_kappa", "macro_f1"]]
+        filtered_df.groupby("comparison", as_index=False)[["accuracy", "cohen_kappa", "macro_f1"]]
         .mean(numeric_only=True)
-        .sort_values("cohen_kappa", ascending=True, na_position="first")
+        .sort_values("macro_f1", ascending=False, na_position="last")
     )
     labels = [_wrap_label(_comparison_label(value), width=28) for value in summary_df["comparison"]]
     y = list(range(len(summary_df)))
@@ -206,7 +283,8 @@ def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path, dpi: in
     ax.set_yticklabels(labels)
     ax.set_xlabel("Mean metric value")
     ax.set_title("Alignment summary by comparison")
-    ax.legend(frameon=False, loc="lower right")
+    # Move legend to upper left to avoid overlapping with bars
+    ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1), ncol=1)
     _style_axes(ax)
     fig.patch.set_facecolor("#FFFDF8")
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
@@ -271,7 +349,23 @@ def plot_family_summary(
     title: str = "Family-level alignment summary",
     dpi: int = 300,
     export_pdf: bool = False,
+    scope_prefix: str | None = None,
+    baseline_comparisons: list[str] | None = None,
+    top_n: int = 3,
 ) -> list[str]:
+    """Plot family summary figure, optionally filtered to baselines + top N LLMs by macro_f1.
+
+    Args:
+        family_df: Family-level summary dataframe.
+        figure_path: Output figure path.
+        metric_name: Metric to plot ("cohen_kappa_mean" or "recall_yes_mean").
+        title: Figure title.
+        dpi: Figure DPI.
+        export_pdf: Whether to also export PDF.
+        scope_prefix: Scope prefix for filtering.
+        baseline_comparisons: Baseline comparisons to always include.
+        top_n: Number of top LLMs to include.
+    """
     plot_df = family_df.copy()
     plot_df = plot_df[plot_df["family"].isin(["tone", "m8", "m9"])]
     families = sorted(plot_df["family"].drop_duplicates().tolist(), key=_family_sort_key)
@@ -280,6 +374,22 @@ def plot_family_summary(
         for family in families
         if not plot_df.loc[plot_df["family"] == family, "recall_yes_mean"].isna().all()
     ]
+
+    # Select comparisons for figure if filtering is enabled
+    if scope_prefix and baseline_comparisons:
+        # Compute mean macro_f1 per comparison for ranking
+        comparison_means = (
+            plot_df.groupby("comparison", as_index=False)["macro_f1_mean"]
+            .mean(numeric_only=True)
+            .sort_values("macro_f1_mean", ascending=False)
+        )
+        baseline_set = set(baseline_comparisons)
+        baselines_present = [c for c in baseline_comparisons if c in comparison_means["comparison"].tolist()]
+        llm_comparisons = [c for c in comparison_means["comparison"].tolist() if c not in baseline_set]
+        top_llms = comparison_means.head(top_n)["comparison"].tolist()
+        selected_comparisons = baselines_present + top_llms
+        plot_df = plot_df[plot_df["comparison"].isin(selected_comparisons)]
+
     comparisons = sorted(plot_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
     fig, axes = plt.subplots(1, 2, figsize=(14.5, 7.0))
     x = list(range(len(families)))
@@ -364,8 +474,33 @@ def plot_single_field_metric_summary(
     title: str,
     dpi: int = 300,
     export_pdf: bool = False,
+    scope_prefix: str | None = None,
+    baseline_comparisons: list[str] | None = None,
+    top_n: int = 3,
 ) -> list[str]:
+    """Plot single field metric summary, optionally filtered to baselines + top N LLMs by macro_f1.
+
+    Args:
+        metrics_df: Full metrics dataframe.
+        field: Field name to filter on.
+        study: Study configuration.
+        figure_path: Output figure path.
+        title: Figure title.
+        dpi: Figure DPI.
+        export_pdf: Whether to also export PDF.
+        scope_prefix: Scope prefix for filtering (e.g., "questionnaire_vs_" or "human_reference_vs_").
+        baseline_comparisons: Baseline comparisons to always include.
+        top_n: Number of top LLMs to include.
+    """
     field_df = metrics_df[metrics_df["field"] == field].copy()
+
+    # Select comparisons for figure if filtering is enabled
+    if scope_prefix and baseline_comparisons:
+        selected_comparisons = _select_top_comparisons_for_figure(
+            field_df, scope_prefix, baseline_comparisons, top_n=top_n, ranking_metric="macro_f1"
+        )
+        field_df = field_df[field_df["comparison"].isin(selected_comparisons)]
+
     comparisons = sorted(field_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
     labels = [_wrap_label(_comparison_label(comparison), width=24) for comparison in comparisons]
     x = list(range(len(comparisons)))
@@ -421,11 +556,36 @@ def plot_metric_heatmap(
     bucket: str,
     dpi: int = 300,
     export_pdf: bool = False,
+    scope_prefix: str | None = None,
+    baseline_comparisons: list[str] | None = None,
+    top_n: int = 3,
 ) -> list[str]:
+    """Plot metric heatmap, optionally filtered to baselines + top N LLMs by macro_f1.
+
+    Args:
+        metrics_df: Full metrics dataframe.
+        study: Study configuration.
+        metric_name: Metric name to plot ("accuracy" or "cohen_kappa").
+        figure_path: Output figure path.
+        bucket: Bucket name ("tone", "m8", or "m9").
+        dpi: Figure DPI.
+        export_pdf: Whether to also export PDF.
+        scope_prefix: Scope prefix for filtering.
+        baseline_comparisons: Baseline comparisons to always include.
+        top_n: Number of top LLMs to include.
+    """
     bucket_fields = _field_bucket_order(study).get(bucket, [])
     bucket_df = metrics_df[metrics_df["field"].map(_field_bucket) == bucket].copy()
     if bucket_fields:
         bucket_df = bucket_df[bucket_df["field"].isin(bucket_fields)]
+
+    # Select comparisons for figure if filtering is enabled
+    if scope_prefix and baseline_comparisons:
+        selected_comparisons = _select_top_comparisons_for_figure(
+            bucket_df, scope_prefix, baseline_comparisons, top_n=top_n, ranking_metric="macro_f1"
+        )
+        bucket_df = bucket_df[bucket_df["comparison"].isin(selected_comparisons)]
+
     comparisons = sorted(bucket_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
     if bucket_fields:
         pivot = bucket_df.pivot(index="comparison", columns="field", values=metric_name)
@@ -464,9 +624,29 @@ def plot_metric_heatmap(
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
-def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_path: Path, dpi: int = 300, export_pdf: bool = False) -> list[str]:
+def plot_tone_alignment(metrics_df: pd.DataFrame, study: StudyConfig, figure_path: Path, dpi: int = 300, export_pdf: bool = False, scope_prefix: str | None = None, baseline_comparisons: list[str] | None = None, top_n: int = 3) -> list[str]:
+    """Plot tone alignment figure, optionally filtered to baselines + top N LLMs by macro_f1.
+
+    Args:
+        metrics_df: Full metrics dataframe.
+        study: Study configuration.
+        figure_path: Output figure path.
+        dpi: Figure DPI.
+        export_pdf: Whether to also export PDF.
+        scope_prefix: Scope prefix for filtering.
+        baseline_comparisons: Baseline comparisons to always include.
+        top_n: Number of top LLMs to include.
+    """
     tone_fields = _field_bucket_order(study)["tone"]
     tone_df = metrics_df[metrics_df["field"].isin(tone_fields)].copy()
+
+    # Select comparisons for figure if filtering is enabled
+    if scope_prefix and baseline_comparisons:
+        selected_comparisons = _select_top_comparisons_for_figure(
+            tone_df, scope_prefix, baseline_comparisons, top_n=top_n, ranking_metric="macro_f1"
+        )
+        tone_df = tone_df[tone_df["comparison"].isin(selected_comparisons)]
+
     comparisons = sorted(tone_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key)
     longest_legend = max((_comparison_label(comparison) for comparison in comparisons), key=len, default="")
     fig_width = max(10.5, 8.5 + 0.06 * len(longest_legend))
@@ -521,10 +701,41 @@ def write_alignment_figures(
             f"{base}_m9_accuracy_heatmap": str(figures_dir / f"{base}_m9_accuracy_heatmap.png"),
             f"{base}_m9_cohen_kappa_heatmap": str(figures_dir / f"{base}_m9_cohen_kappa_heatmap.png"),
         }
-        plot_comparison_summary(scoped_metrics_df, summary_path, dpi=dpi, export_pdf=export_pdf)
+        # Select comparisons for figure: baselines + top 3 LLMs by macro_f1
+        if scope_prefix == "questionnaire_vs_":
+            baseline_comparisons = ["questionnaire_vs_vader"]
+        elif scope_prefix == "human_reference_vs_":
+            baseline_comparisons = ["human_reference_vs_questionnaire", "human_reference_vs_vader"]
+        else:
+            baseline_comparisons = []
+        plot_comparison_summary(
+            scoped_metrics_df,
+            summary_path,
+            dpi=dpi,
+            export_pdf=export_pdf,
+            scope_prefix=scope_prefix,
+            baseline_comparisons=baseline_comparisons,
+            top_n=3,
+        )
         scope_title = "Human vs all — family-level alignment summary" if scope_prefix == "human_reference_vs_" else "Questionnaire vs automated — family-level alignment summary"
-        plot_family_summary(family_df, family_summary_path, title=scope_title, dpi=dpi, export_pdf=export_pdf)
+        plot_family_summary(
+            family_df,
+            family_summary_path,
+            title=scope_title,
+            dpi=dpi,
+            export_pdf=export_pdf,
+            scope_prefix=scope_prefix,
+            baseline_comparisons=baseline_comparisons,
+            top_n=3,
+        )
         tone_summary_title = "Human vs all — tone summary" if scope_prefix == "human_reference_vs_" else "Questionnaire vs automated — Experience Tone summary"
+        # Select comparisons for tone figure: baselines + top 3 LLMs by macro_f1
+        if scope_prefix == "questionnaire_vs_":
+            tone_baseline_comparisons = ["questionnaire_vs_vader"]
+        elif scope_prefix == "human_reference_vs_":
+            tone_baseline_comparisons = ["human_reference_vs_questionnaire", "human_reference_vs_vader"]
+        else:
+            tone_baseline_comparisons = []
         plot_single_field_metric_summary(
             scoped_metrics_df,
             field=study.sections["experience"].tone_internal_column,
@@ -533,14 +744,57 @@ def write_alignment_figures(
             title=tone_summary_title,
             dpi=dpi,
             export_pdf=export_pdf,
+            scope_prefix=scope_prefix,
+            baseline_comparisons=tone_baseline_comparisons,
+            top_n=3,
         )
+        # Select comparisons for heatmap figures: baselines + top 3 LLMs by macro_f1
+        if scope_prefix == "questionnaire_vs_":
+            heatmap_baseline_comparisons = ["questionnaire_vs_vader"]
+        elif scope_prefix == "human_reference_vs_":
+            heatmap_baseline_comparisons = ["human_reference_vs_questionnaire", "human_reference_vs_vader"]
+        else:
+            heatmap_baseline_comparisons = []
         for bucket in ("tone", "m8", "m9"):
-            plot_metric_heatmap(scoped_metrics_df, study, "accuracy", Path(path_map[f"{base}_{bucket}_accuracy_heatmap"]), bucket, dpi=dpi, export_pdf=export_pdf)
-            plot_metric_heatmap(scoped_metrics_df, study, "cohen_kappa", Path(path_map[f"{base}_{bucket}_cohen_kappa_heatmap"]), bucket, dpi=dpi, export_pdf=export_pdf)
+            plot_metric_heatmap(
+                scoped_metrics_df,
+                study,
+                "accuracy",
+                Path(path_map[f"{base}_{bucket}_accuracy_heatmap"]),
+                bucket,
+                dpi=dpi,
+                export_pdf=export_pdf,
+                scope_prefix=scope_prefix,
+                baseline_comparisons=heatmap_baseline_comparisons,
+                top_n=3,
+            )
+            plot_metric_heatmap(
+                scoped_metrics_df,
+                study,
+                "cohen_kappa",
+                Path(path_map[f"{base}_{bucket}_cohen_kappa_heatmap"]),
+                bucket,
+                dpi=dpi,
+                export_pdf=export_pdf,
+                scope_prefix=scope_prefix,
+                baseline_comparisons=heatmap_baseline_comparisons,
+                top_n=3,
+            )
         if scope_prefix == "human_reference_vs_":
             tone_path = figures_dir / f"{base}_tone_alignment.png"
             path_map[f"{base}_tone_alignment"] = str(tone_path)
-            plot_tone_alignment(scoped_metrics_df, study, tone_path, dpi=dpi, export_pdf=export_pdf)
+            # Select comparisons for tone alignment figure: baselines + top 3 LLMs by macro_f1
+            tone_alignment_baseline_comparisons = ["human_reference_vs_questionnaire", "human_reference_vs_vader"]
+            plot_tone_alignment(
+                scoped_metrics_df,
+                study,
+                tone_path,
+                dpi=dpi,
+                export_pdf=export_pdf,
+                scope_prefix=scope_prefix,
+                baseline_comparisons=tone_alignment_baseline_comparisons,
+                top_n=3,
+            )
         scoped_paths.update(path_map)
 
     return scoped_paths
@@ -565,9 +819,10 @@ def _coverage_lines(summary: dict[str, Any]) -> list[str]:
 
 
 def _ranking_lines(comparison_summary: dict[str, Any]) -> list[str]:
+    # Sort by macro_f1 descending, then by comparison order for baselines
     ranking = sorted(
         comparison_summary.items(),
-        key=lambda item: (item[1]["cohen_kappa_mean"], item[1]["accuracy_mean"], item[1]["macro_f1_mean"]),
+        key=lambda item: (item[1]["macro_f1_mean"], item[1]["accuracy_mean"], item[1]["cohen_kappa_mean"]),
         reverse=True,
     )
     lines = ["## Global Results", "", "| Comparison | Fields | Mean Accuracy | Mean Kappa | Mean Macro F1 |", "| --- | ---: | ---: | ---: | ---: |"]
@@ -582,17 +837,23 @@ def _ranking_lines(comparison_summary: dict[str, Any]) -> list[str]:
 def _summary_table_lines(metrics_df: pd.DataFrame, title: str) -> list[str]:
     if metrics_df.empty:
         return [f"## {title}", "", "- No comparisons were available in this run.", ""]
+    # Compute mean metrics and field count per comparison
     grouped = (
-        metrics_df.groupby("comparison", as_index=False)[["accuracy", "cohen_kappa", "macro_f1"]]
-        .mean(numeric_only=True)
-        .copy()
+        metrics_df.groupby("comparison", as_index=False)
+        .agg(
+            fields=("field", "count"),
+            accuracy_mean=("accuracy", "mean"),
+            cohen_kappa_mean=("cohen_kappa", "mean"),
+            macro_f1_mean=("macro_f1", "mean"),
+        )
     )
-    grouped = grouped.sort_values("comparison", key=lambda s: s.map(_comparison_sort_key))
+    # Sort by macro_f1 descending
+    grouped = grouped.sort_values("macro_f1_mean", ascending=False, na_position="last")
     lines = [f"## {title}", "", "| Comparison | Fields | Mean Accuracy | Mean Kappa | Mean Macro F1 |", "| --- | ---: | ---: | ---: | ---: |"]
-    for comparison, group in metrics_df.groupby("comparison"):
-        row = grouped[grouped["comparison"] == comparison].iloc[0]
+    for _, row in grouped.iterrows():
+        comparison = row["comparison"]
         lines.append(
-            f"| {_comparison_label(comparison)} | {int(len(group))} | {float(row['accuracy']):.3f} | {float(row['cohen_kappa']):.3f} | {float(row['macro_f1']):.3f} |"
+            f"| {_comparison_label(comparison)} | {int(row['fields'])} | {float(row['accuracy_mean']):.3f} | {float(row['cohen_kappa_mean']):.3f} | {float(row['macro_f1_mean']):.3f} |"
         )
     lines.append("")
     return lines
@@ -607,8 +868,12 @@ def _family_summary_lines(family_df: pd.DataFrame, title: str) -> list[str]:
         "| Comparison | Family | Fields | Mean Kappa | Mean Macro F1 | Recall Yes | Prevalence Gap | Mean N |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
-    ordered = family_df.sort_values(["comparison", "family"], key=lambda col: col.map(_comparison_sort_key) if col.name == "comparison" else col.map(_family_sort_key))
-    for _, row in ordered.iterrows():
+    # Sort by macro_f1 descending, then by comparison order, then by family order
+    family_df = family_df.copy()
+    family_df["_sort_key"] = family_df["comparison"].map(_comparison_sort_key)
+    family_df = family_df.sort_values(["_sort_key", "macro_f1_mean", "family"], ascending=[True, False, False])
+    family_df = family_df.drop(columns=["_sort_key"])
+    for _, row in family_df.iterrows():
         lines.append(
             f"| {_comparison_label(str(row['comparison']))} | {str(row['family_label'])} | {int(row['field_count'])} | {float(row['cohen_kappa_mean']):.3f} | {float(row['macro_f1_mean']):.3f} | {float(row['recall_yes_mean']):.3f} | {float(row['prevalence_gap_yes_mean']):.3f} | {float(row['n_mean']):.1f} |"
         )
@@ -729,7 +994,6 @@ def _metric_toggle_lines(metrics_df: pd.DataFrame) -> list[str]:
         .copy()
     )
     grouped["error_rate"] = 1.0 - grouped["accuracy"]
-    grouped = grouped.sort_values("comparison", key=lambda s: s.map(_comparison_sort_key))
 
     lines = [
         "## Quick Metric Controls",
@@ -750,7 +1014,7 @@ def _metric_toggle_lines(metrics_df: pd.DataFrame) -> list[str]:
         ("metric-error-rate", "Error rate", "error_rate"),
     ]
     for anchor, title, column in metric_sections:
-        section = grouped.sort_values(column, ascending=False)
+        section = grouped.sort_values(column, ascending=False, na_position="last")
         lines.extend(
             [
                 f"### <a id=\"{anchor}\"></a>{title}",
@@ -767,7 +1031,13 @@ def _metric_toggle_lines(metrics_df: pd.DataFrame) -> list[str]:
 
 def _field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig) -> list[str]:
     lines = ["## Item-Level Detail", "", "The tables below retain the fine-grained item evidence after the general and family-level summaries.", ""]
-    for comparison in sorted(metrics_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key):
+    # Sort comparisons by macro_f1 descending
+    comparison_means = (
+        metrics_df.groupby("comparison", as_index=False)["macro_f1"]
+        .mean(numeric_only=True)
+        .sort_values("macro_f1", ascending=False, na_position="last")
+    )
+    for comparison in comparison_means["comparison"].tolist():
         subset = metrics_df[metrics_df["comparison"] == comparison].copy().sort_values("field")
         accordion_open = _comparison_tab(comparison) in {"human_vs_all", "questionnaire_vs_automated"}
         lines.append("<details open>" if accordion_open else "<details>")
@@ -788,7 +1058,13 @@ def _compact_field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig, he
     if metrics_df.empty:
         lines.extend(["- No comparisons were available in this run.", ""])
         return lines
-    for comparison in sorted(metrics_df["comparison"].drop_duplicates().tolist(), key=_comparison_sort_key):
+    # Sort comparisons by macro_f1 descending
+    comparison_means = (
+        metrics_df.groupby("comparison", as_index=False)["macro_f1"]
+        .mean(numeric_only=True)
+        .sort_values("macro_f1", ascending=False, na_position="last")
+    )
+    for comparison in comparison_means["comparison"].tolist():
         subset = metrics_df[metrics_df["comparison"] == comparison].copy().sort_values(["field"])
         lines.extend([
             f"### <a id=\"comparison-{comparison}\"></a>{_comparison_label(comparison)}",
@@ -845,15 +1121,12 @@ def write_alignment_report_for_scope(
                 "",
             ]
         )
-    lines.extend(_summary_table_lines(metrics_df, "General Results"))
-    lines.extend(_family_summary_lines(family_df, "Family-Level Results"))
-    if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
-        lines.extend(_questionnaire_interpretation_lines(family_df))
+    # Figures first, then tables
     lines.extend(
         [
             "## Figures",
             "",
-            "The figures below follow the same hierarchy as the report: overall comparison first, then family-level comparison, then detailed heatmaps.",
+            "The figures below show baseline comparisons plus the top 3 LLMs ranked by macro F1.",
             "",
             f"![Overall comparison summary]({Path(figure_paths[f'{figure_prefix}_comparison_summary']).relative_to(output_dir).as_posix()})",
             "",
@@ -861,6 +1134,10 @@ def write_alignment_report_for_scope(
             "",
         ]
     )
+    lines.extend(_summary_table_lines(metrics_df, "General Results"))
+    lines.extend(_family_summary_lines(family_df, "Family-Level Results"))
+    if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
+        lines.extend(_questionnaire_interpretation_lines(family_df))
     tone_lines = ["#### Tone", "", f"![Tone summary]({Path(figure_paths[f'{figure_prefix}_tone_summary']).relative_to(output_dir).as_posix()})", ""]
     if figure_prefix == "human":
         tone_lines.extend(
@@ -878,9 +1155,12 @@ def write_alignment_report_for_scope(
                 "",
             ]
         )
+    # Detailed heatmaps (also filtered to baselines + top 3 LLMs)
     lines.extend(
         [
-            "### Detailed heatmaps",
+            "## Detailed Heatmaps",
+            "",
+            "These heatmaps show the same filtered comparisons: baseline(s) plus top 3 LLMs ranked by macro F1.",
             "",
             *tone_lines,
             "#### M8",

@@ -30,6 +30,11 @@ def _is_blank(value: object) -> bool:
     return pd.isna(value) or str(value).strip() == ""
 
 
+def _safe_divide(numerator: float, denominator: float) -> float:
+    """Safely divide two numbers, returning NaN if denominator is zero."""
+    return numerator / denominator if denominator else float("nan")
+
+
 def _normalize_identifier(value: str) -> str:
     cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in value.strip())
     while "__" in cleaned:
@@ -432,9 +437,9 @@ def binary_positive_metrics(y_true: pd.Series, y_pred: pd.Series, positive_label
     tp = int(((y_true == positive_label) & (y_pred == positive_label)).sum())
     fp = int(((y_true != positive_label) & (y_pred == positive_label)).sum())
     fn = int(((y_true == positive_label) & (y_pred != positive_label)).sum())
-    precision = tp / (tp + fp) if (tp + fp) else float("nan")
-    recall = tp / (tp + fn) if (tp + fn) else float("nan")
-    f1 = (2 * precision * recall) / (precision + recall) if not (pd.isna(precision) or pd.isna(recall) or (precision + recall) == 0) else float("nan")
+    precision = _safe_divide(tp, tp + fp)
+    recall = _safe_divide(tp, tp + fn)
+    f1 = _safe_divide(2 * precision * recall, precision + recall)
     prevalence_reference = float((y_true == positive_label).mean()) if len(y_true) else float("nan")
     prevalence_candidate = float((y_pred == positive_label).mean()) if len(y_pred) else float("nan")
     return {
