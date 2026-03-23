@@ -79,6 +79,8 @@ Local runtime settings are split by purpose in [`config/paths.local.toml`](confi
 
 For the practical LLM setup, smoke-test flow, prompt variants layout, and full run instructions, see [LLM Workflow](docs/llm_workflow.md).
 
+For the optional external baseline validation pipeline (Amazon download, normalization, benchmark run, and benchmark report), see [Benchmark Workflow](docs/benchmark_workflow.md).
+
 ## User Options
 
 You now have two valid ways to work.

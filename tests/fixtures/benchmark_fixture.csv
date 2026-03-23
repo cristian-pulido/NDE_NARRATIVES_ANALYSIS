@@ -1,0 +1,7 @@
+record_id,text,gold_label
+amazon_0000001,"I love this product, it works perfectly and exceeded expectations.",positive
+amazon_0000002,"The quality is disappointing and I want a refund.",negative
+amazon_0000003,"It arrived on time and matches the description.",neutral
+amazon_0000004,"Absolutely fantastic quality and very useful every day.",positive
+amazon_0000005,"This was a waste of money and support was unhelpful.",negative
+amazon_0000006,"The item is fine, nothing special but acceptable.",neutral

@@ -144,6 +144,8 @@ def assign_participant_codes(df: pd.DataFrame, study: StudyConfig) -> pd.DataFra
             raise ValueError("Could not assign unique participant_code values after expanding the stable hash width.")
         stable_width = min(stable_width + 4, SHA1_HEX_LENGTH)
 
+    if "participant_code" in out.columns:
+        out = out.drop(columns=["participant_code"])
     out.insert(0, "participant_code", codes)
     return out
 

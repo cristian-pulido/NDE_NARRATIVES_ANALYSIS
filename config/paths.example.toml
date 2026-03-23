@@ -10,6 +10,11 @@ survey_csv = "D:/data/nde/results-survey.csv"
 # evaluation_output_dir = "D:/data/nde/evaluation_outputs"
 # preprocessing_output_dir = "D:/data/nde/preprocessing_outputs"
 # prompt_variants_dir = "D:/data/nde/prompt_variants"
+# benchmark_raw_dir = "D:/data/nde/benchmark/raw"
+# benchmark_processed_dir = "D:/data/nde/benchmark/processed"
+# benchmark_runs_dir = "D:/data/nde/benchmark/runs"
+# benchmark_reports_dir = "D:/data/nde/benchmark/reports"
+# benchmark_prompt_variants_dir = "D:/data/nde/benchmark/prompt_variants"
 # sampled_private_workbook = "D:/data/nde/annotation_outputs/nde_annotation_mapping_private.xlsx"
 # human_annotation_workbook = "D:/data/nde/human_annotations/nde_annotation_sample_completed.xlsx"
 # llm_predictions_path = "D:/data/nde/llm_outputs/nde_predictions.jsonl"
@@ -36,6 +41,31 @@ chars_per_token = 4.0
 
 [[llm.experiments]]
 experiment_id = "qwen25_baseline"
+enabled = true
+model = "qwen2.5:7b"
+prompt_variant = "baseline"
+run_id = "run-01"
+model_variant = "qwen2.5:7b"
+temperature = 0.0
+
+[benchmark.runtime]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+
+[benchmark.dataset]
+dataset_name = "SetFit/amazon_reviews_multi_en"
+dataset_config = ""
+split = "train"
+text_column = "text"
+label_column = "label"
+max_rows = 2000
+random_state = 20
+
+[[benchmark.experiments]]
+experiment_id = "amazon_qwen25_baseline"
 enabled = true
 model = "qwen2.5:7b"
 prompt_variant = "baseline"
