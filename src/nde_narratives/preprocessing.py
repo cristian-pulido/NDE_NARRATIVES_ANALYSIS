@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -127,6 +128,40 @@ def _render_resegment_prompt(row: pd.Series, study: StudyConfig, prompt_root: Pa
     return template.replace("{{merged_text}}", merged)
 
 
+def _estimate_prompt_tokens(prompt: str, chars_per_token: float) -> int:
+    safe_chars_per_token = max(float(chars_per_token), 0.1)
+    return max(1, int(math.ceil(len(prompt) / safe_chars_per_token)))
+
+
+def _resolve_dynamic_num_ctx(prompt: str, preprocessing: PreprocessingConfig) -> int | None:
+    dynamic_enabled = bool(getattr(preprocessing, "dynamic_context_enabled", True))
+    if not dynamic_enabled:
+        return None
+    chars_per_token = float(getattr(preprocessing, "chars_per_token", 4.0))
+    estimated_tokens = _estimate_prompt_tokens(prompt, chars_per_token)
+    target_tokens = estimated_tokens + 1024
+    minimum = int(getattr(preprocessing, "num_ctx_min", 4096))
+    maximum = int(getattr(preprocessing, "num_ctx_max", 16384))
+    if target_tokens <= minimum:
+        return minimum
+    bucket = minimum
+    while bucket < target_tokens and bucket < maximum:
+        bucket *= 2
+    return min(bucket, maximum)
+
+
+def _build_request_metadata(prompt: str, preprocessing: PreprocessingConfig) -> dict[str, Any]:
+    chars_per_token = float(getattr(preprocessing, "chars_per_token", 4.0))
+    metadata = {
+        "prompt_chars": len(prompt),
+        "prompt_tokens_estimate": _estimate_prompt_tokens(prompt, chars_per_token),
+    }
+    dynamic_num_ctx = _resolve_dynamic_num_ctx(prompt, preprocessing)
+    if dynamic_num_ctx is not None:
+        metadata["num_ctx"] = dynamic_num_ctx
+    return metadata
+
+
 def _base_record(row: pd.Series, study: StudyConfig) -> dict[str, Any]:
     participant_code = row.get("participant_code")
     if participant_code is None and getattr(row, "name", None) is not None:
@@ -215,13 +250,15 @@ def _process_row(
         }
         return updated, raw_responses, errors
 
+    validation_prompt = _render_validation_prompt(row, study, prompt_root)
     validation_request = LLMRequest(
         participant_code=str(row["participant_code"]),
         section="preprocess_validate",
-        prompt=_render_validation_prompt(row, study, prompt_root),
+        prompt=validation_prompt,
         response_schema=validation_schema,
         model=str(preprocessing.model),
         temperature=preprocessing.temperature,
+        metadata=_build_request_metadata(validation_prompt, preprocessing),
     )
 
     try:
@@ -233,6 +270,7 @@ def _process_row(
                 "stage": "validation",
                 "raw_text": validation_response.raw_text,
                 "provider_metadata": validation_response.metadata,
+                "request_metadata": validation_request.metadata,
             }
         )
         parsed_validation = parse_structured_response(validation_response.raw_text, validation_schema)
@@ -252,6 +290,7 @@ def _process_row(
                 "stage": "validation",
                 "error_type": type(exc).__name__,
                 "error_message": str(exc),
+                "request_metadata": validation_request.metadata,
                 "updated_at": _utc_now(),
             }
         )
@@ -283,13 +322,15 @@ def _process_row(
             "updated_at": _utc_now(),
         }, raw_responses, errors
 
+    resegment_prompt = _render_resegment_prompt(row, study, prompt_root)
     resegment_request = LLMRequest(
         participant_code=str(row["participant_code"]),
         section="preprocess_resegment",
-        prompt=_render_resegment_prompt(row, study, prompt_root),
+        prompt=resegment_prompt,
         response_schema=resegmentation_schema,
         model=str(preprocessing.model),
         temperature=preprocessing.temperature,
+        metadata=_build_request_metadata(resegment_prompt, preprocessing),
     )
     try:
         resegment_response = provider.generate_structured(resegment_request)
@@ -300,6 +341,7 @@ def _process_row(
                 "stage": "resegmentation",
                 "raw_text": resegment_response.raw_text,
                 "provider_metadata": resegment_response.metadata,
+                "request_metadata": resegment_request.metadata,
             }
         )
         parsed_resegmentation = parse_structured_response(resegment_response.raw_text, resegmentation_schema)
@@ -341,6 +383,7 @@ def _process_row(
                 "stage": "resegmentation",
                 "error_type": type(exc).__name__,
                 "error_message": str(exc),
+                "request_metadata": resegment_request.metadata,
                 "updated_at": _utc_now(),
             }
         )

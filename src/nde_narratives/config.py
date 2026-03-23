@@ -210,6 +210,10 @@ class PreprocessingConfig:
     temperature: float = 0.0
     model: str | None = None
     prompt_version: str = "v1"
+    dynamic_context_enabled: bool = True
+    num_ctx_min: int = 4096
+    num_ctx_max: int = 16384
+    chars_per_token: float = 4.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -220,6 +224,10 @@ class PreprocessingConfig:
             "temperature": self.temperature,
             "model": self.model,
             "prompt_version": self.prompt_version,
+            "dynamic_context_enabled": self.dynamic_context_enabled,
+            "num_ctx_min": self.num_ctx_min,
+            "num_ctx_max": self.num_ctx_max,
+            "chars_per_token": self.chars_per_token,
         }
 
 
@@ -433,7 +441,17 @@ def load_preprocessing_config(path: str | Path | None = None) -> PreprocessingCo
         temperature=_coerce_float(preprocessing_raw.get("temperature"), 0.0),
         model=(str(preprocessing_raw["model"]) if preprocessing_raw.get("model") is not None else None),
         prompt_version=_coerce_str(preprocessing_raw.get("prompt_version"), "v1"),
+        dynamic_context_enabled=_coerce_bool(preprocessing_raw.get("dynamic_context_enabled"), True),
+        num_ctx_min=_coerce_int(preprocessing_raw.get("num_ctx_min"), 4096),
+        num_ctx_max=_coerce_int(preprocessing_raw.get("num_ctx_max"), 16384),
+        chars_per_token=_coerce_float(preprocessing_raw.get("chars_per_token"), 4.0),
     )
     if config.max_attempts < 1:
         raise ValueError(f"preprocessing.max_attempts must be >= 1 in {resolved}")
+    if config.num_ctx_min < 1:
+        raise ValueError(f"preprocessing.num_ctx_min must be >= 1 in {resolved}")
+    if config.num_ctx_max < config.num_ctx_min:
+        raise ValueError(f"preprocessing.num_ctx_max must be >= preprocessing.num_ctx_min in {resolved}")
+    if config.chars_per_token <= 0:
+        raise ValueError(f"preprocessing.chars_per_token must be > 0 in {resolved}")
     return config
