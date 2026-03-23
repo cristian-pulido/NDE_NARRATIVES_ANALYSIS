@@ -3,39 +3,54 @@
   "title": "nde_aftereffects_output",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "aftereffects_tone",
-    "m9_moral_rules",
-    "m9_long_term_thinking",
-    "m9_consider_others",
-    "m9_help_others",
-    "m9_forgiveness"
-  ],
+  "required": ["aftereffects"],
   "properties": {
-    "aftereffects_tone": {
-      "type": "string",
-      "enum": ["positive", "negative", "mixed"]
-    },
-    "m9_moral_rules": {
-      "type": "string",
-      "enum": ["yes", "no"]
-    },
-    "m9_long_term_thinking": {
-      "type": "string",
-      "enum": ["yes", "no"]
-    },
-    "m9_consider_others": {
-      "type": "string",
-      "enum": ["yes", "no"]
-    },
-    "m9_help_others": {
-      "type": "string",
-      "enum": ["yes", "no"]
-    },
-    "m9_forgiveness": {
-      "type": "string",
-      "enum": ["yes", "no"]
+    "aftereffects": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tone",
+        "evidence_segments",
+        "m9_moral_rules",
+        "m9_long_term_thinking",
+        "m9_consider_others",
+        "m9_help_others",
+        "m9_forgiveness"
+      ],
+      "properties": {
+        "tone": {
+          "type": "string",
+          "enum": ["positive", "negative", "mixed", "neutral"]
+        },
+        "evidence_segments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "m9_moral_rules": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "m9_long_term_thinking": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "m9_consider_others": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "m9_help_others": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "m9_forgiveness": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        }
+      }
     }
   }
 }
-

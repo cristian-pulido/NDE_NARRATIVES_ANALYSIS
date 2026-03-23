@@ -70,7 +70,7 @@ The preprocessing prompts are intentionally separate from downstream analysis pr
 
 ## Allowed Values
 
-- Tone fields: `positive`, `negative`, `mixed`
+- Tone fields: `positive`, `negative`, `mixed`, `neutral`
 - Binary fields: `yes`, `no`
 
 ## Human Annotation Artifact Contract
@@ -158,7 +158,46 @@ Supported artifact formats remain:
 - `.xlsx`
 - `.xls`
 
-For JSONL, the record may either expose normalized fields directly or wrap them under a `prediction` object. In both cases, keys must follow the shared field names above.
+For JSONL, records may be provided in one of these contracts:
+
+1. **Nested section contract (current)**
+
+```json
+{
+  "participant_code": "ANN_XXXX",
+  "prediction": {
+    "context": {
+      "tone": "neutral",
+      "evidence_segments": ["short verbatim span"]
+    },
+    "experience": {
+      "tone": "positive",
+      "evidence_segments": ["short verbatim span"],
+      "m8_out_of_body": "no",
+      "m8_bright_light": "yes",
+      "m8_peace": "yes",
+      "m8_time_distortion": "no",
+      "m8_presence": "no"
+    },
+    "aftereffects": {
+      "tone": "mixed",
+      "evidence_segments": ["short verbatim span"],
+      "m9_moral_rules": "yes",
+      "m9_long_term_thinking": "yes",
+      "m9_consider_others": "yes",
+      "m9_help_others": "yes",
+      "m9_forgiveness": "no"
+    }
+  }
+}
+```
+
+2. **Legacy flat contract (still accepted by evaluation loader)**
+
+- top-level/shared field keys directly in each record
+- or a top-level `prediction` object containing shared field keys
+
+In both cases, `nde evaluate` normalizes to shared internal columns before metrics are computed.
 
 Each candidate artifact is validated independently. Invalid artifacts are reported in `llm_artifacts_manifest.json` and skipped.
 

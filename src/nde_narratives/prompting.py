@@ -32,9 +32,7 @@ def resolve_prompt_root(
             candidate = project_root / "prompts" / prompt_variant
         if candidate.exists():
             return candidate
-    if analysis_root.exists():
-        return analysis_root
-    return project_root / "prompts"
+    return analysis_root
 
 
 def load_prompt_template(

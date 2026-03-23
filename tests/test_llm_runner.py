@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -25,7 +26,7 @@ from tests.cli_helpers import (
 
 
 class FakeProvider:
-    def __init__(self, predictions_by_key: dict[tuple[str, str], dict[str, str]], invalid_once: set[tuple[str, str]] | None = None) -> None:
+    def __init__(self, predictions_by_key: dict[tuple[str, str], dict[str, Any]], invalid_once: set[tuple[str, str]] | None = None) -> None:
         self.predictions_by_key = predictions_by_key
         self.invalid_once = invalid_once or set()
         self.calls: dict[tuple[str, str], int] = defaultdict(int)
@@ -45,7 +46,7 @@ class FakeProvider:
 
 
 class InterruptingProvider(FakeProvider):
-    def __init__(self, predictions_by_key: dict[tuple[str, str], dict[str, str]], *, interrupt_on_call: int) -> None:
+    def __init__(self, predictions_by_key: dict[tuple[str, str], dict[str, Any]], *, interrupt_on_call: int) -> None:
         super().__init__(predictions_by_key)
         self.interrupt_on_call = interrupt_on_call
         self.total_calls = 0
@@ -108,19 +109,21 @@ temperature = 0.0
 '''
 
 
-def _prediction_payloads(study, source_df: pd.DataFrame) -> dict[tuple[str, str], dict[str, str]]:
+def _prediction_payloads(study, source_df: pd.DataFrame) -> dict[tuple[str, str], dict[str, Any]]:
     fixture = pd.read_csv(FIXTURES / "llm_predictions_fixture.csv").set_index("response_id")
-    payloads: dict[tuple[str, str], dict[str, str]] = {}
+    payloads: dict[tuple[str, str], dict[str, Any]] = {}
     for _, row in source_df.iterrows():
         participant_code = row["participant_code"]
         prediction_row = fixture.loc[row[study.id_column]]
         for section_name in study.section_order:
             section = study.sections[section_name]
-            payload: dict[str, str] = {
-                section.tone_internal_column: str(prediction_row[section.tone_internal_column]),
+            section_payload: dict[str, Any] = {
+                "tone": str(prediction_row[section.tone_internal_column]),
+                "evidence_segments": [f"fixture evidence for {section_name}"],
             }
             for column in section.binary_labels:
-                payload[column] = str(prediction_row[column])
+                section_payload[column] = str(prediction_row[column])
+            payload = {section_name: section_payload}
             payloads[(participant_code, section_name)] = payload
     return payloads
 
@@ -473,11 +476,11 @@ def test_load_batch_source_excludes_preprocessed_rows_marked_to_drop(tmp_path: P
 
 def test_ollama_provider_accepts_structured_output_in_thinking() -> None:
     payload = {
-        "thinking": '{\n  "context_tone": "positive"\n}',
+        "thinking": '{\n  "context": {\n    "tone": "neutral",\n    "evidence_segments": ["The report describes events in sequence."]\n  }\n}',
         "response": "",
     }
 
     raw_text, source_field = OllamaProvider._extract_raw_text(payload)
 
     assert source_field == "thinking"
-    assert '"context_tone": "positive"' in raw_text
+    assert '"tone": "neutral"' in raw_text
