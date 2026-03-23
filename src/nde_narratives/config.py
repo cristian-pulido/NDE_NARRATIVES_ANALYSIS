@@ -14,6 +14,7 @@ DEFAULT_PATH_LAYOUT = {
     "llm_batch_dir": "llm_batches",
     "llm_results_dir": "llm_outputs",
     "evaluation_output_dir": "evaluation_outputs",
+    "preprocessing_output_dir": "preprocessing_outputs",
     "prompt_variants_dir": "prompt_variants",
     "sampled_private_workbook": "annotation_outputs/nde_annotation_mapping_private.xlsx",
     "human_annotation_workbook": "human_annotations/nde_annotation_sample_completed.xlsx",
@@ -132,6 +133,7 @@ class PathsConfig:
     annotation_output_dir: Path
     llm_batch_dir: Path
     evaluation_output_dir: Path
+    preprocessing_output_dir: Path
     human_annotations_dir: Path
     llm_results_dir: Path
     sampled_private_workbook: Path
@@ -196,6 +198,29 @@ class LLMConfig:
     path: Path
     runtime: LLMRuntimeConfig
     experiments: list[LLMExperimentConfig]
+
+
+@dataclass(frozen=True)
+class PreprocessingConfig:
+    path: Path
+    provider: str = "ollama"
+    base_url: str = "http://localhost:11434"
+    timeout_seconds: int = 120
+    max_attempts: int = 2
+    temperature: float = 0.0
+    model: str | None = None
+    prompt_version: str = "v1"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "timeout_seconds": self.timeout_seconds,
+            "max_attempts": self.max_attempts,
+            "temperature": self.temperature,
+            "model": self.model,
+            "prompt_version": self.prompt_version,
+        }
 
 
 @dataclass(frozen=True)
@@ -302,6 +327,7 @@ def load_paths_config(path: str | Path | None = None) -> PathsConfig:
     annotation_output_dir = _path_with_default(paths, "annotation_output_dir", base_dir, default_base)
     llm_batch_dir = _path_with_default(paths, "llm_batch_dir", base_dir, default_base)
     evaluation_output_dir = _path_with_default(paths, "evaluation_output_dir", base_dir, default_base)
+    preprocessing_output_dir = _path_with_default(paths, "preprocessing_output_dir", base_dir, default_base)
     human_annotations_dir = _path_with_default(paths, "human_annotations_dir", base_dir, default_base)
     llm_results_dir = _path_with_default(paths, "llm_results_dir", base_dir, default_base)
     sampled_private_workbook = _path_with_default(paths, "sampled_private_workbook", base_dir, default_base)
@@ -315,6 +341,7 @@ def load_paths_config(path: str | Path | None = None) -> PathsConfig:
         annotation_output_dir=annotation_output_dir,
         llm_batch_dir=llm_batch_dir,
         evaluation_output_dir=evaluation_output_dir,
+        preprocessing_output_dir=preprocessing_output_dir,
         human_annotations_dir=human_annotations_dir,
         llm_results_dir=llm_results_dir,
         sampled_private_workbook=sampled_private_workbook,
@@ -390,3 +417,23 @@ def load_llm_config(path: str | Path | None = None) -> LLMConfig:
             )
         )
     return LLMConfig(path=resolved, runtime=runtime, experiments=experiments)
+
+
+def load_preprocessing_config(path: str | Path | None = None) -> PreprocessingConfig:
+    resolved = Path(path or default_paths_config_path()).resolve()
+    raw = _load_toml(resolved)
+    preprocessing_raw = dict(raw.get("preprocessing", {}))
+
+    config = PreprocessingConfig(
+        path=resolved,
+        provider=_coerce_str(preprocessing_raw.get("provider"), "ollama"),
+        base_url=_coerce_str(preprocessing_raw.get("base_url"), "http://localhost:11434"),
+        timeout_seconds=_coerce_int(preprocessing_raw.get("timeout_seconds"), 120),
+        max_attempts=_coerce_int(preprocessing_raw.get("max_attempts"), 2),
+        temperature=_coerce_float(preprocessing_raw.get("temperature"), 0.0),
+        model=(str(preprocessing_raw["model"]) if preprocessing_raw.get("model") is not None else None),
+        prompt_version=_coerce_str(preprocessing_raw.get("prompt_version"), "v1"),
+    )
+    if config.max_attempts < 1:
+        raise ValueError(f"preprocessing.max_attempts must be >= 1 in {resolved}")
+    return config

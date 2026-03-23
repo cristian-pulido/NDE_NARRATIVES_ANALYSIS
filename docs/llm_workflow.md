@@ -24,20 +24,21 @@ pip install -e .[dev]
 cp config/paths.example.toml config/paths.local.toml
 ```
 
-Then edit `config/paths.local.toml`:
+Then edit [`config/paths.local.toml`](config/paths.local.toml):
 
 - set `[paths].data_dir`
 - set `[paths].survey_csv`
 - confirm or override the derived output folders if needed
-- add the `[llm]` and `[[llm.experiments]]` blocks described below
+- add the `[preprocessing]` block for one-time cleaning
+- add the `[llm]` and `[[llm.experiments]]` blocks for downstream analysis experiments
 
 If your study config still contains questionnaire placeholder columns, replace them in `config/study.toml` before running the CLI.
 
 After the environment is active, the commands below use `nde ...`. If your shell does not expose that entrypoint, use `python -m nde_narratives.cli ...` on Windows or `python3 -m nde_narratives.cli ...` on Linux/macOS.
 
-## 2. Configure Ollama and Experiments
+## 2. Configure Preprocessing and Analysis Models
 
-The runtime configuration and experiment registry live in `config/paths.local.toml`.
+The runtime configuration lives in [`config/paths.local.toml`](config/paths.local.toml), but preprocessing and analysis are intentionally separate.
 
 Example:
 
@@ -45,6 +46,15 @@ Example:
 [paths]
 data_dir = "D:/data/nde"
 survey_csv = "D:/data/nde/results-survey.csv"
+
+[preprocessing]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+model = "qwen3.5:latest"
+prompt_version = "v1"
 
 [llm]
 provider = "ollama"
@@ -74,13 +84,58 @@ temperature = 0.0
 
 Important notes:
 
+- [`nde preprocess`](src/nde_narratives/cli.py:202) is the canonical one-time cleaning step and does not use analysis experiments.
+- `[preprocessing]` should describe the single model configuration used to create the cleaned dataset.
 - `source = "survey"` means the runner uses the survey CSV, not the human annotation sample.
 - If you want to run only the generated validation sample, set `source = "sampled-private"` instead. That makes `run-llm` use `sampled_private_workbook`, which is the same sample used by the human validation workflow.
 - `all_records = false` means it applies the study-level row filters by default.
 - Each experiment should have its own `experiment_id` or `run_id` so artifacts stay traceable.
 - Use one experiment for smoke tests and a different one for the full run.
 
-## 3. Validate the Setup
+## 3. Run Preprocessing First
+
+Before running any downstream analysis, generate the cleaned narrative dataset:
+
+```bash
+nde preprocess
+```
+
+Optional validation sample generation:
+
+```bash
+nde preprocess --generate-validation-sample --validation-n-total 25
+```
+
+If you want to discard the existing preprocessing state and rebuild everything from zero in the same output folder:
+
+```bash
+nde preprocess --from-scratch
+```
+
+This stage:
+
+- validates whether each original section matches the questionnaire structure
+- resegments only the rows that need correction
+- keeps resumable ledgers and error files on disk
+- writes a cleaned dataset copy without modifying the source file
+- accepts partially populated originals by default, as long as at least one narrative section contains meaningful text
+
+Important output columns in the cleaned dataset:
+
+- `n_valid_sections_original`: sections judged valid before correction
+- `n_valid_sections_cleaned`: non-empty sections available after cleaning
+- `n_valid_sections`: same as `n_valid_sections_cleaned` for compatibility
+
+Important run summary fields:
+
+- `n_rows_with_3_valid_sections_original`
+- `n_rows_with_3_valid_sections_cleaned`
+
+These make it explicit how many rows already had 3 usable sections before preprocessing and how many ended with 3 usable sections after preprocessing.
+
+The preprocessing prompts live under [`prompts/preprocessing/`](prompts/preprocessing/), while downstream analysis prompts live under [`prompts/analysis/`](prompts/analysis/).
+
+## 4. Validate the Setup
 
 Run:
 
@@ -90,12 +145,18 @@ nde validate-config
 
 This checks the study config, the source CSV, the path config, and the LLM configuration block.
 
-## 4. Run a Small Smoke Test
+## 5. Run a Small Smoke Test
 
 Before running the full dataset, execute a tiny subset:
 
 ```bash
 nde run-llm --experiment-id smoke_qwen08 --limit 2
+```
+
+If [`cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:504) exists in `preprocessing_output_dir`, [`nde run-llm`](src/nde_narratives/cli.py:402) now uses it automatically when the LLM source is `survey`. In that auto-detected cleaned-dataset path, downstream loading keeps rows based on post-preprocessing validity instead of the raw strict completeness rule: by default it excludes rows with fewer than 3 cleaned sections and excludes rows where `TO_DROP == True`. [`--min-valid-sections`](src/nde_narratives/cli.py:454) still overrides the section threshold when you need a different cutoff:
+
+```bash
+nde run-llm --experiment-id smoke_qwen08 --min-valid-sections 3
 ```
 
 This is the recommended first test because it:
@@ -114,7 +175,7 @@ source = "sampled-private"
 
 Then run the same command with `--limit`.
 
-## 5. Understand the Output
+## 6. Understand the Output
 
 Each experiment is written under:
 
@@ -149,7 +210,7 @@ For smoke tests, `run_summary.json` is the fastest file to inspect:
 - `status_counts.failed > 0` means you should inspect `errors.jsonl`
 - `raw_responses.jsonl` may still be empty if the provider failed before the runner accepted any model text as a valid candidate response
 
-## 6. Run the Full Experiment
+## 7. Run the Full Experiment
 
 Once the smoke test looks good:
 
@@ -169,7 +230,7 @@ If you need to force another pass on exhausted rows:
 nde run-llm --experiment-id baseline_qwen35 --retry-exhausted
 ```
 
-## 7. Evaluate the Results
+## 8. Evaluate the Results
 
 After human annotations and LLM outputs are available:
 
@@ -179,9 +240,9 @@ nde evaluate --experiment-id baseline_qwen35
 
 Evaluation still compares automated outputs only against the adjudicated human subset.
 
-## 8. Prompt Variants
+## 9. Prompt Variants
 
-By default, prompts are loaded from the repository `prompts/` folder.
+By default, downstream analysis prompts are loaded from [`prompts/analysis/`](prompts/analysis/).
 
 If you define `prompt_variant = "baseline_v2"` in an experiment, the CLI first looks for:
 
@@ -211,7 +272,7 @@ D:/data/nde/prompt_variants/baseline_v2/experience_prompt.md
 D:/data/nde/prompt_variants/baseline_v2/aftereffects_prompt.md
 ```
 
-## 9. Optional Low-Level Debugging
+## 10. Optional Low-Level Debugging
 
 If you want to inspect the rendered prompts and per-section batch records without calling the model:
 
@@ -221,7 +282,7 @@ nde build-llm-batch --source survey --experiment-id debug_batch --run-id run01 -
 
 This is useful for prompt inspection, but for normal use `run-llm` is the primary entrypoint.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### Smoke test ran but every section failed
 

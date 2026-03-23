@@ -13,16 +13,14 @@ from .config import (
     default_study_config_path,
     load_llm_config,
     load_paths_config,
+    load_preprocessing_config,
     load_study_config,
 )
 from .constants import PROJECT_ROOT
-from .evaluation import evaluate_outputs
 from .excel import write_annotation_outputs
 from .io_utils import read_tabular_file
-from .llm_runner import run_llm_experiments
 from .prompting import write_llm_batches
 from .sampling import create_annotation_frames
-from .vader_analysis import run_vader_sensitivity
 
 
 ANSI_RESET = "\033[0m"
@@ -161,6 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
             """\
             Common entry points:
               nde validate-config
+              nde preprocess
               nde build-annotation-sample
               nde run-llm --experiment-id smoke_qwen08 --limit 2
               nde run-llm --all-experiments
@@ -195,6 +194,88 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_config_arguments(validate)
     validate.set_defaults(handler=cmd_validate_config)
+
+    preprocess = subparsers.add_parser(
+        "preprocess",
+        formatter_class=NDEHelpFormatter,
+        help="Run the narrative preprocessing pipeline and write a cleaned dataset copy.",
+        description=dedent(
+            """\
+            Validate narrative section structure with the configured preprocessing model,
+            re-segment invalid cases, resume prior failures, and write a cleaned dataset
+            copy without modifying the original source file.
+            """
+        ),
+        epilog=_examples_block(
+            "nde preprocess",
+            "nde preprocess --limit 10",
+            "nde preprocess --retry-exhausted",
+            "nde preprocess --generate-validation-sample --validation-n-total 20",
+        ),
+    )
+    _add_config_arguments(preprocess)
+    source_group = preprocess.add_argument_group("Source And Scope")
+    source_group.add_argument(
+        "--input-path",
+        metavar="PATH",
+        default=None,
+        help="Explicit tabular input file path that overrides the configured survey source.",
+    )
+    source_group.add_argument(
+        "--limit",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Limit the number of source rows for debugging or smoke tests.",
+    )
+    source_group.add_argument(
+        "--all-records",
+        action="store_true",
+        help="Bypass study-level row filters and process every source row.",
+    )
+    execution_group = preprocess.add_argument_group("Execution Controls")
+    execution_group.add_argument(
+        "--retry-exhausted",
+        action="store_true",
+        help="Retry rows already marked as exhausted instead of leaving them untouched.",
+    )
+    execution_group.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help="Delete any existing preprocessing ledger state in the target output directory and rebuild the run from zero.",
+    )
+    execution_group.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Write preprocessing artifacts to this directory instead of preprocessing_output_dir.",
+    )
+    validation_group = preprocess.add_argument_group("Optional Validation Sample")
+    validation_group.add_argument(
+        "--generate-validation-sample",
+        action="store_true",
+        help="Generate a human-review sample from the cleaned preprocessing outputs.",
+    )
+    validation_group.add_argument(
+        "--validation-n-total",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Override the total number of rows to include in the validation sample.",
+    )
+    validation_group.add_argument(
+        "--validation-random-state",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Random seed for reproducible validation sample selection.",
+    )
+    validation_group.add_argument(
+        "--force-validation-sample",
+        action="store_true",
+        help="Overwrite any existing preprocessing validation sample files.",
+    )
+    preprocess.set_defaults(handler=cmd_preprocess)
 
     build_annotation = subparsers.add_parser(
         "build-annotation-sample",
@@ -368,6 +449,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--all-records",
         action="store_true",
         help="Bypass study-level row filters and process the full configured source.",
+    )
+    source_group.add_argument(
+        "--min-valid-sections",
+        metavar="N",
+        type=int,
+        default=None,
+        help="When a preprocessed dataset is auto-detected, keep only rows with at least N cleaned valid sections.",
     )
     execution_group = run_llm.add_argument_group("Execution Controls")
     execution_group.add_argument(
@@ -547,6 +635,7 @@ def _ensure_output_locations(paths_config) -> list[str]:
         paths_config.annotation_output_dir,
         paths_config.llm_batch_dir,
         paths_config.evaluation_output_dir,
+        paths_config.preprocessing_output_dir,
         paths_config.human_annotations_dir,
         paths_config.llm_results_dir,
         paths_config.sampled_private_workbook.parent,
@@ -616,6 +705,31 @@ def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_preprocess(args: argparse.Namespace) -> int:
+    from .preprocessing import run_preprocessing_pipeline
+
+    study = load_study_config(args.study_config)
+    paths = load_paths_config(args.paths_config)
+    preprocessing = load_preprocessing_config(args.paths_config)
+    summary = run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=preprocessing,
+        input_path=Path(args.input_path).resolve() if args.input_path else None,
+        output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        limit=args.limit,
+        all_records=bool(args.all_records),
+        retry_exhausted=bool(args.retry_exhausted),
+        from_scratch=bool(args.from_scratch),
+        generate_validation_sample=bool(args.generate_validation_sample),
+        validation_n_total=args.validation_n_total,
+        validation_random_state=args.validation_random_state,
+        force_validation_sample=bool(args.force_validation_sample),
+    )
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
 def cmd_build_llm_batch(args: argparse.Namespace) -> int:
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
@@ -638,6 +752,8 @@ def cmd_build_llm_batch(args: argparse.Namespace) -> int:
 
 
 def cmd_run_llm(args: argparse.Namespace) -> int:
+    from .llm_runner import run_llm_experiments
+
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
     llm_config = load_llm_config(args.paths_config)
@@ -650,6 +766,7 @@ def cmd_run_llm(args: argparse.Namespace) -> int:
         input_path=Path(args.input_path).resolve() if args.input_path else None,
         limit=args.limit,
         all_records=True if args.all_records else None,
+        min_valid_sections=args.min_valid_sections,
         retry_exhausted=bool(args.retry_exhausted),
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
     )
@@ -658,6 +775,8 @@ def cmd_run_llm(args: argparse.Namespace) -> int:
 
 
 def cmd_sentiment_sensitivity(args: argparse.Namespace) -> int:
+    from .vader_analysis import run_vader_sensitivity
+
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
     scores_df, summary, written = run_vader_sensitivity(
@@ -675,6 +794,8 @@ def cmd_sentiment_sensitivity(args: argparse.Namespace) -> int:
 
 
 def cmd_evaluate(args: argparse.Namespace) -> int:
+    from .evaluation import evaluate_outputs
+
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
     metrics_df, summary, written = evaluate_outputs(

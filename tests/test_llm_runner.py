@@ -10,6 +10,7 @@ from nde_narratives.config import load_llm_config, load_paths_config, load_study
 from nde_narratives.llm.ollama import OllamaProvider
 from nde_narratives.llm.types import LLMProviderResponse
 from nde_narratives.llm_runner import run_llm_experiments
+from nde_narratives.preprocessing import run_preprocessing_pipeline
 from nde_narratives.prompting import load_batch_source
 from nde_narratives.sampling import assign_participant_codes, create_annotation_frames
 
@@ -54,6 +55,35 @@ class InterruptingProvider(FakeProvider):
         if self.total_calls == self.interrupt_on_call:
             raise KeyboardInterrupt("simulated interruption")
         return super().generate_structured(request)
+
+
+class FakePreprocessingProvider:
+    def __init__(self, invalid_participant: str | None = None) -> None:
+        self.invalid_participant = invalid_participant
+
+    def generate_structured(self, request) -> LLMProviderResponse:
+        if request.section == "preprocess_validate":
+            payload = {
+                "context_assessment": "invalid" if request.participant_code == self.invalid_participant else "valid",
+                "experience_assessment": "valid",
+                "aftereffects_assessment": "invalid" if request.participant_code == self.invalid_participant else "valid",
+                "needs_resegmentation": "yes" if request.participant_code == self.invalid_participant else "no",
+            }
+            return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+        payload = (
+            {
+                "context": "clean context",
+                "experience": "clean experience",
+                "aftereffects": "",
+            }
+            if request.participant_code == self.invalid_participant
+            else {
+                "context": "clean context",
+                "experience": "clean experience",
+                "aftereffects": "clean aftereffects",
+            }
+        )
+        return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
 
 
 def _llm_block(*, temperature: float = 0.2) -> str:
@@ -322,6 +352,122 @@ def test_evaluate_ignores_internal_runner_artifacts(tmp_path: Path) -> None:
     assert len(llm_manifest["accepted"]) == 1
     assert len(llm_manifest["rejected"]) == 0
     assert llm_manifest["accepted"][0]["artifact_id"] == "exp_alpha__run-01"
+
+
+def test_load_batch_source_prefers_preprocessed_dataset_and_can_filter_by_cleaned_sections(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
+    paths = load_paths_config(paths_config)
+
+    preview_df = load_batch_source(study, paths, source="survey", all_records=False)
+    invalid_participant = str(preview_df.iloc[0]["participant_code"])
+
+    class PreprocessConfigStub:
+        model = "mock-preprocess-model"
+        provider = "ollama"
+        base_url = "http://localhost:11434"
+        timeout_seconds = 30
+        max_attempts = 2
+        temperature = 0.0
+        prompt_version = "v1"
+
+        def to_dict(self):
+            return {}
+
+    run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=PreprocessConfigStub(),
+        provider_factory=lambda _: FakePreprocessingProvider(invalid_participant=invalid_participant),
+    )
+
+    preferred_df = load_batch_source(study, paths, source="survey", all_records=False)
+    assert "n_valid_sections_cleaned" in preferred_df.columns
+    assert invalid_participant not in set(preferred_df["participant_code"])
+    assert set(preferred_df["participant_code"]) == set(preview_df["participant_code"]) - {invalid_participant}
+
+    filtered_df = load_batch_source(study, paths, source="survey", all_records=False, min_valid_sections=3)
+    assert invalid_participant not in set(filtered_df["participant_code"])
+
+
+def test_load_batch_source_uses_post_preprocessing_validity_and_to_drop_filters(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
+    paths = load_paths_config(paths_config)
+
+    class PreprocessConfigStub:
+        model = "mock-preprocess-model"
+        provider = "ollama"
+        base_url = "http://localhost:11434"
+        timeout_seconds = 30
+        max_attempts = 2
+        temperature = 0.0
+        prompt_version = "v1"
+
+        def to_dict(self):
+            return {}
+
+    run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=PreprocessConfigStub(),
+        all_records=True,
+        provider_factory=lambda _: FakePreprocessingProvider(),
+    )
+
+    cleaned_path = paths.preprocessing_output_dir / "cleaned_dataset.csv"
+    cleaned_df = pd.read_csv(cleaned_path)
+    cleaned_df.loc[cleaned_df[study.id_column] == 104, "TO_DROP"] = False
+    cleaned_df.loc[cleaned_df[study.id_column] == 104, "n_valid_sections_cleaned"] = 3
+    cleaned_df.loc[cleaned_df[study.id_column] == 104, "n_valid_sections"] = 3
+    cleaned_df.loc[cleaned_df[study.id_column] == 104, study.sections["aftereffects"].source_column] = "clean aftereffects"
+    cleaned_df.to_csv(cleaned_path, index=False)
+
+    filtered_df = load_batch_source(study, paths, source="survey", all_records=False)
+    all_records_df = load_batch_source(study, paths, source="survey", all_records=True)
+
+    assert 104 in set(filtered_df[study.id_column])
+    assert 104 in set(all_records_df[study.id_column])
+
+
+def test_load_batch_source_excludes_preprocessed_rows_marked_to_drop(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
+    paths = load_paths_config(paths_config)
+
+    class PreprocessConfigStub:
+        model = "mock-preprocess-model"
+        provider = "ollama"
+        base_url = "http://localhost:11434"
+        timeout_seconds = 30
+        max_attempts = 2
+        temperature = 0.0
+        prompt_version = "v1"
+
+        def to_dict(self):
+            return {}
+
+    run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=PreprocessConfigStub(),
+        all_records=True,
+        provider_factory=lambda _: FakePreprocessingProvider(),
+    )
+
+    cleaned_path = paths.preprocessing_output_dir / "cleaned_dataset.csv"
+    cleaned_df = pd.read_csv(cleaned_path)
+    cleaned_df.loc[cleaned_df[study.id_column] == 101, "TO_DROP"] = True
+    cleaned_df.to_csv(cleaned_path, index=False)
+
+    filtered_df = load_batch_source(study, paths, source="survey", all_records=False)
+    all_records_df = load_batch_source(study, paths, source="survey", all_records=True)
+
+    assert 101 not in set(filtered_df[study.id_column])
+    assert 101 in set(all_records_df[study.id_column])
 
 
 

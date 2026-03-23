@@ -171,3 +171,4 @@ survey_csv = "{survey_csv.as_posix()}"
     assert (data_dir / "annotation_outputs").exists()
     assert (data_dir / "human_annotations").exists()
     assert (data_dir / "llm_outputs").exists()
+    assert (data_dir / "preprocessing_outputs").exists()
