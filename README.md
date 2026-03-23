@@ -244,6 +244,12 @@ The expected prompt separation is now:
 - [`prompts/preprocessing/`](prompts/preprocessing/) for the one-time cleaning stage
 - [`prompts/analysis/`](prompts/analysis/) for downstream experiment-driven extraction and coding
 
+Prompt location policy:
+
+- Repository default analysis prompts must live only under [`prompts/analysis/`](prompts/analysis/).
+- Do not create duplicate defaults under `prompts/*.md` at repository root.
+- Optional experiment variants should live under `prompt_variants_dir/<variant>/` and include the same three files (`context_prompt.md`, `experience_prompt.md`, `aftereffects_prompt.md`).
+
 Run a first-layer VADER sensitivity analysis over the configured narrative text columns:
 
     nde sentiment-sensitivity

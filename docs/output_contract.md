@@ -51,6 +51,12 @@ The preprocessing prompts are intentionally separate from downstream analysis pr
 - [`prompts/preprocessing/`](prompts/preprocessing/)
 - [`prompts/analysis/`](prompts/analysis/)
 
+Prompt repository policy:
+
+- default downstream prompts must exist only in [`prompts/analysis/`](prompts/analysis/)
+- duplicate default prompt files under `prompts/*.md` at repository root are not supported
+- variant prompts are loaded from `prompt_variants_dir/<variant>/` when configured
+
 ## Shared Fields
 
 - `participant_code`

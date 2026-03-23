@@ -135,6 +135,12 @@ These make it explicit how many rows already had 3 usable sections before prepro
 
 The preprocessing prompts live under [`prompts/preprocessing/`](prompts/preprocessing/), while downstream analysis prompts live under [`prompts/analysis/`](prompts/analysis/).
 
+Prompt policy (to avoid duplicate defaults):
+
+- repository defaults for downstream analysis must exist only in [`prompts/analysis/`](prompts/analysis/)
+- do not add mirrored default files under `prompts/*.md` at repository root
+- experiment-specific variants belong in `prompt_variants_dir/<variant>/`
+
 ## 4. Validate the Setup
 
 Run:
@@ -242,7 +248,7 @@ Evaluation still compares automated outputs only against the adjudicated human s
 
 ## 9. Prompt Variants
 
-By default, downstream analysis prompts are loaded from [`prompts/analysis/`](prompts/analysis/).
+By default, downstream analysis prompts are loaded from [`prompts/analysis/`](prompts/analysis/) via [`resolve_prompt_root()`](src/nde_narratives/prompting.py:18).
 
 If you define `prompt_variant = "baseline_v2"` in an experiment, the CLI first looks for:
 
@@ -256,7 +262,7 @@ That variant folder must contain:
 - `experience_prompt.md`
 - `aftereffects_prompt.md`
 
-If the variant folder does not exist, the CLI falls back to the repository default prompts.
+If the variant folder does not exist, the CLI falls back to the repository default prompts in [`prompts/analysis/`](prompts/analysis/).
 
 With the default path layout, `prompt_variants_dir` resolves to:
 
