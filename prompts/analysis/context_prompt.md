@@ -22,6 +22,7 @@ Use 1 to 3 short verbatim evidence spans copied directly from the input text.
 
 Evidence constraints:
 - Evidence must be literal substrings from the participant text.
+- Evidence spans must directly justify the assigned tone label (not generic summary text).
 - Do not output placeholders or meta text such as "<INPUT_TEXT>", "[[INPUT_TEXT]]", "Text:", or "No text provided".
 - Do not invent evidence; only quote what is actually present in the text.
 

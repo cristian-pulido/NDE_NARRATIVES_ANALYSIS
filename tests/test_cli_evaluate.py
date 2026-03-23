@@ -126,11 +126,19 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert "item-level detail" in report_text.lower()
     assert "family-level summary" in report_text.lower()
     assert "questionnaire vs automated" in questionnaire_report_text.lower()
+    assert "contradiction-focused qualitative analysis" in questionnaire_report_text.lower()
+    assert "curated contradictory evidence examples" in questionnaire_report_text.lower()
+    assert "questionnaire_contradiction_overview.png" in questionnaire_report_text
+    assert "questionnaire_contradiction_unigram_wordcloud.png" in questionnaire_report_text
     assert set(family_metrics["family"]) >= {"tone", "m8", "m9"}
     assert "<details open>" in report_text
     assert (tmp_path / "evaluation_outputs" / "experiments" / "exp_alpha__run-01" / "evaluation_metrics.csv").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_family_summary.png").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_family_summary.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_contradiction_overview.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_contradiction_unigram_wordcloud.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "questionnaire_contradictions.csv").exists()
+    assert "questionnaire_contradictions" in summary
     assert "questionnaire_comparison_summary.png" in questionnaire_report_text
     assert "questionnaire_family_summary.png" in questionnaire_report_text
 
@@ -168,6 +176,7 @@ def test_evaluate_can_export_pdf_figures(tmp_path: Path) -> None:
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_family_summary.pdf").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_comparison_summary.pdf").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_family_summary.pdf").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_contradiction_overview.pdf").exists()
 
 
 def test_evaluate_can_filter_to_selected_experiment_and_annotator(tmp_path: Path) -> None:

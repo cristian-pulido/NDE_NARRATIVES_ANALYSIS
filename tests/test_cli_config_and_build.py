@@ -114,6 +114,56 @@ def test_build_annotation_sample_refuses_to_overwrite_without_force(tmp_path: Pa
     assert "Refusing to overwrite existing annotation artifacts" in second_result.stderr
 
 
+def test_build_annotation_sample_prefers_preprocessed_dataset_when_available(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    preprocessed_dir = tmp_path / "preprocessing_outputs"
+    preprocessed_dir.mkdir(parents=True, exist_ok=True)
+    preprocessed_csv = preprocessed_dir / "cleaned_dataset.csv"
+
+    source = pd.read_csv(survey_csv)
+    one_row = source.head(1).copy()
+    one_row.loc[:, "response_id"] = 999
+    if "m11_quality_label" in one_row.columns:
+        one_row = one_row.drop(columns=["m11_quality_label"])
+    one_row.to_csv(preprocessed_csv, index=False)
+
+    result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["source_path"].endswith("preprocessing_outputs/cleaned_dataset.csv")
+
+    sampled_private = pd.read_excel(tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx", sheet_name="sampled_private")
+    assert len(sampled_private) == 1
+    assert int(sampled_private.loc[0, "response_id"]) == 999
+
+
+def test_build_annotation_sample_falls_back_to_survey_when_preprocessed_missing_valence(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    preprocessed_dir = tmp_path / "preprocessing_outputs"
+    preprocessed_dir.mkdir(parents=True, exist_ok=True)
+    preprocessed_csv = preprocessed_dir / "cleaned_dataset.csv"
+
+    source = pd.read_csv(survey_csv)
+    broken = source.head(1).copy().drop(columns=["valence"])
+    broken.to_csv(preprocessed_csv, index=False)
+
+    result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["source_path"].endswith("survey_fixture.csv")
+
+    sampled_private = pd.read_excel(tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx", sheet_name="sampled_private")
+    assert len(sampled_private) == 3
+
+
 def test_build_llm_batch_writes_experiment_directory_and_manifest(tmp_path: Path) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"

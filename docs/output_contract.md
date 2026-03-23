@@ -258,6 +258,33 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 
 ## Evaluation Alignment Rules
 
+In addition to the standard alignment tables and figures, `nde evaluate` now emits a questionnaire-focused contradiction analysis package for Experience Tone:
+
+- `questionnaire_contradictions.csv`
+- `questionnaire_contradiction_examples.csv`
+- contradiction figures under `evaluation_outputs/figures/alignment/`:
+  - `questionnaire_contradiction_overview.png`
+  - `questionnaire_contradiction_unigram_wordcloud.png`
+  - `questionnaire_contradiction_bigrams.png`
+  - `questionnaire_contradiction_trigrams.png`
+
+### Contradiction definition
+
+- strict polarity contradiction only: questionnaire `positive` vs automated `negative`, or questionnaire `negative` vs automated `positive`
+- scope limited to `experience_tone`
+
+### Source selection and evidence policy
+
+- VADER is included only as a quantitative baseline in contradiction counts/rates
+- qualitative contradiction evidence uses only selected LLM outputs
+- selected LLMs are the top 3 `questionnaire_vs_llm:*` comparisons ranked by `macro_f1` on `experience_tone`
+
+### Evidence segments compatibility
+
+- for nested JSONL outputs, section-level `evidence_segments` are retained for qualitative analysis
+- legacy flat outputs and tabular prediction files remain accepted for metrics; they may not include usable evidence segments
+- three-label historical artifacts remain valid for evaluation as long as labels fit the configured study label set
+
 `nde evaluate` aligns comparison sources to the participant codes present in the majority human reference.
 
 - questionnaire-derived labels are filtered to that participant subset
@@ -279,6 +306,8 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 - `human_agreement_summary.csv`
 - `human_artifacts_manifest.json`
 - `llm_artifacts_manifest.json`
+- `questionnaire_contradictions.csv`
+- `questionnaire_contradiction_examples.csv`
 - `alignment_report.md`
 - `alignment_report_questionnaire.md`
 - `alignment_metrics_long.csv`
@@ -295,3 +324,4 @@ VADER outputs apply only to section tone fields and are not used for binary ques
 - `comparisons`: mean metric summaries by comparison name
 - `human_artifacts`: accepted and rejected human artifact registry
 - `llm_artifacts`: accepted and rejected LLM artifact registry
+- `questionnaire_contradictions`: contradiction-focused quantitative and qualitative analysis payload for questionnaire vs automated Experience Tone

@@ -102,6 +102,10 @@ def test_run_preprocessing_pipeline_writes_cleaned_outputs_and_validation_sample
     cleaned_df = pd.read_csv(source_preview["cleaned_dataset_csv"])
     assert "n_valid_sections_original" in cleaned_df.columns
     assert "n_valid_sections_cleaned" in cleaned_df.columns
+    assert study.stratify_column in cleaned_df.columns
+    quality_column = str(study.dataset.get("quality_label_column"))
+    if quality_column:
+        assert quality_column in cleaned_df.columns
     assert "n_rows_with_3_valid_sections_original" in source_preview["summary"]
     assert "n_rows_with_3_valid_sections_cleaned" in source_preview["summary"]
 
