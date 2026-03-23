@@ -103,3 +103,45 @@ def test_sentiment_sensitivity_generates_scores_figures_and_report(tmp_path: Pat
     assert include_text_result.returncode == 0, include_text_result.stderr
     include_text_scores = pd.read_csv(tmp_path / "sentiment_outputs_text" / "vader_sentiment_scores.csv")
     assert "text" in include_text_scores.columns
+
+
+def test_sentiment_sensitivity_prefers_cleaned_dataset_when_available(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+    output_dir = tmp_path / "sentiment_outputs_cleaned"
+
+    cleaned_dir = tmp_path / "preprocessing_outputs"
+    cleaned_dir.mkdir(parents=True, exist_ok=True)
+    cleaned = pd.DataFrame(
+        [
+            {
+                "response_id": 101,
+                "participant_code": "ANN_CLEANED",
+                "nde_context": "UNIQUE CLEANED CONTEXT TEXT",
+                "nde_description": "UNIQUE CLEANED EXPERIENCE TEXT",
+                "nde_aftereffects": "UNIQUE CLEANED AFTEREFFECTS TEXT",
+                "n_valid_sections": 3,
+                "n_valid_sections_cleaned": 3,
+            }
+        ]
+    )
+    cleaned.to_csv(cleaned_dir / "cleaned_dataset.csv", index=False)
+
+    result = run_cli(
+        "sentiment-sensitivity",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--output-dir",
+        str(output_dir),
+        "--include-text",
+    )
+
+    assert result.returncode == 0, result.stderr
+    scores = pd.read_csv(output_dir / "vader_sentiment_scores.csv")
+    assert len(scores) == 3
+    assert "UNIQUE CLEANED CONTEXT TEXT" in set(scores["text"])
+    assert "UNIQUE CLEANED EXPERIENCE TEXT" in set(scores["text"])
+    assert "UNIQUE CLEANED AFTEREFFECTS TEXT" in set(scores["text"])

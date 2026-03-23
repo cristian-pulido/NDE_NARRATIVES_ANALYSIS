@@ -12,6 +12,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from .config import PathsConfig, StudyConfig
 from .io_utils import read_tabular_file
+from .prompting import PREPROCESSED_DATASET_FILENAME, load_batch_source
 from .sampling import apply_dataset_row_filters, is_meaningful_text
 
 
@@ -280,7 +281,33 @@ def run_vader_sensitivity(
     include_text: bool = False,
     source_df: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, str]]:
-    source = source_df if source_df is not None else read_tabular_file(Path(input_path or paths.survey_csv))
+    source_mode = "provided_dataframe"
+    if source_df is not None:
+        source = source_df
+        prefiltered = False
+    else:
+        explicit_input = Path(input_path) if input_path is not None else None
+        if explicit_input is not None:
+            source = read_tabular_file(explicit_input)
+            source_mode = "explicit_input"
+            prefiltered = False
+        else:
+            cleaned_path = paths.preprocessing_output_dir / PREPROCESSED_DATASET_FILENAME
+            if cleaned_path.exists():
+                source = load_batch_source(
+                    study=study,
+                    paths=paths,
+                    source="survey",
+                    all_records=all_records,
+                    min_valid_sections=(3 if not all_records else None),
+                )
+                source_mode = "preprocessed_cleaned"
+                prefiltered = True
+            else:
+                source = read_tabular_file(Path(paths.survey_csv))
+                source_mode = "survey_original"
+                prefiltered = False
+
     resolved_output_dir = Path(output_dir or default_vader_output_dir(paths))
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = resolved_output_dir / "figures"
@@ -288,11 +315,12 @@ def run_vader_sensitivity(
     scores_df, summary = build_vader_scores(
         source,
         study,
-        all_records=all_records,
-        quality_values=quality_values,
+        all_records=True if prefiltered else all_records,
+        quality_values=None if prefiltered else quality_values,
         limit=limit,
         include_text=include_text,
     )
+    summary["source_mode"] = source_mode
 
     scores_path = resolved_output_dir / DEFAULT_SCORES_FILENAME
     summary_path = resolved_output_dir / DEFAULT_SUMMARY_FILENAME
