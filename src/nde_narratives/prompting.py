@@ -9,7 +9,10 @@ import pandas as pd
 from .config import ExperimentMetadata, PathsConfig, StudyConfig
 from .constants import PROMPT_INPUT_TOKEN, PROJECT_ROOT, SAMPLED_PRIVATE_SHEET
 from .io_utils import read_tabular_file
-from .sampling import assign_participant_codes, filter_source_data
+from .sampling import apply_dataset_row_filters, assign_participant_codes, filter_source_data
+
+
+PREPROCESSED_DATASET_FILENAME = "cleaned_dataset.csv"
 
 
 def resolve_prompt_root(
@@ -20,6 +23,7 @@ def resolve_prompt_root(
 ) -> Path:
     if prompt_root is not None:
         return Path(prompt_root)
+    analysis_root = project_root / "prompts" / "analysis"
     if prompt_variant:
         candidate = None
         if paths and paths.prompt_variants_dir:
@@ -28,6 +32,8 @@ def resolve_prompt_root(
             candidate = project_root / "prompts" / prompt_variant
         if candidate.exists():
             return candidate
+    if analysis_root.exists():
+        return analysis_root
     return project_root / "prompts"
 
 
@@ -73,20 +79,50 @@ def load_batch_source(
     input_path: Path | None = None,
     limit: int | None = None,
     all_records: bool = False,
+    min_valid_sections: int | None = None,
 ) -> pd.DataFrame:
+    def _filter_preprocessed_dataset(prepared_df: pd.DataFrame) -> pd.DataFrame:
+        filtered = prepared_df.copy()
+
+        metric_column = "n_valid_sections_cleaned" if "n_valid_sections_cleaned" in filtered.columns else "n_valid_sections"
+        if metric_column in filtered.columns:
+            minimum_sections = int(min_valid_sections) if min_valid_sections is not None else 3
+            filtered = filtered[filtered[metric_column] >= minimum_sections].copy()
+
+        filtered = apply_dataset_row_filters(
+            filtered,
+            study,
+            apply_quality_filter=False,
+            apply_to_drop_filter=True,
+            drop_missing_strata=False,
+        )
+        return filtered
+
     if source == "sampled-private":
         workbook = Path(input_path or paths.sampled_private_workbook)
         if not workbook.exists():
             raise FileNotFoundError(f"Sampled private workbook not found: {workbook}")
         df = pd.read_excel(workbook, sheet_name=SAMPLED_PRIVATE_SHEET)
     elif source == "survey":
-        survey_path = Path(input_path or paths.survey_csv)
-        if not survey_path.exists():
-            raise FileNotFoundError(f"Survey source not found: {survey_path}")
-        raw = read_tabular_file(survey_path)
-        prepared = raw.copy() if all_records else filter_source_data(raw, study)
-        prepared = prepared.sort_values(study.id_column).reset_index(drop=True)
-        df = assign_participant_codes(prepared, study)
+        preprocessed_path = paths.preprocessing_output_dir / PREPROCESSED_DATASET_FILENAME
+        explicit_input_path = Path(input_path) if input_path is not None else None
+        if explicit_input_path is None and preprocessed_path.exists():
+            prepared = read_tabular_file(preprocessed_path).sort_values(study.id_column).reset_index(drop=True)
+            if not all_records:
+                prepared = _filter_preprocessed_dataset(prepared)
+            if "participant_code" not in prepared.columns:
+                prepared = assign_participant_codes(prepared, study)
+            if all_records and min_valid_sections is not None:
+                prepared = _filter_preprocessed_dataset(prepared)
+            df = prepared
+        else:
+            survey_path = Path(explicit_input_path or paths.survey_csv)
+            if not survey_path.exists():
+                raise FileNotFoundError(f"Survey source not found: {survey_path}")
+            raw = read_tabular_file(survey_path)
+            prepared = raw.copy() if all_records else filter_source_data(raw, study)
+            prepared = prepared.sort_values(study.id_column).reset_index(drop=True)
+            df = assign_participant_codes(prepared, study)
     else:
         raise ValueError(f"Unsupported source: {source}")
 
@@ -199,4 +235,3 @@ def write_llm_batches(
     written["manifest_file"] = str(manifest_path)
     written["batch_dir"] = str(batch_dir)
     return written
-

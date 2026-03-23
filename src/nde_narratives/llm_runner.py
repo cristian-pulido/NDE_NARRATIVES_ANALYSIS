@@ -288,6 +288,9 @@ def _source_input_path(paths: PathsConfig, source: str, input_path: Path | None)
     if input_path is not None:
         return Path(input_path)
     if source == "survey":
+        preprocessed_path = paths.preprocessing_output_dir / "cleaned_dataset.csv"
+        if preprocessed_path.exists():
+            return preprocessed_path
         return paths.survey_csv
     if source == "sampled-private":
         return paths.sampled_private_workbook
@@ -609,6 +612,7 @@ def run_llm_experiments(
     input_path: Path | None = None,
     limit: int | None = None,
     all_records: bool | None = None,
+    min_valid_sections: int | None = None,
     retry_exhausted: bool = False,
     output_dir: Path | None = None,
     provider_factory: Callable[[LLMRuntimeConfig], LLMProvider] | None = None,
@@ -625,6 +629,7 @@ def run_llm_experiments(
         input_path=Path(input_path) if input_path is not None else None,
         limit=limit,
         all_records=(runtime.all_records if all_records is None else bool(all_records)),
+        min_valid_sections=min_valid_sections,
     )
 
     experiment_results: list[ExperimentRunResult] = []
@@ -668,4 +673,3 @@ def run_llm_experiments(
             for result in experiment_results
         ],
     }
-

@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "context_assessment": {
+      "type": "string",
+      "enum": ["valid", "invalid", "empty"]
+    },
+    "experience_assessment": {
+      "type": "string",
+      "enum": ["valid", "invalid", "empty"]
+    },
+    "aftereffects_assessment": {
+      "type": "string",
+      "enum": ["valid", "invalid", "empty"]
+    },
+    "needs_resegmentation": {
+      "type": "string",
+      "enum": ["yes", "no"]
+    }
+  },
+  "required": [
+    "context_assessment",
+    "experience_assessment",
+    "aftereffects_assessment",
+    "needs_resegmentation"
+  ]
+}

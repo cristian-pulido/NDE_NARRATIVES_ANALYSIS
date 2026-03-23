@@ -8,6 +8,7 @@ survey_csv = "D:/data/nde/results-survey.csv"
 # llm_batch_dir = "D:/data/nde/llm_batches"
 # llm_results_dir = "D:/data/nde/llm_outputs"
 # evaluation_output_dir = "D:/data/nde/evaluation_outputs"
+# preprocessing_output_dir = "D:/data/nde/preprocessing_outputs"
 # prompt_variants_dir = "D:/data/nde/prompt_variants"
 # sampled_private_workbook = "D:/data/nde/annotation_outputs/nde_annotation_mapping_private.xlsx"
 # human_annotation_workbook = "D:/data/nde/human_annotations/nde_annotation_sample_completed.xlsx"
@@ -19,8 +20,15 @@ base_url = "http://localhost:11434"
 timeout_seconds = 120
 max_attempts = 2
 temperature = 0.0
-source = "survey"
-all_records = false
+
+[preprocessing]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+model = "qwen2.5:7b"
+prompt_version = "v1"
 
 [[llm.experiments]]
 experiment_id = "qwen25_baseline"

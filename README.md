@@ -19,7 +19,7 @@ The following diagram summarizes how configuration, prompts, schemas, human anno
 
 - `config/`: Study configuration and local path templates.
 - `docs/`: Research proposal, annotation guidelines, and output contracts.
-- `prompts/`: Default section-specific LLM prompt templates.
+- `prompts/`: Prompt templates split into preprocessing and downstream analysis.
 - `schemas/`: Versioned JSON schemas for normalized LLM outputs.
 - `src/`: Python package and CLI.
 - `tests/fixtures/`: Synthetic survey, annotation, and prediction fixtures.
@@ -72,7 +72,10 @@ If you omit the rest, the repository resolves these defaults relative to `data_d
 
 `human_annotation_workbook` and `llm_predictions_path` are now optional in the TOML. They remain as compatibility defaults and as useful single-file overrides.
 
-Local LLM runtime settings and experiment registrations now live in the same file under `[llm]` and `[[llm.experiments]]`.
+Local runtime settings are split by purpose in [`config/paths.local.toml`](config/paths.local.toml):
+
+- `[preprocessing]` defines the one canonical model configuration used by [`nde preprocess`](src/nde_narratives/cli.py:202)
+- `[llm]` and `[[llm.experiments]]` define downstream analysis experiments used by [`nde run-llm`](src/nde_narratives/cli.py:382)
 
 For the practical LLM setup, smoke-test flow, prompt variants layout, and full run instructions, see [LLM Workflow](docs/llm_workflow.md).
 
@@ -189,6 +192,22 @@ Validate that the study config, path config, and source CSV are aligned:
 
     nde validate-config
 
+Run the one-time preprocessing stage that validates section structure, resegments invalid rows when needed, resumes failures, and writes a cleaned dataset copy under `preprocessing_output_dir`:
+
+    nde preprocess
+
+Useful preprocessing options:
+
+- `--all-records`: bypass study-level row filters.
+- `--retry-exhausted`: retry rows previously marked exhausted.
+- `--from-scratch`: borrar el ledger previo y recomenzar la corrida desde cero en la carpeta de salida elegida.
+- `--generate-validation-sample`: write a human-review workbook after preprocessing.
+- `--validation-n-total`: size of the optional validation sample.
+
+By default, preprocessing is intentionally more inclusive than downstream analysis: it accepts rows with at least one meaningful narrative section so partially populated originals can still be rescued before the final `3-section` filter is applied.
+
+If [`cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:23) exists under `preprocessing_output_dir`, downstream analysis commands using the `survey` source automatically prefer that cleaned file over the raw configured survey file.
+
 Build the annotation workbook sample outside the repository:
 
     nde build-annotation-sample
@@ -214,7 +233,16 @@ Run configured LLM experiments directly, resume missing or failed rows, and writ
 
     nde run-llm --experiment-id qwen25_baseline
 
+If you want to keep only fully usable cleaned narratives, add:
+
+    nde run-llm --experiment-id qwen25_baseline --min-valid-sections 3
+
 Use `--all-experiments` to execute every enabled `[[llm.experiments]]` entry in `paths.local.toml`. The command preserves successful rows, retries pending or failed rows up to `max_attempts`, and returns a no-op message when the artifact is already complete for that configuration.
+
+The expected prompt separation is now:
+
+- [`prompts/preprocessing/`](prompts/preprocessing/) for the one-time cleaning stage
+- [`prompts/analysis/`](prompts/analysis/) for downstream experiment-driven extraction and coding
 
 Run a first-layer VADER sensitivity analysis over the configured narrative text columns:
 
@@ -286,4 +314,3 @@ Per-experiment outputs are written under:
 - `nde evaluate` no longer assumes a single completed human workbook or a single LLM predictions file.
 - `nde evaluate` will reuse a previously generated VADER score file when available, or generate sample-level VADER scores automatically for the majority-reference participant subset.
 - LLM execution is now configured locally through `[llm]` and `[[llm.experiments]]` in `paths.local.toml`, with Ollama as the first backend.
-

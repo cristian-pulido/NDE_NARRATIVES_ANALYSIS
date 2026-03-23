@@ -51,7 +51,14 @@ def validate_and_normalize_payload(payload: dict[str, Any], schema: dict[str, An
         if rules.get("type") != "string":
             raise ValueError(f"Unsupported schema type for {field_name}: {rules.get('type')}")
         allowed = [str(value).lower() for value in rules.get("enum", [])]
-        normalized[field_name] = _normalize_enum_value(payload[field_name], allowed, field_name)
+        if allowed:
+            normalized[field_name] = _normalize_enum_value(payload[field_name], allowed, field_name)
+            continue
+        value = payload[field_name]
+        if value is None:
+            normalized[field_name] = ""
+        else:
+            normalized[field_name] = str(value).strip()
 
     return normalized
 

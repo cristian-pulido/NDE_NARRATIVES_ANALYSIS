@@ -30,10 +30,11 @@ def make_paths_config(tmp_path: Path, survey_csv: Path, llm_block: str | None = 
     human_dir = tmp_path / "human_annotations"
     llm_dir = tmp_path / "llm_batches"
     evaluation_dir = tmp_path / "evaluation_outputs"
+    preprocessing_dir = tmp_path / "preprocessing_outputs"
     llm_output_dir = tmp_path / "llm_outputs"
     prompt_variants_dir = tmp_path / "prompt_variants"
 
-    for directory in (annotation_dir, human_dir, llm_dir, evaluation_dir, llm_output_dir, prompt_variants_dir):
+    for directory in (annotation_dir, human_dir, llm_dir, evaluation_dir, preprocessing_dir, llm_output_dir, prompt_variants_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     content = f'''[paths]
@@ -43,6 +44,7 @@ human_annotations_dir = "{human_dir.as_posix()}"
 llm_batch_dir = "{llm_dir.as_posix()}"
 llm_results_dir = "{llm_output_dir.as_posix()}"
 evaluation_output_dir = "{evaluation_dir.as_posix()}"
+preprocessing_output_dir = "{preprocessing_dir.as_posix()}"
 prompt_variants_dir = "{prompt_variants_dir.as_posix()}"
 sampled_private_workbook = "{(annotation_dir / 'nde_annotation_mapping_private.xlsx').as_posix()}"
 human_annotation_workbook = "{(human_dir / 'nde_annotation_sample.xlsx').as_posix()}"

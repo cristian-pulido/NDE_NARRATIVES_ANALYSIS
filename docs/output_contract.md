@@ -2,6 +2,55 @@
 
 The repository normalizes human annotations, LLM outputs, questionnaire-derived labels, and VADER tone outputs to comparable field names where appropriate.
 
+## Preprocessing Artifact Contract
+
+[`nde preprocess`](src/nde_narratives/cli.py:202) writes a dedicated preprocessing artifact directory under `preprocessing_output_dir`.
+
+Typical files:
+
+- `manifest.json`
+- `participant_results.jsonl`
+- `raw_responses.jsonl`
+- `errors.jsonl`
+- `run_summary.json`
+- `cleaned_dataset.csv`
+- `cleaned_dataset.xlsx`
+- optional `preprocessing_validation_sample.xlsx`
+- optional `preprocessing_validation_mapping_private.xlsx`
+
+The preprocessing stage is resumable:
+
+- rows with `success` are not rerun
+- rows with `failed` are retried until `max_attempts`
+- rows with `exhausted` are left untouched unless `--retry-exhausted` is passed
+- [`nde preprocess --from-scratch`](src/nde_narratives/cli.py:247) clears the existing preprocessing artifacts in the target output directory before rebuilding
+
+By default, preprocessing accepts rows with at least one meaningful narrative section, even if the original source does not have all three sections populated. The stricter `3 valid sections` requirement is intended for downstream analysis, not for admission into preprocessing.
+
+The cleaned dataset includes:
+
+- study `id_column`
+- `participant_code`
+- cleaned text written back to the three configured section source columns
+- `preprocessing_status`
+- `n_valid_sections` as the post-cleaning count for backward compatibility
+- `n_valid_sections_original` as the count judged valid before resegmentation
+- `n_valid_sections_cleaned` as the count of non-empty sections after cleaning
+- `preprocessing_run_status`
+- `changed_sections`
+
+The preprocessing run summary includes:
+
+- `n_rows_with_3_valid_sections_original`
+- `n_rows_with_3_valid_sections_cleaned`
+
+This makes it explicit how many rows already had 3 usable sections before preprocessing and how many rows ended with 3 usable sections after preprocessing.
+
+The preprocessing prompts are intentionally separate from downstream analysis prompts:
+
+- [`prompts/preprocessing/`](prompts/preprocessing/)
+- [`prompts/analysis/`](prompts/analysis/)
+
 ## Shared Fields
 
 - `participant_code`
