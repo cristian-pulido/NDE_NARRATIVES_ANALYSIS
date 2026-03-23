@@ -204,6 +204,13 @@ Useful preprocessing options:
 - `--generate-validation-sample`: write a human-review workbook after preprocessing.
 - `--validation-n-total`: size of the optional validation sample.
 
+Useful preprocessing config knobs in `paths.local.toml` under `[preprocessing]`:
+
+- `timeout_seconds`: HTTP timeout per request.
+- `dynamic_context_enabled`: when true, preprocessing estimates prompt size and sends a dynamic `num_ctx` to Ollama.
+- `num_ctx_min` / `num_ctx_max`: lower/upper bounds for dynamic `num_ctx` bucketing.
+- `chars_per_token`: coarse tokenizer ratio used for context estimation.
+
 By default, preprocessing is intentionally more inclusive than downstream analysis: it accepts rows with at least one meaningful narrative section so partially populated originals can still be rescued before the final `3-section` filter is applied.
 
 If [`cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:23) exists under `preprocessing_output_dir`, downstream analysis commands using the `survey` source automatically prefer that cleaned file over the raw configured survey file.

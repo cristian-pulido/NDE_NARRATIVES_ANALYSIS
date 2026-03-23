@@ -17,10 +17,13 @@ class FakePreprocessingProvider:
         self.invalid_participant = invalid_participant
         self.validation_calls: list[str] = []
         self.resegment_calls: list[str] = []
+        self.validation_num_ctx: list[int | None] = []
+        self.resegment_num_ctx: list[int | None] = []
 
     def generate_structured(self, request) -> LLMProviderResponse:
         if request.section == "preprocess_validate":
             self.validation_calls.append(request.participant_code)
+            self.validation_num_ctx.append(request.metadata.get("num_ctx"))
             if request.participant_code == self.invalid_participant:
                 payload = {
                     "context_assessment": "invalid",
@@ -38,6 +41,7 @@ class FakePreprocessingProvider:
             return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
 
         self.resegment_calls.append(request.participant_code)
+        self.resegment_num_ctx.append(request.metadata.get("num_ctx"))
         payload = {
             "context": "clean context",
             "experience": "clean experience",
@@ -56,6 +60,10 @@ max_attempts = 2
 temperature = 0.0
 model = "mock-preprocess-model"
 prompt_version = "v1"
+dynamic_context_enabled = true
+num_ctx_min = 4096
+num_ctx_max = 16384
+chars_per_token = 4.0
 '''
 
 
@@ -131,6 +139,44 @@ def test_run_preprocessing_pipeline_resegments_invalid_rows(tmp_path: Path) -> N
     assert records[0]["n_valid_sections_original"] == 1
     assert records[0]["n_valid_sections_cleaned"] == 3
     assert provider.resegment_calls == [participant_code]
+
+
+def test_preprocessing_dynamic_num_ctx_is_attached_to_requests_and_audited(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    raw = pd.read_csv(FIXTURES / "survey_fixture.csv")
+    target_id = int(raw.iloc[0][study.id_column])
+    repeated = " ".join(["narrative"] * 800)
+    raw.loc[raw[study.id_column] == target_id, study.sections["context"].source_column] = repeated
+    raw.loc[raw[study.id_column] == target_id, study.sections["experience"].source_column] = repeated
+    raw.loc[raw[study.id_column] == target_id, study.sections["aftereffects"].source_column] = repeated
+    custom_survey = tmp_path / "survey_long_prompt.csv"
+    raw.to_csv(custom_survey, index=False)
+
+    paths_config = make_paths_config(tmp_path, custom_survey, llm_block=_preprocessing_block())
+    paths = load_paths_config(paths_config)
+    preprocessing = load_preprocessing_config(paths_config)
+
+    provider = FakePreprocessingProvider(invalid_participant=None)
+    result = run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=preprocessing,
+        limit=1,
+        provider_factory=lambda _: provider,
+    )
+
+    assert provider.validation_num_ctx
+    assert provider.validation_num_ctx[0] is not None
+    assert preprocessing.num_ctx_min <= int(provider.validation_num_ctx[0]) <= preprocessing.num_ctx_max
+
+    raw_responses = [
+        json.loads(line)
+        for line in Path(result["raw_responses_file"]).read_text(encoding="utf-8-sig").splitlines()
+        if line
+    ]
+    assert raw_responses
+    assert "request_metadata" in raw_responses[0]
+    assert "num_ctx" in raw_responses[0]["request_metadata"]
 
 
 def test_run_preprocessing_pipeline_from_scratch_discards_previous_ledger_state(tmp_path: Path) -> None:

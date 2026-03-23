@@ -34,10 +34,23 @@ class OllamaProvider(LLMProvider):
 
         raise RuntimeError("Ollama response did not include a non-empty 'response' field.")
 
+    @staticmethod
+    def _optional_positive_int(value: object) -> int | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
     def generate_structured(self, request: LLMRequest) -> LLMProviderResponse:
         options: dict[str, float] = {}
         effective_temperature = self.temperature if request.temperature is None else float(request.temperature)
         options["temperature"] = effective_temperature
+        num_ctx = self._optional_positive_int(request.metadata.get("num_ctx"))
+        if num_ctx is not None:
+            options["num_ctx"] = float(num_ctx)
 
         payload = {
             "model": request.model,
