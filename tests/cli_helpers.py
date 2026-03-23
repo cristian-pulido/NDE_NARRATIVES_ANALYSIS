@@ -102,11 +102,19 @@ def write_llm_predictions_fixture(mapping_workbook: Path, study_config: Path, ou
             response_id = row[study.id_column]
             prediction_row = predictions.loc[response_id]
             for section in study.section_order:
-                payload = {"participant_code": participant_code, "section": section}
                 section_config = study.sections[section]
-                payload[section_config.tone_internal_column] = prediction_row[section_config.tone_internal_column]
+                section_payload: dict[str, str | list[str]] = {
+                    "tone": str(prediction_row[section_config.tone_internal_column]),
+                    "evidence_segments": [f"fixture evidence for {section}"],
+                }
                 for column in section_config.binary_labels:
-                    payload[column] = prediction_row[column]
+                    section_payload[column] = str(prediction_row[column])
+
+                payload = {
+                    "participant_code": participant_code,
+                    "section": section,
+                    "prediction": {section: section_payload},
+                }
                 handle.write(json.dumps(payload))
                 handle.write("\n")
 

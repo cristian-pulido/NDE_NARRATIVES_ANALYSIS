@@ -111,6 +111,32 @@ def _jsonl_records(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _flatten_llm_payload(payload: dict[str, Any], study: StudyConfig) -> dict[str, Any]:
+    row: dict[str, Any] = {}
+
+    # New nested section contract: {"context": {...}, "experience": {...}, "aftereffects": {...}}
+    for section_name in study.section_order:
+        section_config = study.sections[section_name]
+        section_block = payload.get(section_name)
+        if not isinstance(section_block, dict):
+            continue
+
+        tone_value = section_block.get("tone")
+        if tone_value is not None:
+            row[section_config.tone_internal_column] = tone_value
+
+        for column in section_config.binary_labels:
+            if column in section_block:
+                row[column] = section_block[column]
+
+    # Legacy flat contract fallback
+    for column in study.annotation_internal_columns():
+        if column in payload and column not in row:
+            row[column] = payload[column]
+
+    return row
+
+
 def load_llm_predictions(prediction_path: Path, study: StudyConfig) -> pd.DataFrame:
     if not prediction_path.exists():
         raise FileNotFoundError(f"LLM predictions file not found: {prediction_path}")
@@ -125,9 +151,7 @@ def load_llm_predictions(prediction_path: Path, study: StudyConfig) -> pd.DataFr
                 raise ValueError("Every prediction record must include participant_code.")
             payload = record.get("prediction", record)
             row = {"participant_code": participant_code}
-            for column in study.annotation_internal_columns():
-                if column in payload:
-                    row[column] = payload[column]
+            row.update(_flatten_llm_payload(payload, study))
             rows.append(row)
         df = pd.DataFrame(rows)
         predictions = df.groupby("participant_code", as_index=False).first()

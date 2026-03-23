@@ -3,12 +3,26 @@
   "title": "nde_context_output",
   "type": "object",
   "additionalProperties": false,
-  "required": ["context_tone"],
+  "required": ["context"],
   "properties": {
-    "context_tone": {
-      "type": "string",
-      "enum": ["positive", "negative", "mixed"]
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tone", "evidence_segments"],
+      "properties": {
+        "tone": {
+          "type": "string",
+          "enum": ["positive", "negative", "mixed", "neutral"]
+        },
+        "evidence_segments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        }
+      }
     }
   }
 }
-

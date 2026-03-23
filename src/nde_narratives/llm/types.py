@@ -28,5 +28,5 @@ class LLMExecutionResult:
     provider: str
     model: str
     raw_text: str
-    parsed_prediction: dict[str, str]
+    parsed_prediction: dict[str, Any]
     provider_metadata: dict[str, Any] = field(default_factory=dict)

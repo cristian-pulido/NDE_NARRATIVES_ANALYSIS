@@ -25,6 +25,7 @@ Information must not be transferred across sections.
 - Code only what is explicitly expressed.
 - Use the overall meaning of the section, not isolated words.
 - If tone is ambiguous, use `mixed`.
+- If the section is mainly factual/descriptive and emotionally uncharged, use `neutral`.
 - If an element is implied but not explicit, code `no`.
 - If an element is denied, code `no`.
 - Prioritize the participant's framing of the event.
@@ -40,6 +41,7 @@ Information must not be transferred across sections.
 - `positive`: peace, relief, clarity, insight, beneficial meaning, favorable transformation
 - `negative`: fear, distress, confusion, suffering, threat, adverse interpretation
 - `mixed`: clear positive and negative elements, ambivalence, or unresolved tone
+- `neutral`: mainly descriptive or factual language with little or no emotional valence
 
 ## Experience Elements
 
@@ -63,5 +65,13 @@ Code these only from the `aftereffects` narrative:
 
 ## Allowed Outputs
 
-- Tone columns: `positive`, `negative`, `mixed`
+- Tone columns: `positive`, `negative`, `mixed`, `neutral`
 - Element columns: `yes`, `no`
+
+## LLM Evidence Spans
+
+For each section-level tone assignment, LLM outputs now include 1 to 3 short verbatim evidence spans:
+
+- spans must be copied directly from the section text
+- spans should justify the assigned tone label
+- spans should not be paraphrases or summaries

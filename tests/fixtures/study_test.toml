@@ -25,7 +25,7 @@ mapping_filename = "nde_annotation_mapping_private.xlsx"
 column_map_filename = "nde_annotation_column_mapping_private.xlsx"
 
 [labels]
-tone = ["positive", "negative", "mixed"]
+tone = ["positive", "negative", "mixed", "neutral"]
 binary = ["yes", "no"]
 
 [sections.context]
