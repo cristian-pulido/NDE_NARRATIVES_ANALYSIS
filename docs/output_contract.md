@@ -238,6 +238,12 @@ The effective comparison key written into metrics is `artifact_id`, which is `ex
 - `compound`
 - `vader_label`
 
+Source selection behavior for `nde sentiment-sensitivity`:
+
+- if `--input-path` is provided, that file is used
+- otherwise, if [`preprocessing_outputs/cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:23) exists, VADER uses the cleaned dataset
+- if no cleaned dataset exists, VADER falls back to the configured survey source
+
 Optional field:
 
 - `text` only when the command is run with `--include-text`
