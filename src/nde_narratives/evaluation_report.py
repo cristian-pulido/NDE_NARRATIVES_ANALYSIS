@@ -64,8 +64,8 @@ def _field_bucket(field: str) -> str:
 def _field_bucket_title(bucket: str) -> str:
     titles = {
         "tone": "Tone",
-        "m8": "M8 — NDE-C (Content of the Near-Death Experience Scale)",
-        "m9": "M9 — NDE-MCQ (Impact of the NDE on Moral Cognition)",
+        "m8": "NDE-C (Content of the Near-Death Experience Scale)",
+        "m9": "NDE-MCQ (Impact of the NDE on Moral Cognition)",
         "other": "Other",
     }
     return titles.get(bucket, bucket.replace("_", " ").title())
@@ -244,6 +244,117 @@ def _save_figure(fig, figure_path: Path, dpi: int = 300, export_pdf: bool = Fals
 def _questionnaire_contradiction_payload(summary: dict[str, Any]) -> dict[str, Any]:
     payload = summary.get("questionnaire_contradictions", {})
     return payload if isinstance(payload, dict) else {}
+
+
+def _questionnaire_tone_label_payload(summary: dict[str, Any]) -> dict[str, Any]:
+    payload = summary.get("questionnaire_tone_label_analysis", {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def _comparison_rank_map(payload: dict[str, Any]) -> dict[str, int]:
+    selected = payload.get("selected_comparisons", [])
+    if not isinstance(selected, list):
+        return {}
+    return {str(comparison): index for index, comparison in enumerate(selected)}
+
+
+def _sort_rows_by_selected_order(rows: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rank_map = _comparison_rank_map(payload)
+    if not rank_map:
+        return rows
+    return sorted(rows, key=lambda row: (rank_map.get(str(row.get("comparison", "")), 999), str(row.get("comparison", ""))))
+
+
+def plot_questionnaire_tone_confusion_matrix(
+    tone_payload: dict[str, Any],
+    figure_path: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    confusion_rows = tone_payload.get("confusion", [])
+    if not isinstance(confusion_rows, list) or not confusion_rows:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No tone confusion data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    labels = tone_payload.get("labels", [])
+    if not isinstance(labels, list) or not labels:
+        labels = sorted({str(row.get("questionnaire_label", "")) for row in confusion_rows if str(row.get("questionnaire_label", ""))})
+
+    confusion_df = pd.DataFrame(confusion_rows)
+    if confusion_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No tone confusion data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    # Keep only observed questionnaire rows and observed automated columns.
+    row_labels = [
+        label
+        for label in labels
+        if int(confusion_df.loc[confusion_df["questionnaire_label"] == label, "count"].sum()) > 0
+    ]
+    col_labels = [
+        label
+        for label in labels
+        if int(confusion_df.loc[confusion_df["candidate_label"] == label, "count"].sum()) > 0
+    ]
+    if not row_labels:
+        row_labels = labels
+    if not col_labels:
+        col_labels = labels
+
+    selected_order = _comparison_rank_map(tone_payload)
+    comparisons = confusion_df["comparison"].drop_duplicates().tolist()
+    comparisons = sorted(comparisons, key=lambda value: (selected_order.get(str(value), 999), _comparison_sort_key(str(value))))
+    n_panels = max(1, len(comparisons))
+    n_cols = 1 if n_panels == 1 else 2
+    n_rows = int(math.ceil(n_panels / n_cols))
+    fig = plt.figure(figsize=(6.2 * n_cols + 2.4, 4.8 * n_rows + 1.4))
+    gs = fig.add_gridspec(
+        n_rows,
+        n_cols + 1,
+        width_ratios=[0.06, *([1.0] * n_cols)],
+        wspace=0.10,
+        hspace=0.24,
+    )
+    axes_list = [fig.add_subplot(gs[row, col + 1]) for row in range(n_rows) for col in range(n_cols)]
+    cax = fig.add_subplot(gs[:, 0])
+
+    used_axes = axes_list[:n_panels]
+    for ax, comparison in zip(used_axes, comparisons, strict=False):
+        subset = confusion_df[confusion_df["comparison"] == comparison].copy()
+        matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="row_rate")
+        matrix = matrix.reindex(index=row_labels, columns=col_labels)
+        values = matrix.to_numpy(dtype=float)
+        image = ax.imshow(values, cmap="YlGnBu", aspect="equal", vmin=0.0, vmax=1.0)
+        ax.set_xticks(range(len(col_labels)))
+        ax.set_yticks(range(len(row_labels)))
+        ax.set_xticklabels([_wrap_label(str(label).title(), width=10) for label in col_labels], rotation=20, ha="right")
+        ax.set_yticklabels([_wrap_label(str(label).title(), width=10) for label in row_labels])
+        ax.set_xlabel("Automated label")
+        ax.set_ylabel("Questionnaire label")
+        ax.set_title(_wrap_label(_comparison_label(str(comparison)), width=28), fontsize=10)
+        for i in range(values.shape[0]):
+            for j in range(values.shape[1]):
+                value = values[i, j]
+                if not math.isnan(value):
+                    ax.text(j, i, f"{value:.2f}", ha="center", va="center", color="#1F2933", fontsize=8)
+
+    for extra_ax in axes_list[n_panels:]:
+        extra_ax.axis("off")
+
+    cbar = fig.colorbar(image, cax=cax)
+    cax.yaxis.set_ticks_position("left")
+    cax.yaxis.set_label_position("left")
+    cbar.set_label("Row-normalized rate")
+    fig.suptitle("Experience Tone confusion matrix (row-normalized)", x=0.5, y=0.985, ha="center")
+    fig.subplots_adjust(top=0.90, bottom=0.10, left=0.06, right=0.99)
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
 def plot_questionnaire_contradiction_overview(
@@ -489,6 +600,23 @@ def write_questionnaire_contradiction_figures(
         "questionnaire_contradiction_unigram_wordcloud": str(wordcloud_path),
         "questionnaire_contradiction_bigrams": str(bigrams_path),
         "questionnaire_contradiction_trigrams": str(trigrams_path),
+    }
+
+
+def write_questionnaire_tone_label_figures(
+    summary: dict[str, Any],
+    figures_dir: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> dict[str, str]:
+    tone_payload = _questionnaire_tone_label_payload(summary)
+    if not tone_payload:
+        return {}
+
+    confusion_path = figures_dir / "questionnaire_tone_confusion_matrix.png"
+    plot_questionnaire_tone_confusion_matrix(tone_payload, confusion_path, dpi=dpi, export_pdf=export_pdf)
+    return {
+        "questionnaire_tone_confusion_matrix": str(confusion_path),
     }
 
 
@@ -816,7 +944,7 @@ def plot_metric_heatmap(
     Args:
         metrics_df: Full metrics dataframe.
         study: Study configuration.
-        metric_name: Metric name to plot ("accuracy" or "cohen_kappa").
+        metric_name: Metric name to plot ("macro_f1" or "cohen_kappa").
         figure_path: Output figure path.
         bucket: Bucket name ("tone", "m8", or "m9").
         dpi: Figure DPI.
@@ -945,12 +1073,18 @@ def write_alignment_figures(
             f"{base}_comparison_summary": str(summary_path),
             f"{base}_family_summary": str(family_summary_path),
             f"{base}_tone_summary": str(figures_dir / f"{base}_tone_summary.png"),
-            f"{base}_tone_accuracy_heatmap": str(figures_dir / f"{base}_tone_accuracy_heatmap.png"),
+            f"{base}_tone_macro_f1_heatmap": str(figures_dir / f"{base}_tone_macro_f1_heatmap.png"),
             f"{base}_tone_cohen_kappa_heatmap": str(figures_dir / f"{base}_tone_cohen_kappa_heatmap.png"),
-            f"{base}_m8_accuracy_heatmap": str(figures_dir / f"{base}_m8_accuracy_heatmap.png"),
-            f"{base}_m8_cohen_kappa_heatmap": str(figures_dir / f"{base}_m8_cohen_kappa_heatmap.png"),
-            f"{base}_m9_accuracy_heatmap": str(figures_dir / f"{base}_m9_accuracy_heatmap.png"),
-            f"{base}_m9_cohen_kappa_heatmap": str(figures_dir / f"{base}_m9_cohen_kappa_heatmap.png"),
+            f"{base}_nde_c_macro_f1_heatmap": str(figures_dir / f"{base}_nde_c_macro_f1_heatmap.png"),
+            f"{base}_nde_c_cohen_kappa_heatmap": str(figures_dir / f"{base}_nde_c_cohen_kappa_heatmap.png"),
+            f"{base}_nde_mcq_macro_f1_heatmap": str(figures_dir / f"{base}_nde_mcq_macro_f1_heatmap.png"),
+            f"{base}_nde_mcq_cohen_kappa_heatmap": str(figures_dir / f"{base}_nde_mcq_cohen_kappa_heatmap.png"),
+            # Legacy keys retained for compatibility with downstream consumers.
+            f"{base}_tone_accuracy_heatmap": str(figures_dir / f"{base}_tone_macro_f1_heatmap.png"),
+            f"{base}_m8_accuracy_heatmap": str(figures_dir / f"{base}_nde_c_macro_f1_heatmap.png"),
+            f"{base}_m8_cohen_kappa_heatmap": str(figures_dir / f"{base}_nde_c_cohen_kappa_heatmap.png"),
+            f"{base}_m9_accuracy_heatmap": str(figures_dir / f"{base}_nde_mcq_macro_f1_heatmap.png"),
+            f"{base}_m9_cohen_kappa_heatmap": str(figures_dir / f"{base}_nde_mcq_cohen_kappa_heatmap.png"),
         }
         # Select comparisons for figure: baselines + top 3 LLMs by macro_f1
         if scope_prefix == "questionnaire_vs_":
@@ -1006,12 +1140,18 @@ def write_alignment_figures(
             heatmap_baseline_comparisons = ["human_reference_vs_questionnaire", "human_reference_vs_vader"]
         else:
             heatmap_baseline_comparisons = []
+        bucket_to_public_key = {
+            "tone": "tone",
+            "m8": "nde_c",
+            "m9": "nde_mcq",
+        }
         for bucket in ("tone", "m8", "m9"):
+            public_key = bucket_to_public_key[bucket]
             plot_metric_heatmap(
                 scoped_metrics_df,
                 study,
-                "accuracy",
-                Path(path_map[f"{base}_{bucket}_accuracy_heatmap"]),
+                "macro_f1",
+                Path(path_map[f"{base}_{public_key}_macro_f1_heatmap"]),
                 bucket,
                 dpi=dpi,
                 export_pdf=export_pdf,
@@ -1023,7 +1163,7 @@ def write_alignment_figures(
                 scoped_metrics_df,
                 study,
                 "cohen_kappa",
-                Path(path_map[f"{base}_{bucket}_cohen_kappa_heatmap"]),
+                Path(path_map[f"{base}_{public_key}_cohen_kappa_heatmap"]),
                 bucket,
                 dpi=dpi,
                 export_pdf=export_pdf,
@@ -1151,25 +1291,25 @@ def _questionnaire_interpretation_lines(family_df: pd.DataFrame) -> list[str]:
         m8_recall = float(m8.iloc[0]["recall_yes_mean"])
         m9_recall = float(m9.iloc[0]["recall_yes_mean"])
         kappa_relation = (
-            f"M8 shows stronger agreement than M9 (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
+            f"NDE-C shows stronger agreement than NDE-MCQ (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
             if m8_kappa > m9_kappa
-            else f"M9 shows stronger agreement than M8 (mean family kappa {m9_kappa:.3f} vs {m8_kappa:.3f})"
+            else f"NDE-MCQ shows stronger agreement than NDE-C (mean family kappa {m9_kappa:.3f} vs {m8_kappa:.3f})"
             if m9_kappa > m8_kappa
-            else f"M8 and M9 show matched agreement at the family level (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
+            else f"NDE-C and NDE-MCQ show matched agreement at the family level (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
         )
         recall_relation = (
-            f"Positive-class recovery is weaker for M9 than for M8 (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
+            f"Positive-class recovery is weaker for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
             if (not pd.isna(m8_recall) and not pd.isna(m9_recall) and m8_recall > m9_recall)
-            else f"Positive-class recovery is stronger for M9 than for M8 (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
+            else f"Positive-class recovery is stronger for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
             if (not pd.isna(m8_recall) and not pd.isna(m9_recall) and m9_recall > m8_recall)
-            else f"Positive-class recovery is matched or unavailable across M8 and M9 (mean recall for `yes`: {m8_recall:.3f} vs {m9_recall:.3f})"
+            else f"Positive-class recovery is matched or unavailable across NDE-C and NDE-MCQ (mean recall for `yes`: {m8_recall:.3f} vs {m9_recall:.3f})"
         )
         if m8_kappa > m9_kappa:
-            interpretation_tail = "- This pattern is consistent with the prompt design: the system marks `yes` only when the construct is explicitly verbalized in the narrative, so lower M9 alignment is compatible with weaker narrative explicitness rather than a pure model-quality failure."
+            interpretation_tail = "- This pattern is consistent with the prompt design: the system marks `yes` only when the construct is explicitly verbalized in the narrative, so lower NDE-MCQ alignment is compatible with weaker narrative explicitness rather than a pure model-quality failure."
         elif m9_kappa > m8_kappa:
-            interpretation_tail = "- In this run, the questionnaire-based family pattern does not support the usual expectation that M9 is less recoverable than M8, so the result should be interpreted cautiously and checked against item-level detail and prevalence structure."
+            interpretation_tail = "- In this run, the questionnaire-based family pattern does not support the usual expectation that NDE-MCQ is less recoverable than NDE-C, so the result should be interpreted cautiously and checked against item-level detail and prevalence structure."
         else:
-            interpretation_tail = "- In this run, the questionnaire-based family comparison does not separate M8 and M9 on agreement, so the interpretation should rely more heavily on item-level detail, recall patterns, and prevalence structure."
+            interpretation_tail = "- In this run, the questionnaire-based family comparison does not separate NDE-C and NDE-MCQ on agreement, so the interpretation should rely more heavily on item-level detail, recall patterns, and prevalence structure."
         lines.extend(
             [
                 f"- Across questionnaire-vs-LLM comparisons, {kappa_relation}.",
@@ -1180,7 +1320,7 @@ def _questionnaire_interpretation_lines(family_df: pd.DataFrame) -> list[str]:
             ]
         )
         return lines
-    lines.extend(["- The current run did not contain both M8 and M9 family summaries for interpretation.", ""])
+    lines.extend(["- The current run did not contain both NDE-C and NDE-MCQ family summaries for interpretation.", ""])
     return lines
 
 
@@ -1396,6 +1536,54 @@ def _questionnaire_contradiction_lines(summary: dict[str, Any], output_dir: Path
     return lines
 
 
+def _questionnaire_neutral_focus_lines(summary: dict[str, Any], output_dir: Path, figure_paths: dict[str, str]) -> list[str]:
+    payload = _questionnaire_tone_label_payload(summary)
+    lines = ["## Neutral Focus In Experience Tone", ""]
+    if not payload:
+        lines.extend(["- Neutral-label diagnostics were not available in this run.", ""])
+        return lines
+
+    per_label = payload.get("per_label", [])
+    if not isinstance(per_label, list) or not per_label:
+        lines.extend(["- Neutral-label diagnostics were not available in this run.", ""])
+        return lines
+
+    rows = _sort_rows_by_selected_order([row for row in per_label if str(row.get("label", "")).lower() == "neutral"], payload)
+    if rows:
+        lines.extend(
+            [
+                "This section isolates the **neutral** label so it is not implicitly absorbed into mixed interpretations.",
+                "",
+                "| Comparison | Neutral support (Q) | Neutral predicted (A) | Precision (neutral) | Recall (neutral) | F1 (neutral) |",
+                "| --- | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for row in rows:
+            precision = float(row.get("precision", float("nan")))
+            recall = float(row.get("recall", float("nan")))
+            f1 = float(row.get("f1", float("nan")))
+            lines.append(
+                f"| {_comparison_label(str(row.get('comparison', '')))} | {int(row.get('support_n', 0))} | {int(row.get('predicted_n', 0))} | {precision:.3f} | {recall:.3f} | {f1:.3f} |"
+            )
+        lines.append("")
+    else:
+        lines.extend(["- Neutral-label diagnostics were unavailable for the selected comparisons.", ""])
+
+    if "questionnaire_tone_confusion_matrix" in figure_paths:
+        lines.extend(
+            [
+                "### Tone Confusion Matrix",
+                "",
+                "![Experience Tone confusion matrix]"
+                f"({Path(figure_paths['questionnaire_tone_confusion_matrix']).relative_to(output_dir).as_posix()})",
+                "",
+                "The matrix is row-normalized by questionnaire label; this makes neutral→mixed spillover visible even when class frequencies differ.",
+                "",
+            ]
+        )
+    return lines
+
+
 def _compact_field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig, heading: str) -> list[str]:
     lines = [f"## {heading}", ""]
     if metrics_df.empty:
@@ -1420,6 +1608,122 @@ def _compact_field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig, he
                 f"| {_field_display_label(str(row['field']), study)} | {_field_group(str(row['field']))} | {int(row['n'])} | {float(row['accuracy']):.3f} | {float(row['cohen_kappa']):.3f} | {float(row['macro_f1']):.3f} |"
             )
         lines.append("")
+    return lines
+
+
+def _human_hypothesis_lines(metrics_df: pd.DataFrame, family_df: pd.DataFrame) -> list[str]:
+    lines = ["## Hypothesis Verdict", ""]
+    if metrics_df.empty:
+        lines.extend(["- Hypothesis evaluation was unavailable because no metrics were produced.", ""])
+        return lines
+
+    grouped = (
+        metrics_df.groupby("comparison", as_index=False)["macro_f1"]
+        .mean(numeric_only=True)
+        .rename(columns={"macro_f1": "macro_f1_mean"})
+    )
+    questionnaire_row = grouped[grouped["comparison"] == "human_reference_vs_questionnaire"]
+    if questionnaire_row.empty:
+        lines.extend(["- Hypothesis evaluation was unavailable because `Human Reference vs Questionnaire` is missing.", ""])
+        return lines
+
+    questionnaire_macro_f1 = float(questionnaire_row.iloc[0]["macro_f1_mean"])
+    automated_rows = grouped[
+        grouped["comparison"].astype(str).str.startswith("human_reference_vs_llm:")
+        | (grouped["comparison"] == "human_reference_vs_vader")
+    ].copy()
+    automated_rows = automated_rows.sort_values("macro_f1_mean", ascending=False, na_position="last")
+
+    if automated_rows.empty:
+        lines.extend(["- Hypothesis evaluation was unavailable because no automated comparisons were found.", ""])
+        return lines
+
+    automated_rows["delta_vs_questionnaire"] = automated_rows["macro_f1_mean"] - questionnaire_macro_f1
+    automated_rows["supports_hypothesis"] = automated_rows["delta_vs_questionnaire"] > 0
+
+    n_support = int(automated_rows["supports_hypothesis"].sum())
+    n_total = int(len(automated_rows))
+    if n_support == n_total:
+        verdict = "Supported"
+    elif n_support == 0:
+        verdict = "Rejected"
+    else:
+        verdict = "Partially supported"
+
+    lines.extend(
+        [
+            f"- **Verdict:** {verdict}.",
+            f"- Criterion: global macro F1 compared against `Human Reference vs Questionnaire` ({questionnaire_macro_f1:.3f}), plus family-level support consistency.",
+            "",
+            "### Global Evidence (Macro F1)",
+            "",
+            "| Comparison | Mean Macro F1 | Δ vs Human vs Questionnaire | Supports hypothesis |",
+            "| --- | ---: | ---: | --- |",
+        ]
+    )
+    for _, row in automated_rows.iterrows():
+        lines.append(
+            f"| {_comparison_label(str(row['comparison']))} | {float(row['macro_f1_mean']):.3f} | {float(row['delta_vs_questionnaire']):+.3f} | {'yes' if bool(row['supports_hypothesis']) else 'no'} |"
+        )
+    lines.append("")
+
+    if family_df.empty:
+        lines.extend(["- Family-level support was unavailable in this run.", ""])
+        return lines
+
+    family_scope = family_df[family_df["comparison"].astype(str).str.startswith("human_reference_vs_")].copy()
+    questionnaire_family = family_scope[family_scope["comparison"] == "human_reference_vs_questionnaire"]
+    automated_family = family_scope[
+        family_scope["comparison"].astype(str).str.startswith("human_reference_vs_llm:")
+        | (family_scope["comparison"] == "human_reference_vs_vader")
+    ].copy()
+
+    if questionnaire_family.empty or automated_family.empty:
+        lines.extend(["- Family-level support was unavailable in this run.", ""])
+        return lines
+
+    baseline_by_family = {
+        str(row["family"]): float(row["macro_f1_mean"])
+        for _, row in questionnaire_family.iterrows()
+    }
+    family_rows: list[dict[str, Any]] = []
+    for _, row in automated_family.iterrows():
+        family_key = str(row["family"])
+        if family_key not in baseline_by_family:
+            continue
+        baseline = baseline_by_family[family_key]
+        current = float(row["macro_f1_mean"])
+        delta = current - baseline
+        family_rows.append(
+            {
+                "comparison": str(row["comparison"]),
+                "family_label": str(row["family_label"]),
+                "macro_f1_mean": current,
+                "delta": delta,
+                "supports": delta > 0,
+            }
+        )
+
+    if family_rows:
+        lines.extend(
+            [
+                "### Family-Level Support (Macro F1)",
+                "",
+                "| Comparison | Family | Mean Macro F1 | Δ vs Human vs Questionnaire (same family) | Supports hypothesis |",
+                "| --- | --- | ---: | ---: | --- |",
+            ]
+        )
+        for row in sorted(family_rows, key=lambda item: (_comparison_sort_key(item["comparison"]), item["family_label"])):
+            lines.append(
+                f"| {_comparison_label(row['comparison'])} | {row['family_label']} | {row['macro_f1_mean']:.3f} | {row['delta']:+.3f} | {'yes' if row['supports'] else 'no'} |"
+            )
+        lines.append("")
+
+    vader_row = automated_rows[automated_rows["comparison"] == "human_reference_vs_vader"]
+    if not vader_row.empty and float(vader_row.iloc[0]["delta_vs_questionnaire"]) <= 0:
+        lines.append("- Interpretation guardrail: VADER underperforming questionnaire should be treated as method-class heterogeneity, not direct evidence against LLM-based alignment gains.")
+        lines.append("")
+
     return lines
 
 
@@ -1450,7 +1754,7 @@ def write_alignment_report_for_scope(
         "- Human reference: field-level majority vote across valid human annotation artifacts.",
         "- Unresolved ties remain blank and are excluded only from the affected field metrics.",
         "- Metrics reported: accuracy, Cohen kappa, and macro F1.",
-        "- Families are operationalized as Tone, M8, and M9 to support article-oriented interpretation before item-level detail.",
+        "- Families are operationalized as Tone, NDE-C, and NDE-MCQ to support article-oriented interpretation before item-level detail.",
         "",
     ]
     lines.extend(_coverage_lines(summary))
@@ -1464,29 +1768,53 @@ def write_alignment_report_for_scope(
                 "",
             ]
         )
-    # Figures first, then tables
-    lines.extend(
-        [
-            "## Figures",
-            "",
-            "The figures below show baseline comparisons plus the top 3 LLMs ranked by macro F1.",
-            "",
-            f"![Overall comparison summary]({Path(figure_paths[f'{figure_prefix}_comparison_summary']).relative_to(output_dir).as_posix()})",
-            "",
-            f"![Family-level summary]({Path(figure_paths[f'{figure_prefix}_family_summary']).relative_to(output_dir).as_posix()})",
-            "",
-        ]
-    )
+    # Paper-first figure placement for human report.
+    if report_filename == ALIGNMENT_REPORT_FILENAME:
+        lines.extend(
+            [
+                "## Paper Figures (Lead)",
+                "",
+                "These lead figures are placed first for manuscript-facing reading order.",
+                "",
+                f"![Family-level summary]({Path(figure_paths[f'{figure_prefix}_family_summary']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![Tone summary]({Path(figure_paths[f'{figure_prefix}_tone_summary']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![Tone alignment]({Path(figure_paths[f'{figure_prefix}_tone_alignment']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
+        lines.extend(_human_hypothesis_lines(metrics_df, family_df))
+        lines.extend(
+            [
+                "## Extended Figures",
+                "",
+                f"![Overall comparison summary]({Path(figure_paths[f'{figure_prefix}_comparison_summary']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "## Figures",
+                "",
+                "The figures below show baseline comparisons plus the top 3 LLMs ranked by macro F1.",
+                "",
+                f"![Overall comparison summary]({Path(figure_paths[f'{figure_prefix}_comparison_summary']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![Family-level summary]({Path(figure_paths[f'{figure_prefix}_family_summary']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
     lines.extend(_summary_table_lines(metrics_df, "General Results"))
     lines.extend(_family_summary_lines(family_df, "Family-Level Results"))
     if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
         lines.extend(_questionnaire_interpretation_lines(family_df))
-        lines.extend(_questionnaire_contradiction_lines(summary, output_dir, figure_paths))
     tone_lines = ["#### Tone", "", f"![Tone summary]({Path(figure_paths[f'{figure_prefix}_tone_summary']).relative_to(output_dir).as_posix()})", ""]
     if figure_prefix == "human":
         tone_lines.extend(
             [
-                f"![Tone accuracy heatmap]({Path(figure_paths[f'{figure_prefix}_tone_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
+                f"![Tone macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_tone_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
                 "",
                 f"![Tone alignment]({Path(figure_paths[f'{figure_prefix}_tone_alignment']).relative_to(output_dir).as_posix()})",
                 "",
@@ -1504,23 +1832,26 @@ def write_alignment_report_for_scope(
         [
             "## Detailed Heatmaps",
             "",
-            "These heatmaps show the same filtered comparisons: baseline(s) plus top 3 LLMs ranked by macro F1.",
+            "These heatmaps show macro F1 and Cohen kappa for the same filtered comparisons: baseline(s) plus top 3 LLMs ranked by macro F1.",
             "",
             *tone_lines,
-            "#### M8",
+            "#### NDE-C",
             "",
-            f"![M8 accuracy heatmap]({Path(figure_paths[f'{figure_prefix}_m8_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
+            f"![NDE-C macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_nde_c_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
             "",
-            f"![M8 kappa heatmap]({Path(figure_paths[f'{figure_prefix}_m8_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
+            f"![NDE-C kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_c_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
             "",
-            "#### M9",
+            "#### NDE-MCQ",
             "",
-            f"![M9 accuracy heatmap]({Path(figure_paths[f'{figure_prefix}_m9_accuracy_heatmap']).relative_to(output_dir).as_posix()})",
+            f"![NDE-MCQ macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
             "",
-            f"![M9 kappa heatmap]({Path(figure_paths[f'{figure_prefix}_m9_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
+            f"![NDE-MCQ kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
             "",
         ]
     )
+    if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
+        lines.extend(_questionnaire_neutral_focus_lines(summary, output_dir, figure_paths))
+        lines.extend(_questionnaire_contradiction_lines(summary, output_dir, figure_paths))
     lines.extend(_field_result_lines(metrics_df, study))
     if include_support_sections:
         lines.extend(_human_agreement_lines(summary, output_dir))
@@ -1640,6 +1971,14 @@ def write_alignment_outputs(
 ) -> dict[str, str]:
     figures_dir = output_dir / ALIGNMENT_FIGURES_SUBDIR
     figure_paths = write_alignment_figures(metrics_df, study, figures_dir, dpi=figure_dpi, export_pdf=export_figures_pdf)
+    figure_paths.update(
+        write_questionnaire_tone_label_figures(
+            summary,
+            figures_dir,
+            dpi=figure_dpi,
+            export_pdf=export_figures_pdf,
+        )
+    )
     figure_paths.update(
         write_questionnaire_contradiction_figures(
             summary,

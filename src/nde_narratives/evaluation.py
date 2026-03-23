@@ -661,6 +661,125 @@ def _build_questionnaire_contradiction_analysis(
     }
 
 
+def _tone_label_diagnostics(
+    questionnaire_tones: pd.DataFrame,
+    candidate_tones: pd.DataFrame,
+    comparison: str,
+    labels: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    merged = questionnaire_tones.merge(candidate_tones, on="participant_code", how="inner")
+    valid_mask = ~merged["questionnaire_label"].apply(_is_blank) & ~merged["candidate_label"].apply(_is_blank)
+    merged = merged.loc[valid_mask].copy()
+    if merged.empty:
+        return [], []
+
+    y_true = merged["questionnaire_label"].astype(str)
+    y_pred = merged["candidate_label"].astype(str)
+    matrix = pd.crosstab(
+        pd.Categorical(y_true, categories=labels),
+        pd.Categorical(y_pred, categories=labels),
+        dropna=False,
+    )
+
+    per_label_rows: list[dict[str, Any]] = []
+    for label in labels:
+        tp = int(matrix.loc[label, label]) if label in matrix.index and label in matrix.columns else 0
+        fp = int(matrix[label].sum() - tp) if label in matrix.columns else 0
+        fn = int(matrix.loc[label].sum() - tp) if label in matrix.index else 0
+        support = int(matrix.loc[label].sum()) if label in matrix.index else 0
+        predicted_n = int(matrix[label].sum()) if label in matrix.columns else 0
+        precision = _safe_divide(tp, tp + fp)
+        recall = _safe_divide(tp, tp + fn)
+        f1 = _safe_divide(2 * precision * recall, precision + recall) if pd.notna(precision) and pd.notna(recall) else float("nan")
+        per_label_rows.append(
+            {
+                "comparison": comparison,
+                "label": label,
+                "support_n": support,
+                "predicted_n": predicted_n,
+                "precision": float(precision) if pd.notna(precision) else float("nan"),
+                "recall": float(recall) if pd.notna(recall) else float("nan"),
+                "f1": float(f1) if pd.notna(f1) else float("nan"),
+                "reference_prevalence": _safe_divide(support, len(merged)),
+                "candidate_prevalence": _safe_divide(predicted_n, len(merged)),
+            }
+        )
+
+    confusion_rows: list[dict[str, Any]] = []
+    for true_label in labels:
+        row_total = int(matrix.loc[true_label].sum()) if true_label in matrix.index else 0
+        for predicted_label in labels:
+            count = int(matrix.loc[true_label, predicted_label]) if true_label in matrix.index and predicted_label in matrix.columns else 0
+            confusion_rows.append(
+                {
+                    "comparison": comparison,
+                    "questionnaire_label": true_label,
+                    "candidate_label": predicted_label,
+                    "count": count,
+                    "row_rate": _safe_divide(count, row_total),
+                }
+            )
+    return per_label_rows, confusion_rows
+
+
+def _build_questionnaire_tone_label_analysis(
+    study: StudyConfig,
+    metrics_df: pd.DataFrame,
+    questionnaire_df: pd.DataFrame,
+    vader_df: pd.DataFrame,
+    accepted_llm_artifacts: list[dict[str, Any]],
+    *,
+    top_n: int = 3,
+) -> dict[str, Any]:
+    tone_column = study.sections["experience"].tone_internal_column
+    labels = list(study.allowed_labels_for_column(tone_column))
+    questionnaire_tones = questionnaire_df[["participant_code", tone_column]].rename(columns={tone_column: "questionnaire_label"})
+
+    llm_metric_rows = metrics_df[
+        metrics_df["comparison"].astype(str).str.startswith("questionnaire_vs_llm:") & (metrics_df["field"] == tone_column)
+    ].copy()
+    llm_metric_rows = llm_metric_rows.sort_values(["macro_f1", "accuracy"], ascending=[False, False], na_position="last")
+    selected_llm_comparisons = llm_metric_rows["comparison"].head(top_n).tolist()
+    selected_artifact_ids = [comparison.split(":", 1)[1] for comparison in selected_llm_comparisons if ":" in comparison]
+    selected_comparisons = ["questionnaire_vs_vader", *selected_llm_comparisons]
+
+    selected_map = {
+        str(artifact["artifact_id"]): artifact
+        for artifact in accepted_llm_artifacts
+        if str(artifact.get("artifact_id")) in set(selected_artifact_ids)
+    }
+
+    per_label_rows: list[dict[str, Any]] = []
+    confusion_rows: list[dict[str, Any]] = []
+
+    vader_candidate = vader_df[["participant_code", tone_column]].rename(columns={tone_column: "candidate_label"})
+    per_label, confusion = _tone_label_diagnostics(questionnaire_tones, vader_candidate, "questionnaire_vs_vader", labels)
+    per_label_rows.extend(per_label)
+    confusion_rows.extend(confusion)
+
+    for artifact_id in selected_artifact_ids:
+        artifact = selected_map.get(artifact_id)
+        if artifact is None:
+            continue
+        comparison_name = f"questionnaire_vs_llm:{artifact_id}"
+        candidate_df = artifact["data"][["participant_code", tone_column]].rename(columns={tone_column: "candidate_label"})
+        per_label, confusion = _tone_label_diagnostics(questionnaire_tones, candidate_df, comparison_name, labels)
+        per_label_rows.extend(per_label)
+        confusion_rows.extend(confusion)
+
+    return {
+        "enabled": bool(per_label_rows),
+        "experience_tone_field": tone_column,
+        "labels": labels,
+        "top_n_selected": int(top_n),
+        "selected_comparisons": selected_comparisons,
+        "selected_llm_comparisons": selected_llm_comparisons,
+        "selected_llm_artifact_ids": selected_artifact_ids,
+        "per_label": per_label_rows,
+        "confusion": confusion_rows,
+    }
+
+
 def _map_questionnaire_value(value: object, yes_values: list[str], no_values: list[str], source_column: str) -> str:
     if _is_blank(value):
         raise ValueError(f"Questionnaire column {source_column} contains blank values.")
@@ -1212,6 +1331,13 @@ def evaluate_outputs(
         accepted_llm_analysis,
     )
     summary["questionnaire_contradictions"] = contradiction_analysis
+    summary["questionnaire_tone_label_analysis"] = _build_questionnaire_tone_label_analysis(
+        study,
+        metrics_df,
+        questionnaire_df,
+        vader_df,
+        accepted_llm_analysis,
+    )
 
     metrics_path = evaluation_dir / "evaluation_metrics.csv"
     summary_path = evaluation_dir / "evaluation_summary.json"

@@ -121,6 +121,17 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert "majority vote" in report_text.lower()
     assert "rejected human artifacts" in report_text.lower()
     assert "accepted experiments evaluated against the human majority reference" in report_text.lower()
+    assert "paper figures (lead)" in report_text.lower()
+    assert "hypothesis verdict" in report_text.lower()
+    assert "global evidence (macro f1)" in report_text.lower()
+    assert "family-level support (macro f1)" in report_text.lower()
+    assert "human_family_summary.png" in report_text
+    assert "human_tone_summary.png" in report_text
+    assert "human_tone_alignment.png" in report_text
+    assert "extended figures" in report_text.lower()
+    assert "human_comparison_summary.png" in report_text
+    assert report_text.index("## Paper Figures (Lead)") < report_text.index("## Hypothesis Verdict")
+    assert report_text.index("## Hypothesis Verdict") < report_text.index("## General Results")
     assert "general results" in report_text.lower()
     assert "family-level results" in report_text.lower()
     assert "item-level detail" in report_text.lower()
@@ -130,11 +141,31 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert "curated contradictory evidence examples" in questionnaire_report_text.lower()
     assert "questionnaire_contradiction_overview.png" in questionnaire_report_text
     assert "questionnaire_contradiction_unigram_wordcloud.png" in questionnaire_report_text
+    assert "questionnaire_tone_confusion_matrix.png" in questionnaire_report_text
+    assert "neutral focus in experience tone" in questionnaire_report_text.lower()
+    assert "| comparison | neutral support (q) | neutral predicted (a) |" in questionnaire_report_text.lower()
+    detailed_heatmaps_index = questionnaire_report_text.index("## Detailed Heatmaps")
+    contradiction_index = questionnaire_report_text.index("## Contradiction-Focused Qualitative Analysis")
+    assert detailed_heatmaps_index < contradiction_index
     assert set(family_metrics["family"]) >= {"tone", "m8", "m9"}
+    assert "families are operationalized as tone, nde-c, and nde-mcq" in report_text.lower()
+    assert "#### NDE-C" in report_text
+    assert "#### NDE-MCQ" in report_text
+    assert "#### M8" not in report_text
+    assert "#### M9" not in report_text
+    assert "questionnaire_nde_c_macro_f1_heatmap.png" in questionnaire_report_text
+    assert "questionnaire_nde_mcq_macro_f1_heatmap.png" in questionnaire_report_text
+    assert "questionnaire_m8_accuracy_heatmap.png" not in questionnaire_report_text
+    assert "questionnaire_m9_accuracy_heatmap.png" not in questionnaire_report_text
     assert "<details open>" in report_text
     assert (tmp_path / "evaluation_outputs" / "experiments" / "exp_alpha__run-01" / "evaluation_metrics.csv").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_family_summary.png").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_family_summary.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_nde_c_macro_f1_heatmap.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "human_nde_mcq_macro_f1_heatmap.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_nde_c_macro_f1_heatmap.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_nde_mcq_macro_f1_heatmap.png").exists()
+    assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_tone_confusion_matrix.png").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_contradiction_overview.png").exists()
     assert (tmp_path / "evaluation_outputs" / "figures" / "alignment" / "questionnaire_contradiction_unigram_wordcloud.png").exists()
     assert (tmp_path / "evaluation_outputs" / "questionnaire_contradictions.csv").exists()
