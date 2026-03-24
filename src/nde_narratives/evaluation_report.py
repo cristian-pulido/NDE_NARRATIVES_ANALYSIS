@@ -39,6 +39,12 @@ def _wrap_label(label: str, width: int = 24) -> str:
     return fill(label, width=width, break_long_words=False, break_on_hyphens=False)
 
 
+def _format_pct(value: float, decimals: int = 1) -> str:
+    if pd.isna(value):
+        return "n/a"
+    return f"{value * 100:.{decimals}f}%"
+
+
 def _bar_label_y(value: float, min_offset: float = MIN_OFFSET_FOR_BAR_LABEL, scale: float = SCALE_FACTOR_FOR_BAR_LABEL) -> float:
     return value + max(min_offset, abs(value) * scale)
 
@@ -327,9 +333,12 @@ def plot_questionnaire_tone_confusion_matrix(
     used_axes = axes_list[:n_panels]
     for ax, comparison in zip(used_axes, comparisons, strict=False):
         subset = confusion_df[confusion_df["comparison"] == comparison].copy()
-        matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="row_rate")
-        matrix = matrix.reindex(index=row_labels, columns=col_labels)
-        values = matrix.to_numpy(dtype=float)
+        rate_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="row_rate")
+        rate_matrix = rate_matrix.reindex(index=row_labels, columns=col_labels)
+        count_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="count")
+        count_matrix = count_matrix.reindex(index=row_labels, columns=col_labels)
+        values = rate_matrix.to_numpy(dtype=float)
+        counts = count_matrix.to_numpy(dtype=float)
         image = ax.imshow(values, cmap="YlGnBu", aspect="equal", vmin=0.0, vmax=1.0)
         ax.set_xticks(range(len(col_labels)))
         ax.set_yticks(range(len(row_labels)))
@@ -342,7 +351,17 @@ def plot_questionnaire_tone_confusion_matrix(
             for j in range(values.shape[1]):
                 value = values[i, j]
                 if not math.isnan(value):
-                    ax.text(j, i, f"{value:.2f}", ha="center", va="center", color="#1F2933", fontsize=8)
+                    count = counts[i, j]
+                    count_text = f"{int(count)}" if not math.isnan(count) else "?"
+                    ax.text(
+                        j,
+                        i,
+                        f"{count_text}\n({_format_pct(value)})",
+                        ha="center",
+                        va="center",
+                        color="#1F2933",
+                        fontsize=9,
+                    )
 
     for extra_ax in axes_list[n_panels:]:
         extra_ax.axis("off")
@@ -355,6 +374,69 @@ def plot_questionnaire_tone_confusion_matrix(
     fig.subplots_adjust(top=0.90, bottom=0.10, left=0.06, right=0.99)
     fig.patch.set_facecolor("#FFFDF8")
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def _questionnaire_tone_confusion_table_lines(payload: dict[str, Any]) -> list[str]:
+    confusion_rows = payload.get("confusion", [])
+    if not isinstance(confusion_rows, list) or not confusion_rows:
+        return []
+
+    confusion_df = pd.DataFrame(confusion_rows)
+    if confusion_df.empty:
+        return []
+
+    labels = payload.get("labels", [])
+    if not isinstance(labels, list) or not labels:
+        labels = sorted({str(row.get("questionnaire_label", "")) for row in confusion_rows if str(row.get("questionnaire_label", ""))})
+
+    row_labels = [
+        label
+        for label in labels
+        if int(confusion_df.loc[confusion_df["questionnaire_label"] == label, "count"].sum()) > 0
+    ]
+    col_labels = [
+        label
+        for label in labels
+        if int(confusion_df.loc[confusion_df["candidate_label"] == label, "count"].sum()) > 0
+    ]
+    if not row_labels:
+        row_labels = labels
+    if not col_labels:
+        col_labels = labels
+
+    selected_order = _comparison_rank_map(payload)
+    comparisons = confusion_df["comparison"].drop_duplicates().tolist()
+    comparisons = sorted(comparisons, key=lambda value: (selected_order.get(str(value), 999), _comparison_sort_key(str(value))))
+
+    lines: list[str] = ["#### Tone Confusion Table (count + row %)", ""]
+    for comparison in comparisons:
+        subset = confusion_df[confusion_df["comparison"] == comparison].copy()
+        rate_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="row_rate")
+        rate_matrix = rate_matrix.reindex(index=row_labels, columns=col_labels)
+        count_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="count")
+        count_matrix = count_matrix.reindex(index=row_labels, columns=col_labels)
+
+        lines.extend([
+            f"**{_comparison_label(str(comparison))}**",
+            "",
+            "| Questionnaire \\ Automated | " + " | ".join(str(label).title() for label in col_labels) + " |",
+            "| --- | " + " | ".join(["---:"] * len(col_labels)) + " |",
+        ])
+
+        for row_label in row_labels:
+            row_cells: list[str] = []
+            for col_label in col_labels:
+                count = count_matrix.loc[row_label, col_label]
+                rate = rate_matrix.loc[row_label, col_label]
+                if pd.isna(count) and pd.isna(rate):
+                    row_cells.append("n/a")
+                else:
+                    count_text = str(int(count)) if pd.notna(count) else "?"
+                    row_cells.append(f"{count_text} ({_format_pct(float(rate))})")
+            lines.append(f"| {str(row_label).title()} | " + " | ".join(row_cells) + " |")
+        lines.append("")
+
+    return lines
 
 
 def plot_questionnaire_contradiction_overview(
@@ -969,11 +1051,16 @@ def plot_metric_heatmap(
     if bucket_fields:
         pivot = bucket_df.pivot(index="comparison", columns="field", values=metric_name)
         pivot = pivot.reindex(index=comparisons, columns=bucket_fields)
+        n_pivot = bucket_df.pivot(index="comparison", columns="field", values="n")
+        n_pivot = n_pivot.reindex(index=comparisons, columns=bucket_fields)
     else:
         pivot = bucket_df.pivot(index="comparison", columns="field", values=metric_name)
         pivot = pivot.reindex(index=comparisons)
+        n_pivot = bucket_df.pivot(index="comparison", columns="field", values="n")
+        n_pivot = n_pivot.reindex(index=comparisons)
     display_columns = list(pivot.columns)
     matrix = pivot.to_numpy(dtype=float)
+    n_matrix = n_pivot.to_numpy(dtype=float)
 
     longest_x_label = max((_field_display_label(field, study) for field in display_columns), key=len, default="")
     longest_y_label = max((_comparison_label(comparison) for comparison in pivot.index), key=len, default="")
@@ -995,7 +1082,7 @@ def plot_metric_heatmap(
         for j in range(matrix.shape[1]):
             value = matrix[i, j]
             if not math.isnan(value):
-                ax.text(j, i, f"{value:.2f}", ha="center", va="center", color="#1F2933", fontsize=8)
+                ax.text(j, i, f"{value:.2f}", ha="center", va="center", color="#1F2933", fontsize=9)
 
     cbar = fig.colorbar(image, ax=ax, shrink=0.85)
     cbar.set_label(metric_name.replace("_", " ").title())
@@ -1194,19 +1281,31 @@ def write_alignment_figures(
 def _coverage_lines(summary: dict[str, Any]) -> list[str]:
     coverage = summary["coverage"]
     adjudication = summary["adjudication"]
-    return [
+    lines = [
         "## Evaluation Coverage",
         "",
-        f"- Sampled rows available in private mapping: {coverage['n_sampled_total']}",
+        f"- Total NDE records that passed preprocessing with the 3 sections: {coverage.get('n_preprocessed_three_sections_total', coverage['n_sampled_total'])}",
+        f"- Total sampled records available in private mapping: {coverage['n_sampled_total']}",
+        f"- Records retained in the majority-vote human reference: {coverage['n_reference_participants']}",
         f"- Valid human annotation artifacts: {coverage['n_valid_human_artifacts']}",
         f"- Rejected human annotation artifacts: {coverage['n_rejected_human_artifacts']}",
-        f"- Participants carried into the majority human reference: {coverage['n_reference_participants']}",
         f"- Valid LLM artifacts evaluated: {coverage['n_valid_llm_artifacts']}",
         f"- Rejected LLM artifacts: {coverage['n_rejected_llm_artifacts']}",
         f"- Unresolved field/participant pairs after majority voting: {adjudication['n_unresolved_field_participant_pairs']}",
         "- The reference set is computed by field-level majority vote across valid human artifacts. Unresolved ties remain blank and are excluded from the affected field metrics.",
-        "",
     ]
+
+    accepted = summary.get("llm_artifacts", {}).get("accepted", [])
+    if isinstance(accepted, list) and accepted:
+        lines.extend([
+            "- Valid LLMs included in this report:",
+            *[f"  - `{artifact.get('artifact_id', 'unknown')}`" for artifact in accepted],
+        ])
+    else:
+        lines.append("- Valid LLMs included in this report: none")
+
+    lines.append("")
+    return lines
 
 
 def _ranking_lines(comparison_summary: dict[str, Any]) -> list[str]:
@@ -1577,10 +1676,11 @@ def _questionnaire_neutral_focus_lines(summary: dict[str, Any], output_dir: Path
                 "![Experience Tone confusion matrix]"
                 f"({Path(figure_paths['questionnaire_tone_confusion_matrix']).relative_to(output_dir).as_posix()})",
                 "",
-                "The matrix is row-normalized by questionnaire label; this makes neutral→mixed spillover visible even when class frequencies differ.",
+                "The matrix is row-normalized by questionnaire label and each cell shows both row percentage and absolute count, making neutral→mixed spillover visible even when class frequencies differ.",
                 "",
             ]
         )
+        lines.extend(_questionnaire_tone_confusion_table_lines(payload))
     return lines
 
 
@@ -1742,6 +1842,12 @@ def write_alignment_report_for_scope(
     vader_summary: dict[str, Any] | None = None,
 ) -> Path:
     report_path = output_dir / report_filename
+    objective_context = (
+        "This report summarizes questionnaire-vs-automated agreement at global, family, and item level, "
+        "and makes class-distribution behavior explicit in matrices to support interpretation of where alignment succeeds or fails."
+        if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME
+        else "This report prioritizes questionnaire-vs-automated alignment and preserves record-level support tables for manuscript traceability."
+    )
     lines = [
         f"# {title}",
         "",
@@ -1749,12 +1855,15 @@ def write_alignment_report_for_scope(
         "",
         objective,
         "",
+        objective_context,
+        "",
         "## Methodology",
         "",
         "- Human reference: field-level majority vote across valid human annotation artifacts.",
         "- Unresolved ties remain blank and are excluded only from the affected field metrics.",
         "- Metrics reported: accuracy, Cohen kappa, and macro F1.",
         "- Families are operationalized as Tone, NDE-C, and NDE-MCQ to support article-oriented interpretation before item-level detail.",
+        "- Coverage explicitly reports available sampled records, retained reference records, and the complete set of valid LLM artifacts used in evaluation.",
         "",
     ]
     lines.extend(_coverage_lines(summary))

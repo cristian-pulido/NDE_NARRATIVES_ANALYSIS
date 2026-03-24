@@ -1227,6 +1227,12 @@ def evaluate_outputs(
         llm_results_dir=llm_results_dir,
         experiment_ids=experiment_ids,
     )
+    preprocessed_three_section_codes: set[str] = set()
+    for artifact in llm_candidates:
+        llm_df = artifact.get("data")
+        if isinstance(llm_df, pd.DataFrame) and "participant_code" in llm_df.columns:
+            codes = llm_df["participant_code"].dropna().astype(str).str.strip()
+            preprocessed_three_section_codes.update(code for code in codes.tolist() if code)
     accepted_llm: list[dict[str, Any]] = []
     accepted_llm_analysis: list[dict[str, Any]] = []
     accepted_llm_sources: list[dict[str, Any]] = []
@@ -1291,6 +1297,7 @@ def evaluate_outputs(
     sampled_private_df = load_sampled_private_data(resolved_sampled_private)
     coverage = {
         "n_sampled_total": int(len(sampled_private_df)),
+        "n_preprocessed_three_sections_total": int(len(preprocessed_three_section_codes)),
         "n_valid_human_artifacts": int(len(human_artifacts)),
         "n_rejected_human_artifacts": int(len(rejected_humans)),
         "n_reference_participants": adjudication_summary["n_reference_participants"],

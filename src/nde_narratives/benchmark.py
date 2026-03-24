@@ -18,6 +18,7 @@ from .llm.types import LLMRequest
 
 BENCHMARK_LABELS = ("negative", "neutral", "positive")
 DEFAULT_BENCHMARK_PROMPT = "sentiment_prompt.md"
+LABEL_PRIORITY = ("negative", "neutral", "positive", "mixed")
 
 
 @dataclass(frozen=True)
@@ -359,7 +360,7 @@ def resolve_benchmark_prompt_path(paths: PathsConfig, prompt_variant: str | None
     return default_prompt
 
 
-def _parse_llm_label(raw_text: str) -> str:
+def _parse_llm_label(raw_text: str, *, labels: tuple[str, ...]) -> str:
     normalized = raw_text.strip()
     if not normalized:
         raise ValueError("Empty LLM response")
@@ -369,18 +370,57 @@ def _parse_llm_label(raw_text: str) -> str:
         payload = None
     if isinstance(payload, dict):
         label = str(payload.get("label", "")).strip().lower()
-        if label in BENCHMARK_LABELS:
+        if label in labels:
             return label
 
     lowered = normalized.lower()
-    for label in BENCHMARK_LABELS:
+    for label in labels:
         if label in lowered:
             return label
     raise ValueError(f"Could not parse benchmark label from model response: {normalized[:120]}")
 
 
-def _build_prompt(template: str, text: str) -> str:
-    return template.replace("{{text}}", text)
+def _label_guidance_line(label: str) -> str:
+    if label == "negative":
+        return "- negative: wording is predominantly unfavorable, critical, distressing, or adverse in tone."
+    if label == "neutral":
+        return "- neutral: wording is mostly factual/descriptive with little explicit emotional polarity."
+    if label == "positive":
+        return "- positive: wording is predominantly favorable, appreciative, relieved, or supportive in tone."
+    if label == "mixed":
+        return "- mixed: explicit positive and negative wording are both present and near-balanced."
+    return f"- {label}: use only if the wording clearly matches this label."
+
+
+def _build_prompt(template: str, text: str, *, labels: tuple[str, ...]) -> str:
+    labels_csv = ", ".join(labels)
+    labels_schema = "|".join(labels)
+    guidance_block = "\n".join(_label_guidance_line(label) for label in labels)
+
+    prompt = template
+    prompt = prompt.replace("{{labels_csv}}", labels_csv)
+    prompt = prompt.replace("{{labels_schema}}", labels_schema)
+    prompt = prompt.replace("{{label_guidance}}", guidance_block)
+    prompt = prompt.replace("{{text}}", text)
+
+    if "{{labels_csv}}" not in template and "{{labels_schema}}" not in template:
+        dynamic_header = (
+            "Task context: classify writing tone (not inferred event severity).\n"
+            f"Allowed labels: {labels_csv}.\n"
+            f"Return strict JSON with this schema: {{\"label\": \"{labels_schema}\"}}\n\n"
+        )
+        prompt = dynamic_header + prompt
+    return prompt
+
+
+def _infer_active_labels(frame: pd.DataFrame) -> tuple[str, ...]:
+    labels_in_data = {str(value).strip().lower() for value in frame.get("gold_label", pd.Series(dtype=str)).dropna().tolist()}
+    ordered = [label for label in LABEL_PRIORITY if label in labels_in_data]
+    extras = sorted(label for label in labels_in_data if label not in LABEL_PRIORITY)
+    labels = tuple(ordered + extras)
+    if not labels:
+        return BENCHMARK_LABELS
+    return labels
 
 
 def _safe_div(numerator: float, denominator: float) -> float:
@@ -483,7 +523,7 @@ def _build_provider(runtime: BenchmarkRuntimeConfig) -> OllamaProvider:
     return OllamaProvider(base_url=runtime.base_url, timeout_seconds=runtime.timeout_seconds, temperature=runtime.temperature)
 
 
-def _vader_predictions(frame: pd.DataFrame) -> pd.DataFrame:
+def _vader_predictions(frame: pd.DataFrame, *, labels: tuple[str, ...]) -> pd.DataFrame:
     try:
         from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer  # type: ignore
 
@@ -505,11 +545,13 @@ def _vader_predictions(frame: pd.DataFrame) -> pd.DataFrame:
             return 0.2 if pos_hits > neg_hits else -0.2
 
     def to_label(compound: float) -> str:
-        if compound >= 0.05:
-            return "positive"
-        if compound <= -0.05:
-            return "negative"
-        return "neutral"
+        if "neutral" in labels:
+            if compound >= 0.05:
+                return "positive"
+            if compound <= -0.05:
+                return "negative"
+            return "neutral"
+        return "positive" if compound >= 0 else "negative"
 
     rows: list[dict[str, Any]] = []
     for _, row in frame.iterrows():
@@ -534,6 +576,7 @@ def _run_llm_predictions(
     *,
     output_path: Path | None = None,
     existing_df: pd.DataFrame | None = None,
+    labels: tuple[str, ...] = BENCHMARK_LABELS,
 ) -> tuple[pd.DataFrame, int, int]:
     provider = _build_provider(runtime)
     model_name = str(experiment.model or "")
@@ -551,7 +594,7 @@ def _run_llm_predictions(
         record_id = str(row["record_id"])
         if record_id in existing_ids:
             continue
-        prompt = _build_prompt(prompt_template, str(row["text"]))
+        prompt = _build_prompt(prompt_template, str(row["text"]), labels=labels)
         request = LLMRequest(
             participant_code=record_id,
             section="benchmark",
@@ -561,7 +604,7 @@ def _run_llm_predictions(
                 "properties": {
                     "label": {
                         "type": "string",
-                        "enum": list(BENCHMARK_LABELS),
+                        "enum": list(labels),
                     }
                 },
                 "required": ["label"],
@@ -571,7 +614,7 @@ def _run_llm_predictions(
             metadata={},
         )
         response = provider.generate_structured(request)
-        predicted_label = _parse_llm_label(response.raw_text)
+        predicted_label = _parse_llm_label(response.raw_text, labels=labels)
         rows.append(
             {
                 "record_id": record_id,
@@ -636,6 +679,8 @@ def run_benchmark_pipeline(
             "label_mapping_description": download_summary.get("label_mapping_description"),
         }
 
+    active_labels = _infer_active_labels(frame)
+
     run_root = _ensure_dir(Path(run_output_dir or paths.benchmark_runs_dir or (paths.evaluation_output_dir / "benchmark_runs")))
     artifact_name = str(artifact_prefix or "amazon_baseline").strip() or "amazon_baseline"
     if resume:
@@ -658,14 +703,14 @@ def run_benchmark_pipeline(
     if resume and vader_predictions_path.exists() and not from_scratch:
         vader_df = pd.read_csv(vader_predictions_path)
     else:
-        vader_df = _vader_predictions(frame)
+        vader_df = _vader_predictions(frame, labels=active_labels)
         vader_df.to_csv(vader_predictions_path, index=False)
 
     model_metrics_rows: list[dict[str, Any]] = []
     confusion_rows: list[dict[str, Any]] = []
     per_label_rows: list[dict[str, Any]] = []
 
-    vader_metrics = compute_metrics(vader_df["gold_label"].tolist(), vader_df["predicted_label"].tolist())
+    vader_metrics = compute_metrics(vader_df["gold_label"].tolist(), vader_df["predicted_label"].tolist(), labels=active_labels)
     model_metrics_rows.append(
         {
             "source": "vader",
@@ -697,6 +742,7 @@ def run_benchmark_pipeline(
             prompt_template,
             output_path=prediction_path,
             existing_df=existing_df,
+            labels=active_labels,
         )
         artifact_id = str(prediction_df["artifact_id"].iloc[0]) if not prediction_df.empty else experiment.experiment_id
         if not prediction_df.empty:
@@ -711,7 +757,11 @@ def run_benchmark_pipeline(
             }
         )
 
-        metrics = compute_metrics(prediction_df["gold_label"].tolist(), prediction_df["predicted_label"].tolist())
+        metrics = compute_metrics(
+            prediction_df["gold_label"].tolist(),
+            prediction_df["predicted_label"].tolist(),
+            labels=active_labels,
+        )
         model_metrics_rows.append(
             {
                 "source": "llm",
@@ -748,7 +798,7 @@ def run_benchmark_pipeline(
         "dataset_rows": int(len(frame)),
         "prompt_path": str(prompt_path),
         "prompt_variant": prompt_variant,
-        "labels": list(BENCHMARK_LABELS),
+        "labels": list(active_labels),
         "runtime": benchmark.runtime.to_dict(),
         "dataset": dataset_metadata,
         "experiments": [experiment.to_dict() for experiment in enabled_experiments],
