@@ -61,6 +61,24 @@ def _map_amazon_label_to_sentiment(value: object) -> str | None:
     return None
 
 
+def _map_imdb_label_to_sentiment(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"negative", "positive"}:
+            return normalized
+    try:
+        label_value = int(value)
+    except (TypeError, ValueError):
+        return None
+    if label_value == 0:
+        return "negative"
+    if label_value == 1:
+        return "positive"
+    return None
+
+
 def _ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -87,6 +105,29 @@ def _dataset_to_frame(dataset: Any, *, text_column: str, label_column: str) -> p
             }
         )
     return pd.DataFrame(rows, columns=["text", "gold_label", "star_rating"])
+
+
+def _dataset_to_frame_imdb(dataset: Any, *, text_column: str, label_column: str) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for row in dataset:
+        text = str(row.get(text_column, "")).strip()
+        label = _map_imdb_label_to_sentiment(row.get(label_column))
+        if not text or label is None:
+            continue
+        raw_label = row.get(label_column)
+        class_id: int | None = None
+        try:
+            class_id = int(raw_label)
+        except (TypeError, ValueError):
+            class_id = None
+        rows.append(
+            {
+                "text": text,
+                "gold_label": label,
+                "class_id": class_id,
+            }
+        )
+    return pd.DataFrame(rows, columns=["text", "gold_label", "class_id"])
 
 
 def download_and_prepare_amazon_benchmark(
@@ -198,6 +239,108 @@ def download_and_prepare_amazon_benchmark(
     return sampled, BenchmarkArtifactPaths(raw_file=raw_file, processed_file=processed_file, manifest_file=manifest_file), summary
 
 
+def download_and_prepare_imdb_benchmark(
+    paths: PathsConfig,
+    benchmark: BenchmarkConfig,
+    *,
+    max_rows: int | None = None,
+    output_raw_dir: Path | None = None,
+    output_processed_dir: Path | None = None,
+) -> tuple[pd.DataFrame, BenchmarkArtifactPaths, dict[str, Any]]:
+    try:
+        from datasets import load_dataset
+    except ImportError as exc:  # pragma: no cover - exercised by CLI users without dependency
+        raise RuntimeError(
+            "Missing optional dependency 'datasets'. Install dependencies with: pip install -e .[dev]"
+        ) from exc
+
+    dataset_cfg = benchmark.dataset
+    effective_max_rows = int(max_rows if max_rows is not None else dataset_cfg.max_rows)
+    if effective_max_rows < 1:
+        raise ValueError("max_rows must be >= 1")
+
+    def _load(primary_name: str, primary_config: str | None, primary_split: str) -> Any:
+        if primary_config in {None, "", "none", "null"}:
+            return load_dataset(primary_name, split=primary_split)
+        return load_dataset(primary_name, primary_config, split=primary_split)
+
+    used_dataset_name = dataset_cfg.dataset_name
+    used_dataset_config = dataset_cfg.dataset_config
+    used_split = dataset_cfg.split
+    used_text_column = dataset_cfg.text_column
+    used_label_column = dataset_cfg.label_column
+
+    dataset = _load(dataset_cfg.dataset_name, dataset_cfg.dataset_config, dataset_cfg.split)
+    frame = _dataset_to_frame_imdb(dataset, text_column=dataset_cfg.text_column, label_column=dataset_cfg.label_column)
+    if frame.empty:
+        raise ValueError("No valid IMDB benchmark rows were extracted from the selected dataset configuration.")
+
+    sampled = (
+        frame.sample(n=min(effective_max_rows, len(frame)), random_state=dataset_cfg.random_state, replace=False)
+        .reset_index(drop=True)
+        .copy()
+    )
+    sampled.insert(0, "record_id", [f"imdb_{index + 1:07d}" for index in range(len(sampled))])
+    sampled.insert(1, "split", used_split)
+    sampled.insert(2, "source_dataset", used_dataset_name)
+    sampled.insert(3, "source_config", used_dataset_config)
+
+    raw_dir = _ensure_dir(Path(output_raw_dir or paths.benchmark_raw_dir or (paths.evaluation_output_dir / "benchmark_raw")))
+    processed_dir = _ensure_dir(
+        Path(output_processed_dir or paths.benchmark_processed_dir or (paths.evaluation_output_dir / "benchmark_processed"))
+    )
+
+    raw_file = raw_dir / "imdb_raw.jsonl"
+    processed_file = processed_dir / "imdb_normalized.csv"
+    manifest_file = processed_dir / "imdb_manifest.json"
+
+    sampled.to_json(raw_file, orient="records", lines=True, force_ascii=False)
+    sampled.to_csv(processed_file, index=False)
+
+    summary = {
+        "dataset_name": used_dataset_name,
+        "dataset_config": used_dataset_config,
+        "split": used_split,
+        "text_column": used_text_column,
+        "label_column": used_label_column,
+        "label_mapping_description": "Binary class-id mapping used: 0 negative, 1 positive",
+        "rows_total_after_cleaning": int(len(frame)),
+        "rows_written": int(len(sampled)),
+        "class_distribution": {label: int(count) for label, count in sampled["gold_label"].value_counts().to_dict().items()},
+        "generated_at": _now_utc_iso(),
+        "raw_file": str(raw_file),
+        "processed_file": str(processed_file),
+    }
+    manifest_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return sampled, BenchmarkArtifactPaths(raw_file=raw_file, processed_file=processed_file, manifest_file=manifest_file), summary
+
+
+def download_and_prepare_benchmark_dataset(
+    paths: PathsConfig,
+    benchmark: BenchmarkConfig,
+    *,
+    max_rows: int | None = None,
+    output_raw_dir: Path | None = None,
+    output_processed_dir: Path | None = None,
+) -> tuple[pd.DataFrame, BenchmarkArtifactPaths, dict[str, Any]]:
+    dataset_name = str(benchmark.dataset.dataset_name).lower()
+    if "imdb" in dataset_name:
+        return download_and_prepare_imdb_benchmark(
+            paths=paths,
+            benchmark=benchmark,
+            max_rows=max_rows,
+            output_raw_dir=output_raw_dir,
+            output_processed_dir=output_processed_dir,
+        )
+    return download_and_prepare_amazon_benchmark(
+        paths=paths,
+        benchmark=benchmark,
+        max_rows=max_rows,
+        output_raw_dir=output_raw_dir,
+        output_processed_dir=output_processed_dir,
+    )
+
+
 def _default_prompt_path(project_root: Path) -> Path:
     return project_root / "prompts" / "benchmark" / DEFAULT_BENCHMARK_PROMPT
 
@@ -260,6 +403,8 @@ def _infer_label_mapping_description(values: pd.Series) -> str:
             return "Star mapping used: 1-2 negative, 3 neutral, 4-5 positive"
         if unique_values.issubset({0, 1, 2}):
             return "Class-id mapping used: 0 negative, 1 neutral, 2 positive"
+        if unique_values.issubset({0, 1}):
+            return "Binary class-id mapping used: 0 negative, 1 positive"
 
     return "Text labels mapped directly when matching negative/neutral/positive"
 
@@ -454,6 +599,7 @@ def run_benchmark_pipeline(
     *,
     dataset_path: Path | None = None,
     run_output_dir: Path | None = None,
+    artifact_prefix: str | None = None,
     prompt_variant: str | None = None,
     max_rows: int | None = None,
     resume: bool = True,
@@ -491,11 +637,12 @@ def run_benchmark_pipeline(
         }
 
     run_root = _ensure_dir(Path(run_output_dir or paths.benchmark_runs_dir or (paths.evaluation_output_dir / "benchmark_runs")))
+    artifact_name = str(artifact_prefix or "amazon_baseline").strip() or "amazon_baseline"
     if resume:
-        artifact_dir = run_root / "amazon_baseline"
+        artifact_dir = run_root / artifact_name
     else:
         run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        artifact_dir = run_root / f"amazon_baseline__{run_id}"
+        artifact_dir = run_root / f"{artifact_name}__{run_id}"
 
     if from_scratch and artifact_dir.exists():
         shutil.rmtree(artifact_dir)
@@ -633,13 +780,44 @@ def write_benchmark_report(
     *,
     output_dir: Path,
     nde_metrics_path: Path | None = None,
+    comparison_run_summaries: list[Path] | None = None,
 ) -> Path:
-    summary = json.loads(Path(run_summary_path).read_text(encoding="utf-8"))
-    metrics_path = Path(summary["artifacts"]["metrics_file"])
-    metrics_df = pd.read_csv(metrics_path)
+    def _load_summary_with_metrics(path: Path, *, role: str) -> tuple[dict[str, Any], pd.DataFrame]:
+        loaded_summary = json.loads(Path(path).read_text(encoding="utf-8"))
+        loaded_metrics = pd.read_csv(Path(loaded_summary["artifacts"]["metrics_file"]))
+        dataset_name = str(loaded_summary.get("dataset", {}).get("dataset_name", "n/a"))
+        dataset_config = str(loaded_summary.get("dataset", {}).get("dataset_config", ""))
+        loaded_metrics = loaded_metrics.copy()
+        loaded_metrics["dataset_name"] = dataset_name
+        loaded_metrics["dataset_config"] = dataset_config
+        loaded_metrics["summary_role"] = role
+        return loaded_summary, loaded_metrics
+
+    def _quality_band(macro_f1: float, kappa: float) -> str:
+        if macro_f1 >= 0.70 and kappa >= 0.60:
+            return "strong"
+        if macro_f1 >= 0.60 and kappa >= 0.45:
+            return "adequate"
+        if macro_f1 >= 0.50 and kappa >= 0.30:
+            return "mixed"
+        return "limited"
+
+    summary, primary_metrics_df = _load_summary_with_metrics(Path(run_summary_path), role="primary")
+    metrics_df = primary_metrics_df.copy()
+    if comparison_run_summaries:
+        for comparison_summary_path in comparison_run_summaries:
+            _, comparison_metrics_df = _load_summary_with_metrics(Path(comparison_summary_path), role="comparison")
+            metrics_df = pd.concat([metrics_df, comparison_metrics_df], ignore_index=True)
 
     report_dir = _ensure_dir(output_dir)
     report_path = report_dir / "benchmark_report.md"
+
+    source_datasets = sorted(
+        {
+            f"{name}:{cfg}" if str(cfg).strip() else str(name)
+            for name, cfg in zip(metrics_df["dataset_name"], metrics_df["dataset_config"], strict=False)
+        }
+    )
 
     lines = [
         "# Benchmark Baseline Report",
@@ -650,6 +828,7 @@ def write_benchmark_report(
         f"- Split: {summary['dataset']['split']}",
         f"- Source kind: {summary['dataset'].get('source_kind', 'n/a')}",
         f"- Rows evaluated: {summary['dataset_rows']}",
+        f"- Compared datasets in report: {', '.join(source_datasets) if source_datasets else 'n/a'}",
         "",
         "## Methodology",
         f"- Label mapping: {summary['dataset'].get('label_mapping_description', 'n/a')}",
@@ -661,19 +840,77 @@ def write_benchmark_report(
         f"- Prompt variant: {summary.get('prompt_variant') or 'default'}",
         "",
         "## Metrics",
-        "| source | artifact_id | n | accuracy | macro_f1 | cohen_kappa |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| dataset | source | artifact_id | n | accuracy | macro_f1 | cohen_kappa |",
+        "|---|---|---:|---:|---:|---:|---:|",
     ]
     for _, row in metrics_df.iterrows():
+        dataset_cell = str(row.get("dataset_name", "n/a"))
+        dataset_cfg = str(row.get("dataset_config", "")).strip()
+        if dataset_cfg:
+            dataset_cell = f"{dataset_cell}:{dataset_cfg}"
         lines.append(
-            f"| {row.get('source', 'n/a')} | {row.get('artifact_id', 'n/a')} | {int(row.get('n', 0))} | {float(row.get('accuracy', 0.0)):.4f} | {float(row.get('macro_f1', 0.0)):.4f} | {float(row.get('cohen_kappa', 0.0)):.4f} |"
+            f"| {dataset_cell} | {row.get('source', 'n/a')} | {row.get('artifact_id', 'n/a')} | {int(row.get('n', 0))} | {float(row.get('accuracy', 0.0)):.4f} | {float(row.get('macro_f1', 0.0)):.4f} | {float(row.get('cohen_kappa', 0.0)):.4f} |"
         )
+
+    llm_metrics_df = metrics_df[metrics_df["source"].astype(str) == "llm"].copy()
+    scoped_df = llm_metrics_df if not llm_metrics_df.empty else metrics_df
+    top_row = scoped_df.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
+    bottom_row = scoped_df.sort_values(["macro_f1", "cohen_kappa"], ascending=True).iloc[0]
+
+    aggregate_macro_f1 = float(scoped_df["macro_f1"].mean()) if not scoped_df.empty else 0.0
+    aggregate_kappa = float(scoped_df["cohen_kappa"].mean()) if not scoped_df.empty else 0.0
+    macro_f1_std = float(scoped_df["macro_f1"].std(ddof=0)) if not scoped_df.empty else 0.0
+    kappa_std = float(scoped_df["cohen_kappa"].std(ddof=0)) if not scoped_df.empty else 0.0
+    quality_band = _quality_band(aggregate_macro_f1, aggregate_kappa)
+
+    top_macro_f1 = float(top_row.get("macro_f1", 0.0))
+    top_kappa = float(top_row.get("cohen_kappa", 0.0))
+    bottom_macro_f1 = float(bottom_row.get("macro_f1", 0.0))
+    bottom_kappa = float(bottom_row.get("cohen_kappa", 0.0))
 
     interpretation_lines = [
         "## Interpretation",
-        "- Higher benchmark metrics indicate that the tone model can capture sentiment in externally labeled text.",
-        "- These values provide a baseline for interpreting lower alignment in NDE narrative analyses.",
+        "### Evidence scale",
+        "- **strong**: macro_f1 >= 0.70 and kappa >= 0.60",
+        "- **adequate**: macro_f1 >= 0.60 and kappa >= 0.45",
+        "- **mixed**: macro_f1 >= 0.50 and kappa >= 0.30",
+        "- **limited**: below mixed thresholds",
+        "",
+        "### Aggregate reading",
+        (
+            f"- Aggregate performance across evaluated systems: macro_f1={aggregate_macro_f1:.4f} "
+            f"(std={macro_f1_std:.4f}), kappa={aggregate_kappa:.4f} (std={kappa_std:.4f})."
+        ),
+        f"- Overall evidence level for this benchmark: **{quality_band}**.",
+        "",
+        "### Model spread (best and worst)",
+        (
+            f"- Best artifact in scope: {top_row.get('artifact_id', 'n/a')} "
+            f"(dataset={top_row.get('dataset_name', 'n/a')}, macro_f1={top_macro_f1:.4f}, kappa={top_kappa:.4f})."
+        ),
+        (
+            f"- Worst artifact in scope: {bottom_row.get('artifact_id', 'n/a')} "
+            f"(dataset={bottom_row.get('dataset_name', 'n/a')}, macro_f1={bottom_macro_f1:.4f}, kappa={bottom_kappa:.4f})."
+        ),
     ]
+
+    vader_rows = metrics_df[metrics_df["source"].astype(str) == "vader"].copy()
+    if not llm_metrics_df.empty and not vader_rows.empty:
+        best_vader = vader_rows.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
+        delta_macro_f1 = top_macro_f1 - float(best_vader.get("macro_f1", 0.0))
+        interpretation_lines.append(f"- Best LLM vs best VADER macro_f1 delta: {delta_macro_f1:+.4f}.")
+
+    if metrics_df["dataset_name"].nunique() > 1:
+        interpretation_lines.append("- Multi-dataset comparison enabled in this report:")
+        for dataset_name, dataset_subset in metrics_df.groupby("dataset_name", dropna=False):
+            dataset_best = dataset_subset.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
+            interpretation_lines.append(
+                (
+                    f"  - {dataset_name}: best={dataset_best.get('artifact_id', 'n/a')} "
+                    f"(macro_f1={float(dataset_best.get('macro_f1', 0.0)):.4f}, "
+                    f"kappa={float(dataset_best.get('cohen_kappa', 0.0)):.4f})."
+                )
+            )
 
     if nde_metrics_path is not None and Path(nde_metrics_path).exists():
         nde_metrics = pd.read_csv(nde_metrics_path)
@@ -706,8 +943,6 @@ def write_benchmark_report(
             )
         else:
             interpretation_lines.append("- NDE metrics file was provided, but no comparable tone rows were found.")
-    else:
-        interpretation_lines.append("- NDE comparison table not included because no NDE metrics file was provided.")
 
     lines.extend(
         [
@@ -715,8 +950,9 @@ def write_benchmark_report(
             *interpretation_lines,
             "",
             "## Limitations",
-            "- Amazon reviews are domain-specific and may differ from NDE narrative style.",
-            "- Label mapping from stars to sentiment is a proxy and may include ambiguity near class boundaries.",
+            "- External datasets may differ from NDE narrative language and context.",
+            "- Label-space mapping (binary or 3-class) can introduce ambiguity near class boundaries.",
+            "- Threshold-based interpretation is heuristic and should be triangulated with qualitative error analysis.",
             "",
         ]
     )

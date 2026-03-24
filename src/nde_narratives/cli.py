@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 
@@ -639,6 +640,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional path to NDE evaluation_metrics.csv to include a Benchmark vs NDE comparison table.",
     )
+    benchmark_report.add_argument(
+        "--compare-run-summary",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="Optional additional run_summary.json paths to include multi-dataset benchmark comparison in one report.",
+    )
     benchmark_report.set_defaults(handler=cmd_benchmark_report)
 
     benchmark_all = subparsers.add_parser(
@@ -993,11 +1001,12 @@ def _latest_benchmark_run_summary(paths_config) -> Path:
 
 
 def cmd_benchmark_download(args: argparse.Namespace) -> int:
-    from .benchmark import download_and_prepare_amazon_benchmark
+    from .benchmark import download_and_prepare_benchmark_dataset
 
     paths = load_paths_config(args.paths_config)
     benchmark = load_benchmark_config(args.paths_config)
-    dataset_df, written, summary = download_and_prepare_amazon_benchmark(
+    benchmark = replace(benchmark, dataset=benchmark.datasets[0])
+    dataset_df, written, summary = download_and_prepare_benchmark_dataset(
         paths=paths,
         benchmark=benchmark,
         max_rows=args.max_rows,
@@ -1029,6 +1038,7 @@ def cmd_benchmark_run(args: argparse.Namespace) -> int:
         benchmark=benchmark,
         dataset_path=Path(args.dataset_path).resolve() if args.dataset_path else None,
         run_output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        artifact_prefix=None,
         prompt_variant=args.prompt_variant,
         max_rows=args.max_rows,
         resume=not bool(args.from_scratch),
@@ -1048,42 +1058,56 @@ def cmd_benchmark_report(args: argparse.Namespace) -> int:
         run_summary,
         output_dir=output_dir,
         nde_metrics_path=Path(args.nde_metrics).resolve() if args.nde_metrics else None,
+        comparison_run_summaries=[Path(path).resolve() for path in args.compare_run_summary]
+        if args.compare_run_summary
+        else None,
     )
     print(json.dumps({"run_summary": str(run_summary), "report_file": str(report_path)}, indent=2))
     return 0
 
 
 def cmd_benchmark_all(args: argparse.Namespace) -> int:
-    from .benchmark import download_and_prepare_amazon_benchmark, run_benchmark_pipeline, write_benchmark_report
+    from .benchmark import download_and_prepare_benchmark_dataset, run_benchmark_pipeline, write_benchmark_report
 
     paths = load_paths_config(args.paths_config)
     benchmark = load_benchmark_config(args.paths_config)
-    dataset_df, written, download_summary = download_and_prepare_amazon_benchmark(
-        paths=paths,
-        benchmark=benchmark,
-        max_rows=args.max_rows,
-        output_raw_dir=Path(args.raw_dir).resolve() if args.raw_dir else None,
-        output_processed_dir=Path(args.processed_dir).resolve() if args.processed_dir else None,
+    configured_datasets = benchmark.datasets if benchmark.datasets else [benchmark.dataset]
+    run_root_base = (
+        Path(args.run_output_dir).resolve()
+        if args.run_output_dir
+        else Path(paths.benchmark_runs_dir or (paths.evaluation_output_dir / "benchmark_runs")).resolve()
     )
-    run_summary = run_benchmark_pipeline(
-        paths=paths,
-        benchmark=benchmark,
-        dataset_path=written.processed_file,
-        run_output_dir=Path(args.run_output_dir).resolve() if args.run_output_dir else None,
-        prompt_variant=args.prompt_variant,
-        max_rows=args.max_rows,
-        resume=not bool(args.from_scratch),
-        from_scratch=bool(args.from_scratch),
-    )
-    summary_path = Path(run_summary["summary_file"])  # type: ignore[index]
-    report_path = write_benchmark_report(
-        summary_path,
-        output_dir=Path(args.report_output_dir).resolve() if args.report_output_dir else Path(paths.benchmark_reports_dir),
-        nde_metrics_path=Path(args.nde_metrics).resolve() if args.nde_metrics else None,
-    )
-    print(
-        json.dumps(
+
+    per_dataset_rows: list[dict[str, object]] = []
+    summary_paths: list[Path] = []
+
+    for dataset_cfg in configured_datasets:
+        dataset_benchmark = replace(benchmark, dataset=dataset_cfg)
+        dataset_slug = re.sub(r"[^a-z0-9]+", "_", dataset_cfg.dataset_name.lower()).strip("_") or "dataset"
+
+        dataset_df, written, download_summary = download_and_prepare_benchmark_dataset(
+            paths=paths,
+            benchmark=dataset_benchmark,
+            max_rows=args.max_rows,
+            output_raw_dir=Path(args.raw_dir).resolve() if args.raw_dir else None,
+            output_processed_dir=Path(args.processed_dir).resolve() if args.processed_dir else None,
+        )
+        run_summary = run_benchmark_pipeline(
+            paths=paths,
+            benchmark=dataset_benchmark,
+            dataset_path=written.processed_file,
+            run_output_dir=run_root_base / dataset_slug,
+            artifact_prefix=f"{dataset_slug}_baseline",
+            prompt_variant=args.prompt_variant,
+            max_rows=args.max_rows,
+            resume=not bool(args.from_scratch),
+            from_scratch=bool(args.from_scratch),
+        )
+        summary_path = Path(run_summary["summary_file"])  # type: ignore[index]
+        summary_paths.append(summary_path)
+        per_dataset_rows.append(
             {
+                "dataset_name": dataset_cfg.dataset_name,
                 "rows": int(len(dataset_df)),
                 "download": {
                     "raw_file": str(written.raw_file),
@@ -1092,6 +1116,22 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
                     "summary": download_summary,
                 },
                 "run": run_summary,
+            }
+        )
+
+    if not summary_paths:
+        raise ValueError("No benchmark datasets configured. Define [benchmark.dataset] or [[benchmark.datasets]].")
+
+    report_path = write_benchmark_report(
+        summary_paths[0],
+        output_dir=Path(args.report_output_dir).resolve() if args.report_output_dir else Path(paths.benchmark_reports_dir),
+        nde_metrics_path=Path(args.nde_metrics).resolve() if args.nde_metrics else None,
+        comparison_run_summaries=summary_paths[1:] if len(summary_paths) > 1 else None,
+    )
+    print(
+        json.dumps(
+            {
+                "datasets": per_dataset_rows,
                 "report_file": str(report_path),
             },
             indent=2,

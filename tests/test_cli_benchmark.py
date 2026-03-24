@@ -155,6 +155,67 @@ def test_benchmark_report_can_include_benchmark_vs_nde_table(tmp_path: Path) -> 
     assert "### Benchmark vs NDE" in report_text
 
 
+def test_benchmark_report_supports_comparison_run_summaries(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    benchmark_csv = FIXTURES / "benchmark_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    amazon_run = run_cli(
+        "benchmark-run",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--dataset-path",
+        str(benchmark_csv),
+        "--output-dir",
+        str(tmp_path / "benchmark_runs_amazon"),
+    )
+    assert amazon_run.returncode == 0, amazon_run.stderr
+    amazon_payload = _load_json(amazon_run.stdout)
+
+    imdb_run = run_cli(
+        "benchmark-run",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--dataset-path",
+        str(benchmark_csv),
+        "--output-dir",
+        str(tmp_path / "benchmark_runs_imdb"),
+    )
+    assert imdb_run.returncode == 0, imdb_run.stderr
+    imdb_payload = _load_json(imdb_run.stdout)
+
+    imdb_summary_path = Path(imdb_payload["summary_file"])
+    imdb_summary = json.loads(imdb_summary_path.read_text(encoding="utf-8"))
+    imdb_summary["dataset"]["dataset_name"] = "imdb"
+    imdb_summary_path.write_text(json.dumps(imdb_summary, indent=2), encoding="utf-8")
+
+    report_result = run_cli(
+        "benchmark-report",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--run-summary",
+        str(amazon_payload["summary_file"]),
+        "--compare-run-summary",
+        str(imdb_payload["summary_file"]),
+        "--output-dir",
+        str(tmp_path / "benchmark_reports"),
+    )
+    assert report_result.returncode == 0, report_result.stderr
+    report_payload = _load_json(report_result.stdout)
+    report_text = Path(report_payload["report_file"]).read_text(encoding="utf-8")
+
+    assert "Compared datasets in report" in report_text
+    assert "imdb" in report_text
+    assert "Overall evidence level for this benchmark" in report_text
+
+
 def test_compute_metrics_returns_expected_keys() -> None:
     y_true = ["positive", "negative", "neutral", "positive"]
     y_pred = ["positive", "negative", "positive", "neutral"]

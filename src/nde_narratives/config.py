@@ -283,6 +283,7 @@ class BenchmarkConfig:
     path: Path
     runtime: BenchmarkRuntimeConfig
     dataset: BenchmarkDatasetConfig
+    datasets: list[BenchmarkDatasetConfig]
     experiments: list[BenchmarkExperimentConfig]
 
 
@@ -583,6 +584,26 @@ def load_benchmark_config(path: str | Path | None = None) -> BenchmarkConfig:
     if dataset.max_rows < 1:
         raise ValueError(f"benchmark.dataset.max_rows must be >= 1 in {resolved}")
 
+    datasets_raw = list(benchmark_raw.get("datasets", []))
+    datasets: list[BenchmarkDatasetConfig] = []
+    if datasets_raw:
+        for item in datasets_raw:
+            dataset_item = dict(item)
+            parsed = BenchmarkDatasetConfig(
+                dataset_name=_coerce_str(dataset_item.get("dataset_name"), dataset.dataset_name),
+                dataset_config=_coerce_str(dataset_item.get("dataset_config"), dataset.dataset_config),
+                split=_coerce_str(dataset_item.get("split"), dataset.split),
+                text_column=_coerce_str(dataset_item.get("text_column"), dataset.text_column),
+                label_column=_coerce_str(dataset_item.get("label_column"), dataset.label_column),
+                max_rows=_coerce_int(dataset_item.get("max_rows"), dataset.max_rows),
+                random_state=_coerce_int(dataset_item.get("random_state"), dataset.random_state),
+            )
+            if parsed.max_rows < 1:
+                raise ValueError(f"benchmark.datasets.max_rows must be >= 1 in {resolved}")
+            datasets.append(parsed)
+    else:
+        datasets = [dataset]
+
     experiment_items = list(benchmark_raw.get("experiments", []))
     if not experiment_items:
         experiment_items = list(llm_raw.get("experiments", []))
@@ -615,4 +636,4 @@ def load_benchmark_config(path: str | Path | None = None) -> BenchmarkConfig:
             )
         )
 
-    return BenchmarkConfig(path=resolved, runtime=runtime, dataset=dataset, experiments=experiments)
+    return BenchmarkConfig(path=resolved, runtime=runtime, dataset=dataset, datasets=datasets, experiments=experiments)

@@ -28,6 +28,24 @@ label_column = "label"
 max_rows = 2000
 random_state = 20
 
+[[benchmark.datasets]]
+dataset_name = "amazon_reviews_multi"
+dataset_config = "en"
+split = "train"
+text_column = "review_body"
+label_column = "stars"
+max_rows = 2000
+random_state = 20
+
+[[benchmark.datasets]]
+dataset_name = "imdb"
+dataset_config = ""
+split = "test"
+text_column = "text"
+label_column = "label"
+max_rows = 2000
+random_state = 20
+
 [[benchmark.experiments]]
 experiment_id = "amazon_qwen25_baseline"
 enabled = true
@@ -39,6 +57,8 @@ temperature = 0.0
 ```
 
 If `[[benchmark.experiments]]` is omitted, benchmark execution reuses `[[llm.experiments]]` automatically and keeps unique artifact ids.
+
+If `[[benchmark.datasets]]` is present, `nde benchmark-all` runs every dataset in that list and generates one comparative report automatically.
 
 Benchmark artifacts are stored under optional benchmark path keys in `[paths]`:
 
