@@ -419,6 +419,12 @@ def _count_rows_with_exact_valid_sections(cleaned_df: pd.DataFrame, column: str,
 def _build_cleaned_dataset(source_df: pd.DataFrame, records: dict[str, dict[str, Any]], study: StudyConfig) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     by_code = source_df.set_index("participant_code")
+    passthrough_columns = [
+        study.stratify_column,
+        str(study.dataset.get("quality_label_column") or ""),
+        str(study.dataset.get("to_drop_column") or ""),
+    ]
+    passthrough_columns = [column for column in passthrough_columns if column and column in source_df.columns]
     for participant_code in by_code.index:
         row = by_code.loc[participant_code]
         record = records.get(str(participant_code), _base_record(row, study))
@@ -438,6 +444,8 @@ def _build_cleaned_dataset(source_df: pd.DataFrame, records: dict[str, dict[str,
             "original_experience": _coerce_text(row.get(study.sections["experience"].source_column)),
             "original_aftereffects": _coerce_text(row.get(study.sections["aftereffects"].source_column)),
         }
+        for column in passthrough_columns:
+            cleaned[column] = row.get(column)
         rows.append(cleaned)
     return pd.DataFrame(rows)
 

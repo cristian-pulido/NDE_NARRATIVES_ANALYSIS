@@ -241,6 +241,257 @@ def _save_figure(fig, figure_path: Path, dpi: int = 300, export_pdf: bool = Fals
     return written
 
 
+def _questionnaire_contradiction_payload(summary: dict[str, Any]) -> dict[str, Any]:
+    payload = summary.get("questionnaire_contradictions", {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def plot_questionnaire_contradiction_overview(
+    contradiction_payload: dict[str, Any],
+    figure_path: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    overview = pd.DataFrame(contradiction_payload.get("overview", []))
+    if overview.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No contradiction data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    overview = overview.copy()
+    overview["comparison_label"] = overview["comparison"].map(_comparison_label)
+    overview = overview.sort_values("contradiction_rate", ascending=False)
+    labels = [_wrap_label(value, width=26) for value in overview["comparison_label"].tolist()]
+    x = list(range(len(overview)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(14.2, max(4.8, 1.1 * len(overview) + 2.6)))
+    bars = axes[0].barh(x, overview["n_contradictions"], color="#B23A48", edgecolor="#F8F5F0", linewidth=0.8)
+    axes[0].set_yticks(x)
+    axes[0].set_yticklabels(labels)
+    axes[0].set_xlabel("Contradictory rows (count)")
+    axes[0].set_title("Strict polarity contradictions")
+    _style_axes(axes[0])
+    for bar, value in zip(bars, overview["n_contradictions"], strict=False):
+        axes[0].text(bar.get_width() + 0.1, bar.get_y() + bar.get_height() / 2, f"{int(value)}", va="center", ha="left", fontsize=8, color="#2B2D42")
+
+    rates = overview["contradiction_rate"].fillna(0.0).astype(float)
+    bars_rate = axes[1].barh(x, rates, color="#2A6F97", edgecolor="#F8F5F0", linewidth=0.8)
+    axes[1].set_yticks(x)
+    axes[1].set_yticklabels([])
+    axes[1].set_xlim(0.0, max(0.25, float(rates.max()) * 1.2 if len(rates) else 0.25))
+    axes[1].set_xlabel("Contradiction rate")
+    axes[1].set_title("Rate among positive/negative questionnaire rows")
+    _style_axes(axes[1])
+    for bar, value in zip(bars_rate, rates, strict=False):
+        axes[1].text(bar.get_width() + 0.005, bar.get_y() + bar.get_height() / 2, f"{value:.1%}", va="center", ha="left", fontsize=8, color="#2B2D42")
+
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def _draw_wordcloud_like(ax, terms: list[dict[str, Any]]) -> None:
+    ax.set_facecolor("#F7F4EA")
+    ax.axis("off")
+    if not terms:
+        ax.text(0.5, 0.5, "No unigram evidence terms available", ha="center", va="center", fontsize=12, color="#2B2D42")
+        return
+
+    top_terms = terms[:45]
+    max_count = max(int(item.get("count", 1)) for item in top_terms)
+    palette = ["#355070", "#6D597A", "#B56576", "#2A9D8F", "#457B9D", "#B08968"]
+
+    def _box_for(x: float, y: float, text: str, size: float) -> tuple[float, float, float, float]:
+        # Approximate text bbox in axes coordinates.
+        width = min(0.46, max(0.055, 0.0019 * size * max(3, len(text))))
+        height = min(0.10, max(0.028, 0.0033 * size))
+        return (x - width / 2, y - height / 2, x + width / 2, y + height / 2)
+
+    def _overlaps(a: tuple[float, float, float, float], b: tuple[float, float, float, float], margin: float = 0.008) -> bool:
+        return not (a[2] + margin < b[0] or a[0] - margin > b[2] or a[3] + margin < b[1] or a[1] - margin > b[3])
+
+    placed_boxes: list[tuple[float, float, float, float]] = []
+    golden = math.pi * (3 - math.sqrt(5))
+
+    for index, item in enumerate(top_terms):
+        term = str(item.get("term") or item.get("ngram") or "").strip()
+        if not term:
+            continue
+        count = int(item.get("count", 1))
+        rank_factor = count / max_count
+        size = 11 + (22 * rank_factor)
+
+        placed = False
+        for step in range(1, 900):
+            radius = 0.01 + 0.46 * math.sqrt(step / 900)
+            angle = step * golden
+            x = 0.5 + radius * math.cos(angle)
+            y = 0.5 + radius * math.sin(angle)
+            if x < 0.08 or x > 0.92 or y < 0.10 or y > 0.90:
+                continue
+
+            box = _box_for(x, y, term, size)
+            if box[0] < 0.03 or box[2] > 0.97 or box[1] < 0.04 or box[3] > 0.96:
+                continue
+            if any(_overlaps(box, other) for other in placed_boxes):
+                continue
+
+            ax.text(x, y, term, fontsize=size, rotation=0, ha="center", va="center", color=palette[index % len(palette)], alpha=0.94)
+            placed_boxes.append(box)
+            placed = True
+            break
+
+        if not placed:
+            # Safe fallback near lower band to avoid hard failure.
+            fallback_x = 0.08 + 0.84 * ((index % 10) / 9 if 9 else 0)
+            fallback_y = 0.08 + 0.05 * (index // 10)
+            ax.text(fallback_x, fallback_y, term, fontsize=max(9, min(13, size * 0.55)), rotation=0, ha="center", va="center", color=palette[index % len(palette)], alpha=0.85)
+
+
+def plot_questionnaire_unigram_wordcloud(
+    contradiction_payload: dict[str, Any],
+    figure_path: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    terms_by_direction = contradiction_payload.get("ngrams", {}).get("wordcloud_terms_by_direction", {})
+    if isinstance(terms_by_direction, dict) and terms_by_direction:
+        qpos_lneg = terms_by_direction.get("q_positive_llm_negative", [])
+        qneg_lpos = terms_by_direction.get("q_negative_llm_positive", [])
+        fig, axes = plt.subplots(1, 2, figsize=(14.8, 6.8))
+        _draw_wordcloud_like(axes[0], qpos_lneg if isinstance(qpos_lneg, list) else [])
+        axes[0].set_title("Questionnaire POSITIVE → LLM NEGATIVE")
+        _draw_wordcloud_like(axes[1], qneg_lpos if isinstance(qneg_lpos, list) else [])
+        axes[1].set_title("Questionnaire NEGATIVE → LLM POSITIVE")
+        fig.suptitle("Contradiction evidence word cloud (unigrams)")
+    else:
+        terms = contradiction_payload.get("ngrams", {}).get("wordcloud_terms", [])
+        fig, ax = plt.subplots(figsize=(12.5, 6.8))
+        _draw_wordcloud_like(ax, terms if isinstance(terms, list) else [])
+        ax.set_title("Contradiction evidence word cloud (unigrams)")
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def plot_questionnaire_ngram_panels(
+    contradiction_payload: dict[str, Any],
+    figure_path: Path,
+    ngram_key: str,
+    title: str,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    per_comparison = contradiction_payload.get("ngrams", {}).get("per_comparison", [])
+    if not isinstance(per_comparison, list):
+        per_comparison = []
+    selected = per_comparison[:3]
+
+    if not selected:
+        fig, ax = plt.subplots(figsize=(10, 4.2))
+        ax.text(0.5, 0.5, "No n-gram evidence data available", ha="center", va="center", fontsize=12, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    fig, axes = plt.subplots(len(selected), 1, figsize=(12.5, 3.5 * len(selected)))
+    if len(selected) == 1:
+        axes = [axes]
+
+    for ax, row in zip(axes, selected, strict=False):
+        direction_block = row.get("by_direction", {}) if isinstance(row, dict) else {}
+        qpos_lneg_items = direction_block.get("q_positive_llm_negative", {}).get(ngram_key, []) if isinstance(direction_block, dict) else []
+        qneg_lpos_items = direction_block.get("q_negative_llm_positive", {}).get(ngram_key, []) if isinstance(direction_block, dict) else []
+
+        if not isinstance(qpos_lneg_items, list):
+            qpos_lneg_items = []
+        if not isinstance(qneg_lpos_items, list):
+            qneg_lpos_items = []
+
+        tagged_items: list[tuple[str, int, str]] = []
+        tagged_items.extend(
+            [
+                (f"Q+→L- | {str(item.get('term') or item.get('ngram') or '')}", int(item.get("count", 0)), "#B23A48")
+                for item in qpos_lneg_items[:6]
+            ]
+        )
+        tagged_items.extend(
+            [
+                (f"Q-→L+ | {str(item.get('term') or item.get('ngram') or '')}", int(item.get("count", 0)), "#2A6F97")
+                for item in qneg_lpos_items[:6]
+            ]
+        )
+
+        if not tagged_items:
+            fallback_items = row.get(ngram_key, []) if isinstance(row, dict) else []
+            if not isinstance(fallback_items, list):
+                fallback_items = []
+            tagged_items = [
+                (str(item.get("term") or item.get("ngram") or ""), int(item.get("count", 0)), "#6C9A8B")
+                for item in fallback_items[:10]
+            ]
+
+        labels = [_wrap_label(item[0], width=34) for item in tagged_items]
+        values = [item[1] for item in tagged_items]
+        colors = [item[2] for item in tagged_items]
+        y = list(range(len(tagged_items)))
+        ax.barh(y, values, color=colors, edgecolor="#F8F5F0", linewidth=0.8)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()
+        ax.set_xlabel("Frequency")
+        ax.set_title(_wrap_label(_comparison_label(str(row.get("comparison", ""))), width=46), fontsize=10)
+        _style_axes(ax)
+        for index, value in enumerate(values):
+            ax.text(value + 0.1, index, str(value), va="center", ha="left", fontsize=8, color="#2B2D42")
+
+    fig.suptitle(title, fontsize=13)
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def write_questionnaire_contradiction_figures(
+    summary: dict[str, Any],
+    figures_dir: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> dict[str, str]:
+    contradiction_payload = _questionnaire_contradiction_payload(summary)
+    if not contradiction_payload:
+        return {}
+
+    overview_path = figures_dir / "questionnaire_contradiction_overview.png"
+    wordcloud_path = figures_dir / "questionnaire_contradiction_unigram_wordcloud.png"
+    bigrams_path = figures_dir / "questionnaire_contradiction_bigrams.png"
+    trigrams_path = figures_dir / "questionnaire_contradiction_trigrams.png"
+
+    plot_questionnaire_contradiction_overview(contradiction_payload, overview_path, dpi=dpi, export_pdf=export_pdf)
+    plot_questionnaire_unigram_wordcloud(contradiction_payload, wordcloud_path, dpi=dpi, export_pdf=export_pdf)
+    plot_questionnaire_ngram_panels(
+        contradiction_payload,
+        bigrams_path,
+        ngram_key="bigrams",
+        title="Top contradiction evidence bigrams",
+        dpi=dpi,
+        export_pdf=export_pdf,
+    )
+    plot_questionnaire_ngram_panels(
+        contradiction_payload,
+        trigrams_path,
+        ngram_key="trigrams",
+        title="Top contradiction evidence trigrams",
+        dpi=dpi,
+        export_pdf=export_pdf,
+    )
+
+    return {
+        "questionnaire_contradiction_overview": str(overview_path),
+        "questionnaire_contradiction_unigram_wordcloud": str(wordcloud_path),
+        "questionnaire_contradiction_bigrams": str(bigrams_path),
+        "questionnaire_contradiction_trigrams": str(trigrams_path),
+    }
+
+
 def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path, dpi: int = 300, export_pdf: bool = False, scope_prefix: str | None = None, baseline_comparisons: list[str] | None = None, top_n: int = 3) -> list[str]:
     """Plot comparison summary figure, optionally filtered to baselines + top N LLMs by macro_f1.
 
@@ -1053,6 +1304,98 @@ def _field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig) -> list[st
     return lines
 
 
+def _questionnaire_contradiction_lines(summary: dict[str, Any], output_dir: Path, figure_paths: dict[str, str]) -> list[str]:
+    payload = _questionnaire_contradiction_payload(summary)
+    lines = ["## Contradiction-Focused Qualitative Analysis", ""]
+    if not payload:
+        lines.extend(["- Contradiction analysis was not available in this run.", ""])
+        return lines
+
+    lines.extend(
+        [
+            "### Scope and Definition",
+            "",
+            f"- {payload.get('definition', 'Strict polarity contradiction definition not available.')}",
+            f"- Top LLMs selected for qualitative analysis: {', '.join(payload.get('selected_llm_artifact_ids', [])) or 'none'}",
+            "- VADER is retained only as a quantitative baseline because it does not provide extractive evidence spans.",
+            "",
+            "### Quantitative Contradiction Overview",
+            "",
+            "| Comparison | Type | N total | N contradictions | Rate | Evidence spans |",
+            "| --- | --- | ---: | ---: | ---: | --- |",
+        ]
+    )
+
+    overview = payload.get("overview", [])
+    if isinstance(overview, list) and overview:
+        for row in overview:
+            lines.append(
+                f"| {_comparison_label(str(row.get('comparison', '')))} | {str(row.get('source_kind', 'n/a')).upper()} | {int(row.get('n_total', 0))} | {int(row.get('n_contradictions', 0))} | {float(row.get('contradiction_rate', 0.0)):.1%} | {'yes' if bool(row.get('evidence_available', False)) else 'no'} |"
+            )
+    else:
+        lines.append("| n/a | n/a | 0 | 0 | 0.0% | no |")
+    lines.append("")
+
+    if "questionnaire_contradiction_overview" in figure_paths:
+        lines.extend(
+            [
+                "### Visual Summaries",
+                "",
+                f"![Contradiction overview]({Path(figure_paths['questionnaire_contradiction_overview']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![Unigram contradiction word cloud]({Path(figure_paths['questionnaire_contradiction_unigram_wordcloud']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
+
+    lines.extend(["### Curated Contradictory Evidence Examples", ""])
+    examples = payload.get("examples", [])
+    if isinstance(examples, list) and examples:
+        lines.extend(
+            [
+                "| Comparison | Participant | Questionnaire | Automated | Evidence excerpt |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in examples:
+            excerpt = str(row.get("evidence_text", "")).replace("\n", " ").strip()
+            if len(excerpt) > 180:
+                excerpt = f"{excerpt[:177]}..."
+            direction = str(row.get("direction", "")).strip()
+            direction_label = (
+                "Q+→LLM-" if direction == "q_positive_llm_negative" else "Q-→LLM+" if direction == "q_negative_llm_positive" else "n/a"
+            )
+            lines.append(
+                f"| {_comparison_label(str(row.get('comparison', '')))} ({direction_label}) | {str(row.get('participant_code', ''))} | {str(row.get('questionnaire_label', ''))} | {str(row.get('candidate_label', ''))} | {excerpt or 'n/a'} |"
+            )
+    else:
+        lines.append("- No contradiction examples were available for the selected LLM comparisons.")
+    lines.append("")
+
+    lines.extend(["### N-gram Findings", ""])
+    if "questionnaire_contradiction_bigrams" in figure_paths:
+        lines.extend(
+            [
+                f"![Contradiction bigrams]({Path(figure_paths['questionnaire_contradiction_bigrams']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![Contradiction trigrams]({Path(figure_paths['questionnaire_contradiction_trigrams']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
+    else:
+        lines.append("- N-gram visual summaries were not available in this run.")
+        lines.append("")
+
+    notes = payload.get("notes", [])
+    if isinstance(notes, list) and notes:
+        lines.append("### Interpretation Notes")
+        lines.append("")
+        for note in notes:
+            lines.append(f"- {note}")
+        lines.append("")
+    return lines
+
+
 def _compact_field_result_lines(metrics_df: pd.DataFrame, study: StudyConfig, heading: str) -> list[str]:
     lines = [f"## {heading}", ""]
     if metrics_df.empty:
@@ -1138,6 +1481,7 @@ def write_alignment_report_for_scope(
     lines.extend(_family_summary_lines(family_df, "Family-Level Results"))
     if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
         lines.extend(_questionnaire_interpretation_lines(family_df))
+        lines.extend(_questionnaire_contradiction_lines(summary, output_dir, figure_paths))
     tone_lines = ["#### Tone", "", f"![Tone summary]({Path(figure_paths[f'{figure_prefix}_tone_summary']).relative_to(output_dir).as_posix()})", ""]
     if figure_prefix == "human":
         tone_lines.extend(
@@ -1296,6 +1640,14 @@ def write_alignment_outputs(
 ) -> dict[str, str]:
     figures_dir = output_dir / ALIGNMENT_FIGURES_SUBDIR
     figure_paths = write_alignment_figures(metrics_df, study, figures_dir, dpi=figure_dpi, export_pdf=export_figures_pdf)
+    figure_paths.update(
+        write_questionnaire_contradiction_figures(
+            summary,
+            figures_dir,
+            dpi=figure_dpi,
+            export_pdf=export_figures_pdf,
+        )
+    )
     long_df = build_alignment_long_table(metrics_df)
     family_df = build_family_summary_table(metrics_df)
     long_path = output_dir / ALIGNMENT_LONG_FILENAME

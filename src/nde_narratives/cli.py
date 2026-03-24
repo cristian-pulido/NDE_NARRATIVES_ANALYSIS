@@ -19,7 +19,7 @@ from .config import (
 from .constants import PROJECT_ROOT
 from .excel import write_annotation_outputs
 from .io_utils import read_tabular_file
-from .prompting import write_llm_batches
+from .prompting import PREPROCESSED_DATASET_FILENAME, write_llm_batches
 from .sampling import create_annotation_frames
 
 
@@ -684,7 +684,16 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
 def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
-    source_df = read_tabular_file(paths.survey_csv)
+    preprocessed_path = paths.preprocessing_output_dir / PREPROCESSED_DATASET_FILENAME
+    source_path = paths.survey_csv
+    source_df = read_tabular_file(source_path)
+
+    if preprocessed_path.exists():
+        preprocessed_df = read_tabular_file(preprocessed_path)
+        required_columns = [study.id_column, study.stratify_column, *study.text_columns().values()]
+        if all(column in preprocessed_df.columns for column in required_columns):
+            source_path = preprocessed_path
+            source_df = preprocessed_df
 
     annotation_df, mapping_df, column_map_df, sampled_private_df, summary = create_annotation_frames(
         source_df=source_df,
@@ -701,7 +710,7 @@ def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
         paths=paths,
         force=args.force,
     )
-    print(json.dumps({**summary, **written}, indent=2))
+    print(json.dumps({**summary, "source_path": str(source_path), **written}, indent=2))
     return 0
 
 

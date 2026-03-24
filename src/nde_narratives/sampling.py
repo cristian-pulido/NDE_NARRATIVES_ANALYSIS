@@ -34,7 +34,7 @@ def apply_dataset_row_filters(
 
     quality_column = study.dataset.get("quality_label_column")
     effective_quality_values = quality_values if quality_values is not None else study.dataset.get("quality_values_to_use")
-    if apply_quality_filter and quality_column and effective_quality_values:
+    if apply_quality_filter and quality_column and effective_quality_values and str(quality_column) in out.columns:
         out = out[out[str(quality_column)].isin(effective_quality_values)].copy()
 
     to_drop_column = study.dataset.get("to_drop_column")
