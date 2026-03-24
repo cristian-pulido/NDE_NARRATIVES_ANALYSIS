@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 
+from nde_narratives.config import load_benchmark_config
 from nde_narratives.constants import PARTICIPANT_CODE_HEADER
 
 from tests.cli_helpers import FIXTURES, make_paths_config, run_cli
@@ -222,3 +223,53 @@ survey_csv = "{survey_csv.as_posix()}"
     assert (data_dir / "human_annotations").exists()
     assert (data_dir / "llm_outputs").exists()
     assert (data_dir / "preprocessing_outputs").exists()
+
+
+def test_load_benchmark_config_parses_multiple_datasets(tmp_path: Path) -> None:
+    config_path = tmp_path / "paths.local.toml"
+    config_path.write_text(
+        """[paths]
+data_dir = "/tmp/nde-data"
+survey_csv = "/tmp/nde-data/survey.csv"
+
+[benchmark.runtime]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+
+[benchmark.dataset]
+dataset_name = "amazon_reviews_multi"
+dataset_config = "en"
+split = "train"
+text_column = "review_body"
+label_column = "stars"
+max_rows = 2000
+random_state = 20
+
+[[benchmark.datasets]]
+dataset_name = "amazon_reviews_multi"
+dataset_config = "en"
+split = "train"
+text_column = "review_body"
+label_column = "stars"
+max_rows = 100
+random_state = 20
+
+[[benchmark.datasets]]
+dataset_name = "imdb"
+dataset_config = ""
+split = "test"
+text_column = "text"
+label_column = "label"
+max_rows = 200
+random_state = 20
+""",
+        encoding="utf-8",
+    )
+
+    benchmark = load_benchmark_config(config_path)
+    assert len(benchmark.datasets) == 2
+    assert benchmark.datasets[0].dataset_name == "amazon_reviews_multi"
+    assert benchmark.datasets[1].dataset_name == "imdb"

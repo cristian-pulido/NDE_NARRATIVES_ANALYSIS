@@ -16,6 +16,11 @@ DEFAULT_PATH_LAYOUT = {
     "evaluation_output_dir": "evaluation_outputs",
     "preprocessing_output_dir": "preprocessing_outputs",
     "prompt_variants_dir": "prompt_variants",
+    "benchmark_raw_dir": "benchmark/raw",
+    "benchmark_processed_dir": "benchmark/processed",
+    "benchmark_runs_dir": "benchmark/runs",
+    "benchmark_reports_dir": "benchmark/reports",
+    "benchmark_prompt_variants_dir": "benchmark/prompt_variants",
     "sampled_private_workbook": "annotation_outputs/nde_annotation_mapping_private.xlsx",
     "human_annotation_workbook": "human_annotations/nde_annotation_sample_completed.xlsx",
     "llm_predictions_path": "llm_outputs/nde_predictions.jsonl",
@@ -140,6 +145,11 @@ class PathsConfig:
     human_annotation_workbook: Path
     llm_predictions_path: Path
     prompt_variants_dir: Path | None = None
+    benchmark_raw_dir: Path | None = None
+    benchmark_processed_dir: Path | None = None
+    benchmark_runs_dir: Path | None = None
+    benchmark_reports_dir: Path | None = None
+    benchmark_prompt_variants_dir: Path | None = None
     data_dir: Path | None = None
 
 
@@ -198,6 +208,83 @@ class LLMConfig:
     path: Path
     runtime: LLMRuntimeConfig
     experiments: list[LLMExperimentConfig]
+
+
+@dataclass(frozen=True)
+class BenchmarkRuntimeConfig:
+    provider: str = "ollama"
+    base_url: str = "http://localhost:11434"
+    timeout_seconds: int = 120
+    max_attempts: int = 2
+    temperature: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "timeout_seconds": self.timeout_seconds,
+            "max_attempts": self.max_attempts,
+            "temperature": self.temperature,
+        }
+
+
+@dataclass(frozen=True)
+class BenchmarkDatasetConfig:
+    dataset_name: str = "amazon_reviews_multi"
+    dataset_config: str = "en"
+    split: str = "train"
+    text_column: str = "review_body"
+    label_column: str = "stars"
+    max_rows: int = 2000
+    random_state: int = 20
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dataset_name": self.dataset_name,
+            "dataset_config": self.dataset_config,
+            "split": self.split,
+            "text_column": self.text_column,
+            "label_column": self.label_column,
+            "max_rows": self.max_rows,
+            "random_state": self.random_state,
+        }
+
+
+@dataclass(frozen=True)
+class BenchmarkExperimentConfig:
+    experiment_id: str
+    enabled: bool = True
+    model: str | None = None
+    prompt_variant: str | None = None
+    run_id: str | None = None
+    model_variant: str | None = None
+    temperature: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "experiment_id": self.experiment_id,
+            "enabled": self.enabled,
+        }
+        if self.model is not None:
+            data["model"] = self.model
+        if self.prompt_variant is not None:
+            data["prompt_variant"] = self.prompt_variant
+        if self.run_id is not None:
+            data["run_id"] = self.run_id
+        if self.model_variant is not None:
+            data["model_variant"] = self.model_variant
+        if self.temperature is not None:
+            data["temperature"] = self.temperature
+        return data
+
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    path: Path
+    runtime: BenchmarkRuntimeConfig
+    dataset: BenchmarkDatasetConfig
+    datasets: list[BenchmarkDatasetConfig]
+    experiments: list[BenchmarkExperimentConfig]
 
 
 @dataclass(frozen=True)
@@ -342,6 +429,11 @@ def load_paths_config(path: str | Path | None = None) -> PathsConfig:
     human_annotation_workbook = _path_with_default(paths, "human_annotation_workbook", base_dir, default_base)
     llm_predictions_path = _path_with_default(paths, "llm_predictions_path", base_dir, default_base)
     prompt_variants_dir = _path_with_default(paths, "prompt_variants_dir", base_dir, default_base)
+    benchmark_raw_dir = _path_with_default(paths, "benchmark_raw_dir", base_dir, default_base)
+    benchmark_processed_dir = _path_with_default(paths, "benchmark_processed_dir", base_dir, default_base)
+    benchmark_runs_dir = _path_with_default(paths, "benchmark_runs_dir", base_dir, default_base)
+    benchmark_reports_dir = _path_with_default(paths, "benchmark_reports_dir", base_dir, default_base)
+    benchmark_prompt_variants_dir = _path_with_default(paths, "benchmark_prompt_variants_dir", base_dir, default_base)
 
     return PathsConfig(
         path=resolved,
@@ -356,6 +448,11 @@ def load_paths_config(path: str | Path | None = None) -> PathsConfig:
         human_annotation_workbook=human_annotation_workbook,
         llm_predictions_path=llm_predictions_path,
         prompt_variants_dir=prompt_variants_dir,
+        benchmark_raw_dir=benchmark_raw_dir,
+        benchmark_processed_dir=benchmark_processed_dir,
+        benchmark_runs_dir=benchmark_runs_dir,
+        benchmark_reports_dir=benchmark_reports_dir,
+        benchmark_prompt_variants_dir=benchmark_prompt_variants_dir,
         data_dir=default_base if data_dir_raw else None,
     )
 
@@ -455,3 +552,88 @@ def load_preprocessing_config(path: str | Path | None = None) -> PreprocessingCo
     if config.chars_per_token <= 0:
         raise ValueError(f"preprocessing.chars_per_token must be > 0 in {resolved}")
     return config
+
+
+def load_benchmark_config(path: str | Path | None = None) -> BenchmarkConfig:
+    resolved = Path(path or default_paths_config_path()).resolve()
+    raw = _load_toml(resolved)
+    benchmark_raw = dict(raw.get("benchmark", {}))
+    llm_raw = dict(raw.get("llm", {}))
+    runtime_raw = dict(benchmark_raw.get("runtime", {}))
+    dataset_raw = dict(benchmark_raw.get("dataset", {}))
+
+    runtime = BenchmarkRuntimeConfig(
+        provider=_coerce_str(runtime_raw.get("provider"), "ollama"),
+        base_url=_coerce_str(runtime_raw.get("base_url"), "http://localhost:11434"),
+        timeout_seconds=_coerce_int(runtime_raw.get("timeout_seconds"), 120),
+        max_attempts=_coerce_int(runtime_raw.get("max_attempts"), 2),
+        temperature=_coerce_float(runtime_raw.get("temperature"), 0.0),
+    )
+    if runtime.max_attempts < 1:
+        raise ValueError(f"benchmark.runtime.max_attempts must be >= 1 in {resolved}")
+
+    dataset = BenchmarkDatasetConfig(
+        dataset_name=_coerce_str(dataset_raw.get("dataset_name"), "amazon_reviews_multi"),
+        dataset_config=_coerce_str(dataset_raw.get("dataset_config"), "en"),
+        split=_coerce_str(dataset_raw.get("split"), "train"),
+        text_column=_coerce_str(dataset_raw.get("text_column"), "review_body"),
+        label_column=_coerce_str(dataset_raw.get("label_column"), "stars"),
+        max_rows=_coerce_int(dataset_raw.get("max_rows"), 2000),
+        random_state=_coerce_int(dataset_raw.get("random_state"), 20),
+    )
+    if dataset.max_rows < 1:
+        raise ValueError(f"benchmark.dataset.max_rows must be >= 1 in {resolved}")
+
+    datasets_raw = list(benchmark_raw.get("datasets", []))
+    datasets: list[BenchmarkDatasetConfig] = []
+    if datasets_raw:
+        for item in datasets_raw:
+            dataset_item = dict(item)
+            parsed = BenchmarkDatasetConfig(
+                dataset_name=_coerce_str(dataset_item.get("dataset_name"), dataset.dataset_name),
+                dataset_config=_coerce_str(dataset_item.get("dataset_config"), dataset.dataset_config),
+                split=_coerce_str(dataset_item.get("split"), dataset.split),
+                text_column=_coerce_str(dataset_item.get("text_column"), dataset.text_column),
+                label_column=_coerce_str(dataset_item.get("label_column"), dataset.label_column),
+                max_rows=_coerce_int(dataset_item.get("max_rows"), dataset.max_rows),
+                random_state=_coerce_int(dataset_item.get("random_state"), dataset.random_state),
+            )
+            if parsed.max_rows < 1:
+                raise ValueError(f"benchmark.datasets.max_rows must be >= 1 in {resolved}")
+            datasets.append(parsed)
+    else:
+        datasets = [dataset]
+
+    experiment_items = list(benchmark_raw.get("experiments", []))
+    if not experiment_items:
+        experiment_items = list(llm_raw.get("experiments", []))
+
+    experiments: list[BenchmarkExperimentConfig] = []
+    seen_artifact_ids: set[str] = set()
+    for index, item in enumerate(experiment_items, start=1):
+        experiment = dict(item)
+        experiment_id = experiment.get("experiment_id")
+        model = experiment.get("model")
+        if not experiment_id:
+            raise ValueError(f"Missing benchmark.experiments[{index}].experiment_id in {resolved}")
+        if not model:
+            raise ValueError(f"Missing benchmark.experiments[{index}].model in {resolved}")
+        temperature_raw = experiment.get("temperature")
+        run_id = (str(experiment["run_id"]) if experiment.get("run_id") is not None else None)
+        artifact_id = f"{experiment_id}__{run_id}" if run_id else str(experiment_id)
+        if artifact_id in seen_artifact_ids:
+            continue
+        seen_artifact_ids.add(artifact_id)
+        experiments.append(
+            BenchmarkExperimentConfig(
+                experiment_id=str(experiment_id),
+                enabled=_coerce_bool(experiment.get("enabled"), True),
+                model=str(model),
+                prompt_variant=(str(experiment["prompt_variant"]) if experiment.get("prompt_variant") is not None else None),
+                run_id=run_id,
+                model_variant=(str(experiment["model_variant"]) if experiment.get("model_variant") is not None else None),
+                temperature=(float(temperature_raw) if temperature_raw is not None else None),
+            )
+        )
+
+    return BenchmarkConfig(path=resolved, runtime=runtime, dataset=dataset, datasets=datasets, experiments=experiments)
