@@ -498,6 +498,16 @@ def load_llm_config(path: str | Path | None = None) -> LLMConfig:
     raw = _load_toml(resolved)
     llm_raw = dict(raw.get("llm", {}))
 
+    stop_sequences_raw = llm_raw.get("stop_sequences")
+    if stop_sequences_raw is None:
+        stop_sequences: list[str] | None = None
+    elif isinstance(stop_sequences_raw, list):
+        stop_sequences = [str(item) for item in stop_sequences_raw]
+    else:
+        raise ValueError(
+            f"llm.stop_sequences must be a TOML array of strings in {resolved}"
+        )
+
     runtime = LLMRuntimeConfig(
         provider=_coerce_str(llm_raw.get("provider"), "ollama"),
         base_url=_coerce_str(llm_raw.get("base_url"), "http://localhost:11434"),
@@ -509,7 +519,7 @@ def load_llm_config(path: str | Path | None = None) -> LLMConfig:
         max_tokens=_coerce_int(llm_raw.get("max_tokens"), 512),
         top_p=(float(llm_raw["top_p"]) if llm_raw.get("top_p") is not None else None),
         top_k=(int(llm_raw["top_k"]) if llm_raw.get("top_k") is not None else None),
-        stop_sequences=([str(item) for item in llm_raw.get("stop_sequences", [])] if llm_raw.get("stop_sequences") is not None else None),
+        stop_sequences=stop_sequences,
         source=_coerce_str(llm_raw.get("source"), "survey"),
         all_records=_coerce_bool(llm_raw.get("all_records"), False),
     )

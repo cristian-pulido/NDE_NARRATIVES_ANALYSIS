@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
-from nde_narratives.config import LLMRuntimeConfig, load_llm_config
+from nde_narratives.config import LLMRuntimeConfig, PreprocessingConfig, load_llm_config
 from nde_narratives.llm.factory import build_llm_provider
 
 
@@ -74,3 +76,31 @@ def test_build_llm_provider_routes_to_bedrock(monkeypatch) -> None:
     assert captured["aws_profile"] == "default"
     assert captured["max_tokens"] == 512
 
+
+
+def test_build_llm_provider_preserves_unsupported_for_preprocessing_bedrock() -> None:
+    runtime = PreprocessingConfig(path=Path("/tmp/paths.local.toml"), provider="bedrock")
+    with pytest.raises(ValueError, match="Unsupported LLM provider"):
+        build_llm_provider(runtime)
+
+
+def test_load_llm_config_rejects_string_stop_sequences(tmp_path: Path) -> None:
+    config_path = tmp_path / "paths.local.toml"
+    config_path.write_text(
+        """[paths]
+data_dir = "/tmp/nde-data"
+survey_csv = "/tmp/nde-data/survey.csv"
+
+[llm]
+provider = "bedrock"
+stop_sequences = "</END>"
+
+[[llm.experiments]]
+experiment_id = "exp-bedrock"
+model = "anthropic.claude-3-haiku-20240307-v1:0"
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="llm.stop_sequences must be a TOML array"):
+        load_llm_config(config_path)
