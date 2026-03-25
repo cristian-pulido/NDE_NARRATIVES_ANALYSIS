@@ -157,9 +157,15 @@ class PathsConfig:
 class LLMRuntimeConfig:
     provider: str = "ollama"
     base_url: str = "http://localhost:11434"
+    aws_region: str = "us-east-1"
+    aws_profile: str | None = None
     timeout_seconds: int = 120
     max_attempts: int = 2
     temperature: float = 0.0
+    max_tokens: int = 512
+    top_p: float | None = None
+    top_k: int | None = None
+    stop_sequences: list[str] | None = None
     source: str = "survey"
     all_records: bool = False
 
@@ -167,9 +173,15 @@ class LLMRuntimeConfig:
         return {
             "provider": self.provider,
             "base_url": self.base_url,
+            "aws_region": self.aws_region,
+            "aws_profile": self.aws_profile,
             "timeout_seconds": self.timeout_seconds,
             "max_attempts": self.max_attempts,
             "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "stop_sequences": list(self.stop_sequences or []),
             "source": self.source,
             "all_records": self.all_records,
         }
@@ -489,9 +501,15 @@ def load_llm_config(path: str | Path | None = None) -> LLMConfig:
     runtime = LLMRuntimeConfig(
         provider=_coerce_str(llm_raw.get("provider"), "ollama"),
         base_url=_coerce_str(llm_raw.get("base_url"), "http://localhost:11434"),
+        aws_region=_coerce_str(llm_raw.get("aws_region"), "us-east-1"),
+        aws_profile=(str(llm_raw["aws_profile"]) if llm_raw.get("aws_profile") is not None else None),
         timeout_seconds=_coerce_int(llm_raw.get("timeout_seconds"), 120),
         max_attempts=_coerce_int(llm_raw.get("max_attempts"), 2),
         temperature=_coerce_float(llm_raw.get("temperature"), 0.0),
+        max_tokens=_coerce_int(llm_raw.get("max_tokens"), 512),
+        top_p=(float(llm_raw["top_p"]) if llm_raw.get("top_p") is not None else None),
+        top_k=(int(llm_raw["top_k"]) if llm_raw.get("top_k") is not None else None),
+        stop_sequences=([str(item) for item in llm_raw.get("stop_sequences", [])] if llm_raw.get("stop_sequences") is not None else None),
         source=_coerce_str(llm_raw.get("source"), "survey"),
         all_records=_coerce_bool(llm_raw.get("all_records"), False),
     )

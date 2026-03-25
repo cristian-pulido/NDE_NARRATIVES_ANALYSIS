@@ -92,6 +92,32 @@ Important notes:
 - Each experiment should have its own `experiment_id` or `run_id` so artifacts stay traceable.
 - Use one experiment for smoke tests and a different one for the full run.
 
+### Bedrock runtime option (AWS)
+
+If you want to run analysis on AWS Bedrock instead of Ollama, create a local Bedrock config file at
+[`config/paths.bedrock.toml`](config/paths.bedrock.toml) (this file is intentionally gitignored for local paths/credentials).
+
+Highlights of the Bedrock template:
+
+- `provider = "bedrock"` under `[llm]`
+- `aws_region` and optional `aws_profile`
+- output directed to a parallel folder `llm_outputs_bedrock`
+- `source = "survey"` so the run uses the cleaned dataset automatically when
+  [`cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:504) exists
+- five preconfigured experiments for:
+  - `anthropic.claude-3-5-sonnet-20240620-v1:0`
+  - `anthropic.claude-3-haiku-20240307-v1:0`
+  - `mistral.mistral-large-3-675b-instruct`
+  - `qwen.qwen3-32b-v1:0`
+  - `meta.llama3-70b-instruct-v1:0`
+
+Execution remains the same CLI flow:
+
+```bash
+nde preprocess --paths-config config/paths.bedrock.toml
+nde run-llm --paths-config config/paths.bedrock.toml --all-experiments
+```
+
 ## 3. Run Preprocessing First
 
 Before running any downstream analysis, generate the cleaned narrative dataset:
