@@ -937,6 +937,19 @@ def macro_f1_score(y_true: pd.Series, y_pred: pd.Series, labels: list[str]) -> f
     return float(sum(scores) / len(scores))
 
 
+def f1_by_label(y_true: pd.Series, y_pred: pd.Series, labels: list[str]) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for label in labels:
+        tp = int(((y_true == label) & (y_pred == label)).sum())
+        fp = int(((y_true != label) & (y_pred == label)).sum())
+        fn = int(((y_true == label) & (y_pred != label)).sum())
+        precision = _safe_divide(tp, tp + fp)
+        recall = _safe_divide(tp, tp + fn)
+        f1 = _safe_divide(2 * precision * recall, precision + recall)
+        metrics[f"f1_label_{_normalize_identifier(str(label))}"] = f1
+    return metrics
+
+
 def binary_positive_metrics(y_true: pd.Series, y_pred: pd.Series, positive_label: str = "yes") -> dict[str, float]:
     tp = int(((y_true == positive_label) & (y_pred == positive_label)).sum())
     fp = int(((y_true != positive_label) & (y_pred == positive_label)).sum())
@@ -973,6 +986,12 @@ def compute_comparison_metrics(
         valid_mask = ~reference_values.apply(_is_blank) & ~candidate_values.apply(_is_blank)
         y_true = reference_values.loc[valid_mask]
         y_pred = candidate_values.loc[valid_mask]
+
+        tone_label_f1_metrics = {
+            f"f1_label_{_normalize_identifier(str(label))}": float("nan")
+            for label in labels
+        } if column == "experience_tone" else {}
+
         if len(y_true) == 0:
             accuracy = float("nan")
             kappa = float("nan")
@@ -997,6 +1016,9 @@ def compute_comparison_metrics(
                 "prevalence_candidate_yes": float("nan"),
                 "prevalence_gap_yes": float("nan"),
             }
+            if column == "experience_tone":
+                tone_label_f1_metrics = f1_by_label(y_true, y_pred, labels)
+
         row: dict[str, Any] = {
             "comparison": comparison_name,
             "field": column,
@@ -1005,6 +1027,7 @@ def compute_comparison_metrics(
             "cohen_kappa": kappa,
             "macro_f1": macro_f1,
             **extra_metrics,
+            **tone_label_f1_metrics,
         }
         if metadata:
             row.update(metadata)
@@ -1328,6 +1351,13 @@ def evaluate_outputs(
             "accepted": accepted_llm,
             "rejected": rejected_llm,
         },
+    }
+
+    tone_label_columns = sorted(column for column in metrics_df.columns if column.startswith("f1_label_"))
+    tone_label_rows = metrics_df.loc[metrics_df["field"] == "experience_tone", ["comparison", "field", "n", *tone_label_columns]].copy() if tone_label_columns else pd.DataFrame()
+    summary["experience_tone_label_f1"] = {
+        "labels": tone_label_columns,
+        "rows": tone_label_rows.to_dict(orient="records") if not tone_label_rows.empty else [],
     }
 
     contradiction_analysis = _build_questionnaire_contradiction_analysis(

@@ -118,6 +118,11 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert {"vader_vs_llm:exp_alpha__run-01", "vader_vs_llm:exp_beta__run-02", "llm_vs_llm:exp_alpha__run-01__vs__exp_beta__run-02"}.issubset(set(metrics["comparison"]))
     questionnaire_vader_fields = set(metrics.loc[metrics["comparison"] == "questionnaire_vs_vader", "field"])
     assert questionnaire_vader_fields == {"experience_tone"}
+    tone_label_columns = {"f1_label_positive", "f1_label_negative", "f1_label_mixed", "f1_label_neutral"}
+    assert tone_label_columns.issubset(set(metrics.columns))
+    assert "experience_tone_label_f1" in summary
+    assert summary["experience_tone_label_f1"]["labels"] == sorted(tone_label_columns)
+    assert len(summary["experience_tone_label_f1"]["rows"]) >= 1
     assert "majority vote" in report_text.lower()
     assert "rejected human artifacts" in report_text.lower()
     assert "accepted experiments evaluated against the human majority reference" in report_text.lower()

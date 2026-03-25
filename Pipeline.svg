@@ -1,0 +1,381 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="1532.8179"
+   height="459.91531"
+   viewBox="0 0 1532.8179 459.91531"
+   version="1.1"
+   id="svg33"
+   sodipodi:docname="methods_pipeline.svg"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25, custom)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview33"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="0.78941176"
+     inkscape:cx="818.33085"
+     inkscape:cy="294.5231"
+     inkscape:window-width="1920"
+     inkscape:window-height="1177"
+     inkscape:window-x="-1"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg33" />
+  <defs
+     id="defs1">
+    <marker
+       id="arrow"
+       viewBox="0 0 10 10"
+       refX="9"
+       refY="5"
+       markerWidth="8"
+       markerHeight="8"
+       orient="auto-start-reverse">
+      <path
+         d="M 0,0 10,5 0,10 Z"
+         fill="#475569"
+         id="path1" />
+    </marker>
+  </defs>
+  <rect
+     x="8.0175781"
+     y="74.384766"
+     width="240"
+     height="78"
+     rx="12"
+     fill="#f8fafc"
+     stroke="#334155"
+     stroke-width="2"
+     id="rect1" />
+  <text
+     x="128.01758"
+     y="106.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text2">Data Sources</text>
+  <text
+     x="128.01758"
+     y="129.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text3">Survey + Narratives</text>
+  <rect
+     x="288.01758"
+     y="74.384766"
+     width="260"
+     height="78"
+     rx="12"
+     fill="#f8fafc"
+     stroke="#334155"
+     stroke-width="2"
+     id="rect3" />
+  <text
+     x="418.01758"
+     y="106.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text4">Harmonization &amp; Filtering</text>
+  <text
+     x="418.01758"
+     y="129.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text5">Link records, normalize fields</text>
+  <rect
+     x="588.01758"
+     y="74.384766"
+     width="220"
+     height="78"
+     rx="12"
+     fill="#f8fafc"
+     stroke="#334155"
+     stroke-width="2"
+     id="rect5" />
+  <text
+     x="698.01758"
+     y="106.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text6">Preprocessing</text>
+  <text
+     x="698.01758"
+     y="129.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text7">Resegment + validate</text>
+  <rect
+     x="888.01758"
+     y="14.384766"
+     width="280"
+     height="86"
+     rx="12"
+     fill="#eef2ff"
+     stroke="#3730a3"
+     stroke-width="2"
+     id="rect7" />
+  <text
+     x="1028.0176"
+     y="47.384766"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text8">Branch 1: Tone Labeling</text>
+  <text
+     x="1028.0176"
+     y="70.384766"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text9">LLMs + VADER baseline</text>
+  <rect
+     x="888.01758"
+     y="124.38477"
+     width="280"
+     height="86"
+     rx="12"
+     fill="#eef2ff"
+     stroke="#3730a3"
+     stroke-width="2"
+     id="rect9" />
+  <text
+     x="1028.0176"
+     y="157.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text10">Branch 2: Structured Extraction</text>
+  <text
+     x="1028.0176"
+     y="180.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text11">M8 experiential + M9 aftereffects</text>
+  <rect
+     x="888.01758"
+     y="234.38477"
+     width="280"
+     height="86"
+     rx="12"
+     fill="#eef2ff"
+     stroke="#3730a3"
+     stroke-width="2"
+     id="rect11" />
+  <text
+     x="1028.0176"
+     y="267.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text12">Branch 3: Human Annotation</text>
+  <text
+     x="1028.0176"
+     y="290.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text13">Majority-vote reference labels</text>
+  <rect
+     x="1238.0176"
+     y="14.384766"
+     width="290"
+     height="86"
+     rx="12"
+     fill="#ecfeff"
+     stroke="#0f766e"
+     stroke-width="2"
+     id="rect13" />
+  <text
+     x="1383.0176"
+     y="47.384766"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text14">Experiment A</text>
+  <text
+     x="1383.0176"
+     y="70.384766"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text15">Questionnaire vs automated</text>
+  <rect
+     x="1238.0176"
+     y="124.38477"
+     width="290"
+     height="86"
+     rx="12"
+     fill="#ecfeff"
+     stroke="#0f766e"
+     stroke-width="2"
+     id="rect15" />
+  <text
+     x="1383.0176"
+     y="157.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text16">Experiment B</text>
+  <text
+     x="1383.0176"
+     y="180.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text17">Recoverability by family</text>
+  <rect
+     x="1238.0176"
+     y="234.38477"
+     width="290"
+     height="86"
+     rx="12"
+     fill="#ecfeff"
+     stroke="#0f766e"
+     stroke-width="2"
+     id="rect17" />
+  <text
+     x="1383.0176"
+     y="267.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text18">Experiment C</text>
+  <text
+     x="1383.0176"
+     y="290.38477"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text19">Human vs automated</text>
+  <rect
+     x="1241.8179"
+     y="338.91531"
+     width="290"
+     height="120"
+     rx="12"
+     fill="#fff7ed"
+     stroke="#c2410c"
+     stroke-width="2"
+     id="rect19" />
+  <text
+     x="1386.8179"
+     y="373.91531"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="16px"
+     id="text20">Evaluation Metrics</text>
+  <text
+     x="1386.8179"
+     y="400.91531"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text21">Accuracy</text>
+  <text
+     x="1386.8179"
+     y="424.91531"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text22">Macro F1</text>
+  <text
+     x="1386.8179"
+     y="448.91531"
+     text-anchor="middle"
+     font-family="Arial"
+     font-size="14px"
+     id="text23">Cohen's kappa</text>
+  <line
+     x1="248.01758"
+     y1="113.38477"
+     x2="288.01758"
+     y2="113.38477"
+     stroke="#475569"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line23" />
+  <line
+     x1="548.01758"
+     y1="113.38477"
+     x2="588.01758"
+     y2="113.38477"
+     stroke="#475569"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line24" />
+  <line
+     x1="808.01758"
+     y1="113.38477"
+     x2="888.01758"
+     y2="57.384766"
+     stroke="#475569"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line25" />
+  <line
+     x1="808.01758"
+     y1="113.38477"
+     x2="888.01758"
+     y2="167.38477"
+     stroke="#475569"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line26" />
+  <line
+     x1="808.01758"
+     y1="113.38477"
+     x2="888.01758"
+     y2="277.38477"
+     stroke="#475569"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line27" />
+  <line
+     x1="1168.0176"
+     y1="57.384766"
+     x2="1238.0176"
+     y2="57.384766"
+     stroke="#0f766e"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line28" />
+  <line
+     x1="1168.0176"
+     y1="167.38477"
+     x2="1238.0176"
+     y2="167.38477"
+     stroke="#0f766e"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line29" />
+  <line
+     x1="1168.0176"
+     y1="277.38477"
+     x2="1238.0176"
+     y2="277.38477"
+     stroke="#0f766e"
+     stroke-width="2.5"
+     marker-end="url(#arrow)"
+     id="line30" />
+  <path
+     d="m 1168.0176,57.384766 c 40,0 40,220.000004 70,220.000004"
+     stroke="#0f766e"
+     stroke-width="2.5"
+     fill="none"
+     marker-end="url(#arrow)"
+     id="path30" />
+</svg>
