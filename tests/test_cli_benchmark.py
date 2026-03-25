@@ -85,6 +85,9 @@ def test_benchmark_report_sections_follow_required_order(tmp_path: Path) -> None
     report_payload = _load_json(report_result.stdout)
     report_path = Path(report_payload["report_file"])
     assert report_path.exists()
+    assert "figure_file" in report_payload
+    figure_path = Path(report_payload["figure_file"])
+    assert figure_path.exists()
 
     report_text = report_path.read_text(encoding="utf-8")
     section_order = [
@@ -92,11 +95,15 @@ def test_benchmark_report_sections_follow_required_order(tmp_path: Path) -> None
         "## Methodology",
         "## Prompts",
         "## Metrics",
+        "## Visual Summary",
         "## Interpretation",
         "## Limitations",
     ]
     positions = [report_text.index(section) for section in section_order]
     assert positions == sorted(positions)
+    assert "![Benchmark macro_f1 vs cohen_kappa](figures/benchmark_macro_f1_vs_kappa.png)" in report_text
+    assert "Emoji overlay per point: 😀 positive F1, 😐 neutral F1, ☹️ negative F1" in report_text
+    assert "- Dataset: benchmark_fixture" in report_text
 
 
 def test_benchmark_report_can_include_benchmark_vs_nde_table(tmp_path: Path) -> None:
@@ -153,6 +160,8 @@ def test_benchmark_report_can_include_benchmark_vs_nde_table(tmp_path: Path) -> 
     report_payload = _load_json(report_result.stdout)
     report_text = Path(report_payload["report_file"]).read_text(encoding="utf-8")
     assert "### Benchmark vs NDE" in report_text
+    assert "figure_file" in report_payload
+    assert Path(report_payload["figure_file"]).exists()
 
 
 def test_benchmark_report_supports_comparison_run_summaries(tmp_path: Path) -> None:

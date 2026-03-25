@@ -1062,7 +1062,11 @@ def cmd_benchmark_report(args: argparse.Namespace) -> int:
         if args.compare_run_summary
         else None,
     )
-    print(json.dumps({"run_summary": str(run_summary), "report_file": str(report_path)}, indent=2))
+    figure_path = output_dir / "figures" / "benchmark_macro_f1_vs_kappa.png"
+    payload = {"run_summary": str(run_summary), "report_file": str(report_path)}
+    if figure_path.exists():
+        payload["figure_file"] = str(figure_path)
+    print(json.dumps(payload, indent=2))
     return 0
 
 
@@ -1128,12 +1132,17 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
         nde_metrics_path=Path(args.nde_metrics).resolve() if args.nde_metrics else None,
         comparison_run_summaries=summary_paths[1:] if len(summary_paths) > 1 else None,
     )
+    report_output_dir = Path(args.report_output_dir).resolve() if args.report_output_dir else Path(paths.benchmark_reports_dir)
+    figure_path = report_output_dir / "figures" / "benchmark_macro_f1_vs_kappa.png"
+    response_payload = {
+        "datasets": per_dataset_rows,
+        "report_file": str(report_path),
+    }
+    if figure_path.exists():
+        response_payload["figure_file"] = str(figure_path)
     print(
         json.dumps(
-            {
-                "datasets": per_dataset_rows,
-                "report_file": str(report_path),
-            },
+            response_payload,
             indent=2,
         )
     )

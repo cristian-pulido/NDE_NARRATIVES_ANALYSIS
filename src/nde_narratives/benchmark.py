@@ -8,7 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import matplotlib
+
+matplotlib.use("Agg")
+
 import pandas as pd
+from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
 
 from .config import BenchmarkConfig, BenchmarkExperimentConfig, BenchmarkRuntimeConfig, PathsConfig
 from .constants import PROJECT_ROOT
@@ -83,6 +89,188 @@ def _map_imdb_label_to_sentiment(value: object) -> str | None:
 def _ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _normalize_dataset_display_name(dataset_name: object, *, input_path: object | None = None) -> str:
+    raw_name = str(dataset_name or "").strip()
+    normalized = raw_name.lower()
+    if raw_name and normalized not in {"n/a", "none", "nan", "user_provided_csv"}:
+        return raw_name
+
+    if input_path:
+        stem = Path(str(input_path)).stem.strip()
+        if stem:
+            return stem
+
+    return raw_name or "dataset"
+
+
+def _resolve_local_dataset_name(benchmark: BenchmarkConfig, dataset_path: Path) -> str:
+    configured_name = str(getattr(benchmark.dataset, "dataset_name", "") or "").strip()
+    # Keep explicit custom names, but avoid leaking the default external benchmark label for local CSVs.
+    if configured_name and configured_name != "amazon_reviews_multi":
+        return configured_name
+    csv_stem = dataset_path.stem.strip()
+    if csv_stem:
+        return csv_stem
+    return configured_name or "user_provided_csv"
+
+
+def _normalize_model_family(artifact_id: object, source: object) -> str:
+    source_name = str(source or "").strip().lower()
+    if source_name == "vader":
+        return "vader"
+
+    model_id = str(artifact_id or "").strip()
+    base = model_id.split("__", 1)[0] if model_id else "unknown"
+    base = re.sub(r"_[0-9]+(?:\.[0-9]+)?$", "", base)
+    return base or "unknown"
+
+
+def _plot_benchmark_scatter(
+    metrics_df: pd.DataFrame,
+    *,
+    figure_path: Path,
+    per_label_df: pd.DataFrame | None = None,
+    dpi: int = 300,
+) -> Path | None:
+    if metrics_df.empty:
+        return None
+
+    plot_df = metrics_df.copy()
+    plot_df["macro_f1"] = pd.to_numeric(plot_df["macro_f1"], errors="coerce")
+    plot_df["cohen_kappa"] = pd.to_numeric(plot_df["cohen_kappa"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["macro_f1", "cohen_kappa"])
+    if plot_df.empty:
+        return None
+
+    plot_df["dataset_display"] = [
+        _normalize_dataset_display_name(row.get("dataset_name"), input_path=row.get("input_path"))
+        for _, row in plot_df.iterrows()
+    ]
+    plot_df["model_family"] = [
+        _normalize_model_family(row.get("artifact_id"), row.get("source"))
+        for _, row in plot_df.iterrows()
+    ]
+
+    families = sorted(plot_df["model_family"].astype(str).unique().tolist())
+    datasets = sorted(plot_df["dataset_display"].astype(str).unique().tolist())
+
+    family_cmap = plt.get_cmap("tab20")
+    family_colors = {family: family_cmap(index % 20) for index, family in enumerate(families)}
+    dataset_cmap = plt.get_cmap("Set2")
+    dataset_edge_colors = {dataset: dataset_cmap(index % 8) for index, dataset in enumerate(datasets)}
+    marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "*"]
+    dataset_markers = {dataset: marker_cycle[index % len(marker_cycle)] for index, dataset in enumerate(datasets)}
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    for _, row in plot_df.iterrows():
+        family = str(row["model_family"])
+        dataset = str(row["dataset_display"])
+        x_value = float(row["macro_f1"])
+        y_value = float(row["cohen_kappa"])
+        ax.scatter(
+            x_value,
+            y_value,
+            c=[family_colors[family]],
+            marker=dataset_markers[dataset],
+            s=130,
+            alpha=0.88,
+            edgecolors=[dataset_edge_colors[dataset]],
+            linewidths=1.2,
+            zorder=3,
+        )
+
+        if per_label_df is not None and not per_label_df.empty:
+            label_subset = per_label_df[
+                (per_label_df["artifact_id"].astype(str) == str(row.get("artifact_id", "")))
+                & (per_label_df["source"].astype(str) == str(row.get("source", "")))
+                & (per_label_df["dataset_name"].astype(str) == str(row.get("dataset_name", "")))
+                & (per_label_df["dataset_config"].astype(str) == str(row.get("dataset_config", "")))
+            ].copy()
+            if not label_subset.empty:
+                emoji_by_label = {"positive": "😀", "neutral": "😐", "negative": "☹️"}
+                label_subset["label"] = label_subset["label"].astype(str).str.lower()
+                f1_by_label = {
+                    str(item["label"]): float(item["f1"])
+                    for _, item in label_subset.iterrows()
+                    if str(item.get("label", "")).lower() in emoji_by_label
+                }
+                ordered_labels = [label for label in ("positive", "neutral", "negative") if label in f1_by_label]
+                emoji_offsets = {"positive": -6, "neutral": 0, "negative": 6}
+                emoji_colors = {"positive": "#1B9E3E", "neutral": "#6E6E6E", "negative": "#C62828"}
+                for idx, label in enumerate(ordered_labels):
+                    f1_value = min(1.0, max(0.0, float(f1_by_label[label])))
+                    alpha = 0.12 + (0.88 * f1_value)
+                    ax.annotate(
+                        emoji_by_label[label],
+                        (x_value, y_value),
+                        xytext=(emoji_offsets.get(label, idx * 6), 0),
+                        textcoords="offset points",
+                        ha="center",
+                        va="center",
+                        fontsize=8,
+                        color=emoji_colors.get(label, "#333333"),
+                        alpha=alpha,
+                        zorder=4,
+                    )
+
+    best_row = plot_df.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
+    worst_row = plot_df.sort_values(["macro_f1", "cohen_kappa"], ascending=True).iloc[0]
+    for labeled_row in (best_row, worst_row):
+        ax.annotate(
+            str(labeled_row.get("artifact_id", "n/a")),
+            (float(labeled_row["macro_f1"]), float(labeled_row["cohen_kappa"])),
+            xytext=(6, 6),
+            textcoords="offset points",
+            fontsize=8,
+        )
+
+    family_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="None",
+            markerfacecolor=family_colors[family],
+            markeredgecolor="black",
+            markeredgewidth=0.4,
+            markersize=8,
+            label=family,
+        )
+        for family in families
+    ]
+    dataset_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=dataset_markers[dataset],
+            linestyle="None",
+            markerfacecolor="#f5f5f5",
+            markeredgecolor=dataset_edge_colors[dataset],
+            markeredgewidth=1.3,
+            markersize=8,
+            label=dataset,
+        )
+        for dataset in datasets
+    ]
+
+    family_legend = ax.legend(handles=family_handles, title="Model family", loc="lower right")
+    ax.add_artist(family_legend)
+    ax.legend(handles=dataset_handles, title="Dataset", loc="upper left")
+
+    ax.set_xlim(0.0, 1.0)
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xlabel("Macro F1")
+    ax.set_ylabel("Cohen kappa")
+    ax.set_title("Benchmark performance: macro_f1 vs cohen_kappa")
+    ax.grid(True, alpha=0.25)
+
+    figure_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(figure_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return figure_path
 
 
 def _dataset_to_frame(dataset: Any, *, text_column: str, label_column: str) -> pd.DataFrame:
@@ -657,9 +845,10 @@ def run_benchmark_pipeline(
         missing = [column for column in ("record_id", "text", "gold_label") if column not in frame.columns]
         if missing:
             raise ValueError(f"Benchmark dataset is missing required columns: {missing}")
+        local_dataset_name = _resolve_local_dataset_name(benchmark, Path(dataset_path))
         dataset_metadata = {
             "source_kind": "local_csv",
-            "dataset_name": "user_provided_csv",
+            "dataset_name": local_dataset_name,
             "dataset_config": "",
             "split": "custom",
             "text_column": "text",
@@ -832,16 +1021,27 @@ def write_benchmark_report(
     nde_metrics_path: Path | None = None,
     comparison_run_summaries: list[Path] | None = None,
 ) -> Path:
-    def _load_summary_with_metrics(path: Path, *, role: str) -> tuple[dict[str, Any], pd.DataFrame]:
+    def _load_summary_with_metrics(path: Path, *, role: str) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
         loaded_summary = json.loads(Path(path).read_text(encoding="utf-8"))
         loaded_metrics = pd.read_csv(Path(loaded_summary["artifacts"]["metrics_file"]))
-        dataset_name = str(loaded_summary.get("dataset", {}).get("dataset_name", "n/a"))
+        loaded_per_label = pd.read_csv(Path(loaded_summary["artifacts"]["per_label_file"]))
+        input_path = loaded_summary.get("dataset", {}).get("input_path")
+        dataset_name = _normalize_dataset_display_name(
+            loaded_summary.get("dataset", {}).get("dataset_name", "n/a"),
+            input_path=input_path,
+        )
         dataset_config = str(loaded_summary.get("dataset", {}).get("dataset_config", ""))
         loaded_metrics = loaded_metrics.copy()
+        loaded_per_label = loaded_per_label.copy()
         loaded_metrics["dataset_name"] = dataset_name
         loaded_metrics["dataset_config"] = dataset_config
+        loaded_metrics["input_path"] = str(input_path or "")
         loaded_metrics["summary_role"] = role
-        return loaded_summary, loaded_metrics
+        loaded_per_label["dataset_name"] = dataset_name
+        loaded_per_label["dataset_config"] = dataset_config
+        loaded_per_label["input_path"] = str(input_path or "")
+        loaded_per_label["summary_role"] = role
+        return loaded_summary, loaded_metrics, loaded_per_label
 
     def _quality_band(macro_f1: float, kappa: float) -> str:
         if macro_f1 >= 0.70 and kappa >= 0.60:
@@ -852,15 +1052,27 @@ def write_benchmark_report(
             return "mixed"
         return "limited"
 
-    summary, primary_metrics_df = _load_summary_with_metrics(Path(run_summary_path), role="primary")
+    summary, primary_metrics_df, primary_per_label_df = _load_summary_with_metrics(Path(run_summary_path), role="primary")
     metrics_df = primary_metrics_df.copy()
+    per_label_df = primary_per_label_df.copy()
     if comparison_run_summaries:
         for comparison_summary_path in comparison_run_summaries:
-            _, comparison_metrics_df = _load_summary_with_metrics(Path(comparison_summary_path), role="comparison")
+            _, comparison_metrics_df, comparison_per_label_df = _load_summary_with_metrics(
+                Path(comparison_summary_path),
+                role="comparison",
+            )
             metrics_df = pd.concat([metrics_df, comparison_metrics_df], ignore_index=True)
+            per_label_df = pd.concat([per_label_df, comparison_per_label_df], ignore_index=True)
 
     report_dir = _ensure_dir(output_dir)
     report_path = report_dir / "benchmark_report.md"
+    figure_path = report_dir / "figures" / "benchmark_macro_f1_vs_kappa.png"
+    written_figure_path = _plot_benchmark_scatter(metrics_df, figure_path=figure_path, per_label_df=per_label_df)
+
+    source_dataset_display = _normalize_dataset_display_name(
+        summary.get("dataset", {}).get("dataset_name", "n/a"),
+        input_path=summary.get("dataset", {}).get("input_path"),
+    )
 
     source_datasets = sorted(
         {
@@ -873,7 +1085,7 @@ def write_benchmark_report(
         "# Benchmark Baseline Report",
         "",
         "## Source",
-        f"- Dataset: {summary['dataset']['dataset_name']}",
+        f"- Dataset: {source_dataset_display}",
         f"- Dataset config: {summary['dataset']['dataset_config']}",
         f"- Split: {summary['dataset']['split']}",
         f"- Source kind: {summary['dataset'].get('source_kind', 'n/a')}",
@@ -900,6 +1112,17 @@ def write_benchmark_report(
             dataset_cell = f"{dataset_cell}:{dataset_cfg}"
         lines.append(
             f"| {dataset_cell} | {row.get('source', 'n/a')} | {row.get('artifact_id', 'n/a')} | {int(row.get('n', 0))} | {float(row.get('accuracy', 0.0)):.4f} | {float(row.get('macro_f1', 0.0)):.4f} | {float(row.get('cohen_kappa', 0.0)):.4f} |"
+        )
+
+    if written_figure_path is not None:
+        lines.extend(
+            [
+                "",
+                "## Visual Summary",
+                "Scatter plot with macro_f1 (x) and cohen_kappa (y): marker fill color = model family; marker shape + border color = dataset.",
+                "Emoji overlay per point: 😀 positive F1, 😐 neutral F1, ☹️ negative F1 (higher opacity = higher F1).",
+                f"![Benchmark macro_f1 vs cohen_kappa]({written_figure_path.relative_to(report_dir).as_posix()})",
+            ]
         )
 
     llm_metrics_df = metrics_df[metrics_df["source"].astype(str) == "llm"].copy()
