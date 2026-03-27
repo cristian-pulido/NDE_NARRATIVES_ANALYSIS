@@ -44,6 +44,32 @@ def _normalize_identifier(value: str) -> str:
     return cleaned.strip("_") or "artifact"
 
 
+def _infer_prompt_variant_from_metadata(metadata: dict[str, Any]) -> str | None:
+    explicit_prompt_variant = metadata.get("prompt_variant")
+    if explicit_prompt_variant is not None:
+        resolved = str(explicit_prompt_variant).strip()
+        if resolved:
+            return resolved
+
+    prompt_root_raw = metadata.get("prompt_root")
+    if prompt_root_raw is None:
+        return None
+    prompt_root_text = str(prompt_root_raw).strip()
+    if not prompt_root_text:
+        return None
+
+    prompt_root = Path(prompt_root_text)
+    if prompt_root.parent.name == "prompt_variants":
+        candidate = prompt_root.name.strip()
+        return candidate or None
+
+    if prompt_root.name == "analysis":
+        return "default"
+
+    candidate = prompt_root.name.strip()
+    return candidate or None
+
+
 def _validate_labels(df: pd.DataFrame, columns: list[str], study: StudyConfig, source_name: str) -> None:
     for column in columns:
         if column not in df.columns:
@@ -273,7 +299,7 @@ def _experiment_metadata_for(path: Path, metadata: dict[str, Any]) -> Experiment
     experiment_id = str(metadata.get("experiment_id") or metadata.get("id") or path.parent.name or path.stem)
     return ExperimentMetadata(
         experiment_id=_normalize_identifier(experiment_id),
-        prompt_variant=(str(metadata["prompt_variant"]) if metadata.get("prompt_variant") is not None else None),
+        prompt_variant=_infer_prompt_variant_from_metadata(metadata),
         run_id=(str(metadata["run_id"]) if metadata.get("run_id") is not None else None),
         model_variant=(str(metadata["model_variant"]) if metadata.get("model_variant") is not None else None),
     )
@@ -340,10 +366,12 @@ def discover_llm_prediction_artifacts(
     llm_predictions_path: Path | None = None,
     llm_results_dir: Path | None = None,
     experiment_ids: list[str] | None = None,
+    prompt_variants: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     allowed_ids = {_normalize_identifier(value) for value in experiment_ids} if experiment_ids else None
+    allowed_prompt_variants = {_normalize_identifier(value) for value in prompt_variants} if prompt_variants else None
 
     if llm_predictions_path is not None:
         candidates = [Path(llm_predictions_path)]
@@ -356,6 +384,9 @@ def discover_llm_prediction_artifacts(
         metadata, metadata_path = _artifact_metadata(candidate)
         experiment = _experiment_metadata_for(candidate, metadata)
         if allowed_ids and experiment.experiment_id not in allowed_ids and experiment.artifact_id not in allowed_ids:
+            continue
+        normalized_prompt_variant = _normalize_identifier(str(experiment.prompt_variant or "")) if experiment.prompt_variant else None
+        if allowed_prompt_variants and (normalized_prompt_variant is None or normalized_prompt_variant not in allowed_prompt_variants):
             continue
         artifact = {
             **experiment.to_dict(),
@@ -1204,6 +1235,7 @@ def evaluate_outputs(
     llm_results_dir: Path | None = None,
     annotator_ids: list[str] | None = None,
     experiment_ids: list[str] | None = None,
+    prompt_variants: list[str] | None = None,
     sampled_private_workbook: Path | None = None,
     output_dir: Path | None = None,
     vader_scores_path: Path | None = None,
@@ -1249,6 +1281,7 @@ def evaluate_outputs(
         llm_predictions_path=llm_predictions_path,
         llm_results_dir=llm_results_dir,
         experiment_ids=experiment_ids,
+        prompt_variants=prompt_variants,
     )
     preprocessed_three_section_codes: set[str] = set()
     for artifact in llm_candidates:
