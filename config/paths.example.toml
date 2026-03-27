@@ -22,9 +22,16 @@ survey_csv = "D:/data/nde/results-survey.csv"
 [llm]
 provider = "ollama"
 base_url = "http://localhost:11434"
+# Bedrock-specific runtime options (used when provider = "bedrock")
+# aws_region = "us-east-1"
+# aws_profile = "default"
 timeout_seconds = 120
 max_attempts = 2
 temperature = 0.0
+# max_tokens = 512
+# top_p = 0.95
+# top_k = 250
+# stop_sequences = []
 
 [preprocessing]
 provider = "ollama"
