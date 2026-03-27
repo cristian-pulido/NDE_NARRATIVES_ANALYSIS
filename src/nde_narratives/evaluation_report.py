@@ -297,7 +297,160 @@ def plot_questionnaire_tone_confusion_matrix(
         fig.patch.set_facecolor("#FFFDF8")
         return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
+    preferred_order = ["positive", "negative", "mixed", "neutral"]
+    labels = sorted(
+        {str(label).lower() for label in labels if str(label).strip()},
+        key=lambda value: preferred_order.index(value) if value in preferred_order else len(preferred_order),
+    )
+
     # Keep only observed questionnaire rows and observed automated columns.
+    row_labels = [
+        label
+        for label in labels
+        if int(confusion_df.loc[confusion_df["questionnaire_label"] == label, "count"].sum()) > 0
+    ]
+    col_labels = [
+        label
+        for label in labels
+        if int(confusion_df.loc[confusion_df["candidate_label"] == label, "count"].sum()) > 0
+    ]
+    if not row_labels:
+        row_labels = labels
+    if not col_labels:
+        col_labels = labels
+
+    per_label_df = pd.DataFrame(tone_payload.get("per_label", []))
+
+    selected_order = _comparison_rank_map(tone_payload)
+    comparisons = confusion_df["comparison"].drop_duplicates().tolist()
+    if selected_order:
+        comparisons = [comparison for comparison in comparisons if str(comparison) in selected_order]
+    comparisons = sorted(comparisons, key=lambda value: (selected_order.get(str(value), 999), _comparison_sort_key(str(value))))
+    n_panels = max(1, len(comparisons))
+    n_cols = 1 if n_panels == 1 else 2
+    n_rows = int(math.ceil(n_panels / n_cols))
+    fig = plt.figure(figsize=(6.2 * n_cols + 2.4, 4.8 * n_rows + 1.4))
+    gs = fig.add_gridspec(
+        n_rows,
+        n_cols + 1,
+        width_ratios=[0.045, *([1.0] * n_cols)],
+        wspace=0.20,
+        hspace=0.24,
+    )
+    axes_list = [fig.add_subplot(gs[row, col + 1]) for row in range(n_rows) for col in range(n_cols)]
+    cax = fig.add_subplot(gs[:, 0])
+
+    used_axes = axes_list[:n_panels]
+    for panel_index, (ax, comparison) in enumerate(zip(used_axes, comparisons, strict=False)):
+        subset = confusion_df[confusion_df["comparison"] == comparison].copy()
+        rate_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="row_rate")
+        rate_matrix = rate_matrix.reindex(index=row_labels, columns=col_labels)
+        count_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="count")
+        count_matrix = count_matrix.reindex(index=row_labels, columns=col_labels)
+        values = rate_matrix.to_numpy(dtype=float)
+        counts = count_matrix.to_numpy(dtype=float)
+        image = ax.imshow(values, cmap="YlGnBu", aspect="equal", vmin=0.0, vmax=1.0)
+        ax.set_xticks(range(len(col_labels)))
+        ax.set_yticks(range(len(row_labels)))
+        ax.set_xticklabels([_wrap_label(str(label).title(), width=10) for label in col_labels], rotation=20, ha="right", fontsize=12)
+        ax.set_yticklabels([_wrap_label(str(label).title(), width=10) for label in row_labels], fontsize=12)
+        panel_row = panel_index // n_cols
+        is_bottom_row = panel_row == (n_rows - 1)
+        ax.set_xlabel("Automated label" if is_bottom_row else "", fontsize=13)
+        ax.set_ylabel("Questionnaire label", fontsize=13)
+
+        comparison_key = str(comparison)
+        if comparison_key == "questionnaire_vs_vader":
+            panel_label = "VADER"
+        elif comparison_key.startswith("questionnaire_vs_llm:"):
+            panel_label = comparison_key.split(":", 1)[1]
+        else:
+            panel_label = _comparison_label(comparison_key)
+        title_text = _wrap_label(panel_label, width=28)
+
+        if not per_label_df.empty:
+            comparison_rows = per_label_df[per_label_df["comparison"] == comparison].copy()
+            label_f1_map = {
+                str(row["label"]).lower(): float(row["f1"])
+                for _, row in comparison_rows.iterrows()
+            }
+
+            def _fmt_f1(label: str) -> str:
+                value = label_f1_map.get(label)
+                if value is None or math.isnan(value):
+                    return "n/a"
+                return f"{value:.2f}"
+
+            title_text = (
+                f"{title_text}\n"
+                f"F1 pos={_fmt_f1('positive')} · neg={_fmt_f1('negative')} · "
+                f"mix={_fmt_f1('mixed')} · neu={_fmt_f1('neutral')}"
+            )
+
+        ax.set_title(title_text, fontsize=14, pad=6)
+
+        for i in range(values.shape[0]):
+            for j in range(values.shape[1]):
+                value = values[i, j]
+                if not math.isnan(value):
+                    count = counts[i, j]
+                    count_text = f"{int(count)}" if not math.isnan(count) else "?"
+                    ax.text(
+                        j,
+                        i,
+                        f"{count_text}\n({_format_pct(value)})",
+                        ha="center",
+                        va="center",
+                        color="#FFFFFF" if float(value) >= 0.50 else "#1F2933",
+                        fontsize=12,
+                    )
+
+    for extra_ax in axes_list[n_panels:]:
+        extra_ax.axis("off")
+
+    cbar = fig.colorbar(image, cax=cax)
+    cax.yaxis.set_ticks_position("left")
+    cax.yaxis.set_label_position("left")
+    cbar.set_label("Row-normalized rate", fontsize=13)
+    cbar.ax.tick_params(labelsize=11)
+    fig.subplots_adjust(top=0.95, bottom=0.10, left=0.07, right=0.99, hspace=0.36)
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def plot_questionnaire_tone_flow(
+    tone_payload: dict[str, Any],
+    figure_path: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    """Render an alluvial-style flow chart for questionnaire→automated tone transitions."""
+    confusion_rows = tone_payload.get("confusion", [])
+    if not isinstance(confusion_rows, list) or not confusion_rows:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No tone flow data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    confusion_df = pd.DataFrame(confusion_rows)
+    if confusion_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No tone flow data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    labels = tone_payload.get("labels", [])
+    if not isinstance(labels, list) or not labels:
+        labels = sorted(
+            {
+                str(row.get("questionnaire_label", ""))
+                for row in confusion_rows
+                if str(row.get("questionnaire_label", ""))
+            }
+        )
+
     row_labels = [
         label
         for label in labels
@@ -316,62 +469,93 @@ def plot_questionnaire_tone_confusion_matrix(
     selected_order = _comparison_rank_map(tone_payload)
     comparisons = confusion_df["comparison"].drop_duplicates().tolist()
     comparisons = sorted(comparisons, key=lambda value: (selected_order.get(str(value), 999), _comparison_sort_key(str(value))))
-    n_panels = max(1, len(comparisons))
-    n_cols = 1 if n_panels == 1 else 2
+    if not comparisons:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No tone flow data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    n_panels = len(comparisons)
+    n_cols = min(2, n_panels)
     n_rows = int(math.ceil(n_panels / n_cols))
-    fig = plt.figure(figsize=(6.2 * n_cols + 2.4, 4.8 * n_rows + 1.4))
-    gs = fig.add_gridspec(
-        n_rows,
-        n_cols + 1,
-        width_ratios=[0.06, *([1.0] * n_cols)],
-        wspace=0.10,
-        hspace=0.24,
-    )
-    axes_list = [fig.add_subplot(gs[row, col + 1]) for row in range(n_rows) for col in range(n_cols)]
-    cax = fig.add_subplot(gs[:, 0])
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(10.2 * n_cols, 3.9 * n_rows), squeeze=False)
+    axes_flat = axes.flatten()
 
-    used_axes = axes_list[:n_panels]
-    for ax, comparison in zip(used_axes, comparisons, strict=False):
+    left_y = {label: 1.0 - (index + 1) / (len(row_labels) + 1) for index, label in enumerate(row_labels)}
+    right_y = {label: 1.0 - (index + 1) / (len(col_labels) + 1) for index, label in enumerate(col_labels)}
+    flow_palette = {
+        "positive": "#2A9D8F",
+        "negative": "#B23A48",
+        "mixed": "#6D597A",
+        "neutral": "#457B9D",
+    }
+
+    for panel_index, (ax, comparison) in enumerate(zip(axes_flat, comparisons, strict=False)):
         subset = confusion_df[confusion_df["comparison"] == comparison].copy()
-        rate_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="row_rate")
-        rate_matrix = rate_matrix.reindex(index=row_labels, columns=col_labels)
-        count_matrix = subset.pivot(index="questionnaire_label", columns="candidate_label", values="count")
-        count_matrix = count_matrix.reindex(index=row_labels, columns=col_labels)
-        values = rate_matrix.to_numpy(dtype=float)
-        counts = count_matrix.to_numpy(dtype=float)
-        image = ax.imshow(values, cmap="YlGnBu", aspect="equal", vmin=0.0, vmax=1.0)
-        ax.set_xticks(range(len(col_labels)))
-        ax.set_yticks(range(len(row_labels)))
-        ax.set_xticklabels([_wrap_label(str(label).title(), width=10) for label in col_labels], rotation=20, ha="right")
-        ax.set_yticklabels([_wrap_label(str(label).title(), width=10) for label in row_labels])
-        ax.set_xlabel("Automated label")
-        ax.set_ylabel("Questionnaire label")
-        ax.set_title(_wrap_label(_comparison_label(str(comparison)), width=28), fontsize=10)
-        for i in range(values.shape[0]):
-            for j in range(values.shape[1]):
-                value = values[i, j]
-                if not math.isnan(value):
-                    count = counts[i, j]
-                    count_text = f"{int(count)}" if not math.isnan(count) else "?"
-                    ax.text(
-                        j,
-                        i,
-                        f"{count_text}\n({_format_pct(value)})",
-                        ha="center",
-                        va="center",
-                        color="#1F2933",
-                        fontsize=9,
-                    )
+        subset = subset[(subset["questionnaire_label"].isin(row_labels)) & (subset["candidate_label"].isin(col_labels))]
+        max_count = float(subset["count"].max()) if not subset.empty else 1.0
+        max_count = max(1.0, max_count)
 
-    for extra_ax in axes_list[n_panels:]:
+        for label in row_labels:
+            y = left_y[label]
+            ax.scatter([0.10], [y], s=190, color=flow_palette.get(str(label), "#355070"), edgecolors="#F8F5F0", linewidths=0.8, zorder=4)
+            ax.text(0.06, y, str(label).title(), ha="right", va="center", fontsize=9, color="#2B2D42")
+        for label in col_labels:
+            y = right_y[label]
+            ax.scatter([0.90], [y], s=190, color=flow_palette.get(str(label), "#355070"), edgecolors="#F8F5F0", linewidths=0.8, zorder=4)
+            ax.text(0.94, y, str(label).title(), ha="left", va="center", fontsize=9, color="#2B2D42")
+
+        visible_rows: list[dict[str, Any]] = []
+        for _, row in subset.iterrows():
+            source = str(row["questionnaire_label"])
+            target = str(row["candidate_label"])
+            count = float(row.get("count", 0.0))
+            if count <= 0 or source not in left_y or target not in right_y:
+                continue
+            rate = float(row.get("row_rate", float("nan")))
+            lw = 1.2 + 10.0 * (count / max_count)
+            color = flow_palette.get(source, "#355070")
+            alpha = 0.25 + 0.55 * (count / max_count)
+            ax.plot([0.10, 0.90], [left_y[source], right_y[target]], color=color, linewidth=lw, alpha=alpha, solid_capstyle="round", zorder=2)
+            visible_rows.append({
+                "source": source,
+                "target": target,
+                "count": count,
+                "rate": rate,
+                "y_mid": (left_y[source] + right_y[target]) / 2,
+            })
+
+        visible_rows = sorted(visible_rows, key=lambda item: item["count"], reverse=True)
+        for label_index, item in enumerate(visible_rows[:4]):
+            if pd.isna(item["rate"]) or float(item["rate"]) < 0.18:
+                continue
+            jitter = ((label_index % 2) * 0.018) - 0.009
+            y_text = min(0.96, max(0.06, float(item["y_mid"]) + jitter))
+            ax.text(
+                0.52,
+                y_text,
+                f"{str(item['source']).title()}→{str(item['target']).title()}: {int(item['count'])} ({_format_pct(float(item['rate']))})",
+                ha="center",
+                va="center",
+                fontsize=7.6,
+                color="#1F2933",
+                bbox={"boxstyle": "round,pad=0.15", "facecolor": "#FFFDF8", "edgecolor": "#DDD6C8", "alpha": 0.88},
+                zorder=5,
+            )
+
+        ax.text(0.10, 1.02, "Questionnaire", ha="center", va="bottom", fontsize=9, color="#2B2D42")
+        ax.text(0.90, 1.02, "Automated", ha="center", va="bottom", fontsize=9, color="#2B2D42")
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.06)
+        ax.axis("off")
+        ax.set_title(_wrap_label(_comparison_label(str(comparison)), width=30), fontsize=10)
+
+    for extra_ax in axes_flat[n_panels:]:
         extra_ax.axis("off")
 
-    cbar = fig.colorbar(image, cax=cax)
-    cax.yaxis.set_ticks_position("left")
-    cax.yaxis.set_label_position("left")
-    cbar.set_label("Row-normalized rate")
-    fig.suptitle("Experience Tone confusion matrix (row-normalized)", x=0.5, y=0.985, ha="center")
-    fig.subplots_adjust(top=0.90, bottom=0.10, left=0.06, right=0.99)
+    fig.suptitle("Experience Tone flow (questionnaire → automated)", fontsize=13, y=0.985)
+    fig.subplots_adjust(top=0.90, bottom=0.08, left=0.03, right=0.98, wspace=0.18, hspace=0.24)
     fig.patch.set_facecolor("#FFFDF8")
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
@@ -700,6 +884,484 @@ def write_questionnaire_tone_label_figures(
     return {
         "questionnaire_tone_confusion_matrix": str(confusion_path),
     }
+
+
+def plot_questionnaire_family_tradeoff_map(
+    family_df: pd.DataFrame,
+    figure_path: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    """Main questionnaire figure in one panel: NDE-C + NDE-MCQ + Tone."""
+    if family_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No family summary data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    source_df = family_df[family_df["comparison"].astype(str).str.startswith("questionnaire_vs_llm:")].copy()
+    if source_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No questionnaire-vs-LLM family data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    rank_df = source_df.copy().rename(columns={"cohen_kappa_mean": "cohen_kappa", "macro_f1_mean": "macro_f1"})
+    comparisons = _select_top_comparisons_for_figure(
+        rank_df,
+        "questionnaire_vs_",
+        baseline_comparisons=[],
+        top_n=10,
+        ranking_metric="macro_f1",
+    )
+    selected_llm = [comparison for comparison in comparisons if comparison.startswith("questionnaire_vs_llm:")]
+    plot_df = source_df[source_df["comparison"].isin(selected_llm)].copy()
+    plot_df = plot_df[plot_df["family"].isin(["m8", "m9", "tone"])].copy()
+    if plot_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No family slices available for scatter figure", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    fig, ax = plt.subplots(figsize=(12.8, 7.0))
+
+    marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h", "*"]
+    marker_map = {comparison: marker_cycle[index % len(marker_cycle)] for index, comparison in enumerate(selected_llm)}
+    legend_handles = []
+    legend_labels = []
+
+    family_colors = {
+        "m8": "#2A9D8F",
+        "m9": "#E76F51",
+        "tone": "#4C78A8",
+    }
+    family_labels = {
+        "m8": "NDE-C (Content of the Near-Death Experience Scale)",
+        "m9": "NDE-MCQ (Impact of the NDE on Moral Cognition)",
+        "tone": "Experience Tone",
+    }
+    for _, row in plot_df.iterrows():
+        comparison_name = str(row["comparison"])
+        family = str(row["family"])
+        x = float(row["cohen_kappa_mean"]) if pd.notna(row["cohen_kappa_mean"]) else float("nan")
+        y = float(row["macro_f1_mean"]) if pd.notna(row["macro_f1_mean"]) else float("nan")
+        if math.isnan(x) or math.isnan(y):
+            continue
+        if family == "tone":
+            size = 170
+        else:
+            recall_yes = float(row["recall_yes_mean"]) if pd.notna(row["recall_yes_mean"]) else 0.35
+            size = 110 + 520 * max(0.0, min(1.0, recall_yes))
+        marker = marker_map.get(comparison_name, "o")
+        ax.scatter(
+            [x],
+            [y],
+            s=size,
+            color=family_colors.get(family, "#6B7280"),
+            marker=marker,
+            alpha=0.84,
+            edgecolors="#F8F5F0",
+            linewidths=0.9,
+        )
+
+        if comparison_name not in legend_labels:
+            handle = plt.Line2D(
+                [0],
+                [0],
+                marker=marker,
+                color="none",
+                markerfacecolor="#9AA0A6",
+                markeredgecolor="#2B2D42",
+                markersize=7,
+                linewidth=0,
+            )
+            legend_handles.append(handle)
+            legend_labels.append(comparison_name)
+
+    # Add VADER baseline for tone reference
+    vader_tone = family_df[(family_df["comparison"] == "questionnaire_vs_vader") & (family_df["family"] == "tone")]
+    vader_kappa = (
+        float(vader_tone.iloc[0]["cohen_kappa_mean"])
+        if not vader_tone.empty and pd.notna(vader_tone.iloc[0]["cohen_kappa_mean"])
+        else float("nan")
+    )
+    vader_macro_f1 = (
+        float(vader_tone.iloc[0]["macro_f1_mean"])
+        if not vader_tone.empty and pd.notna(vader_tone.iloc[0]["macro_f1_mean"])
+        else float("nan")
+    )
+    if not math.isnan(vader_kappa):
+        ax.axvline(vader_kappa, color="#5E6472", linestyle="--", linewidth=1.0, alpha=0.85)
+    if not math.isnan(vader_macro_f1):
+        ax.axhline(vader_macro_f1, color="#5E6472", linestyle=":", linewidth=1.0, alpha=0.85)
+    if not math.isnan(vader_kappa) and not math.isnan(vader_macro_f1):
+        ax.scatter([vader_kappa], [vader_macro_f1], s=120, color="#5E6472", marker="*", edgecolors="#F8F5F0", linewidths=0.8, zorder=4)
+
+    all_xy = plot_df[["cohen_kappa_mean", "macro_f1_mean"]].dropna()
+    x_min = float(all_xy["cohen_kappa_mean"].min())
+    x_max = float(all_xy["cohen_kappa_mean"].max())
+    y_min = float(all_xy["macro_f1_mean"].min())
+    y_max = float(all_xy["macro_f1_mean"].max())
+    if not math.isnan(vader_kappa):
+        x_min = min(x_min, vader_kappa)
+        x_max = max(x_max, vader_kappa)
+    if not math.isnan(vader_macro_f1):
+        y_min = min(y_min, vader_macro_f1)
+        y_max = max(y_max, vader_macro_f1)
+    x_pad = max(0.015, (x_max - x_min) * 0.22)
+    y_pad = max(0.015, (y_max - y_min) * 0.22)
+
+    ax.set_title("Single panel — NDE-C, NDE-MCQ, and Experience Tone", fontsize=12)
+    ax.set_xlabel("Mean Cohen kappa")
+    ax.set_ylabel("Mean Macro F1")
+    ax.set_xlim(max(-0.02, x_min - x_pad), min(0.90, x_max + x_pad))
+    ax.set_ylim(max(0.20, y_min - y_pad), min(0.92, y_max + y_pad))
+    ax.set_facecolor("#FFFFFF")
+    ax.grid(axis="both", color="#E5E7EB", linestyle="--", linewidth=0.8, alpha=0.9)
+    ax.set_axisbelow(True)
+
+    family_handles = [
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["m8"], markeredgecolor=family_colors["m8"], markersize=7, linewidth=0),
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["m9"], markeredgecolor=family_colors["m9"], markersize=7, linewidth=0),
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["tone"], markeredgecolor=family_colors["tone"], markersize=7, linewidth=0),
+    ]
+    family_legend = ax.legend(
+        family_handles,
+        [
+            "NDE-C (Content of the Near-Death Experience Scale)",
+            "NDE-MCQ (Impact of the NDE on Moral Cognition)",
+            "Experience Tone",
+        ],
+        loc="upper left",
+        frameon=False,
+        title="Family grouping",
+        title_fontsize=9,
+        fontsize=8.1,
+    )
+    ax.add_artist(family_legend)
+
+    size_legend_sizes = [0.30, 0.55, 0.80]
+    size_handles = [
+        plt.scatter([], [], s=110 + 520 * value, color="#BFC5CE", edgecolors="#2B2D42", linewidths=0.6)
+        for value in size_legend_sizes
+    ]
+    size_legend = ax.legend(
+        size_handles,
+        [f"Recall yes ≈ {value:.2f}" for value in size_legend_sizes],
+        loc="lower right",
+        frameon=False,
+        fontsize=8,
+        title="Bubble size",
+        title_fontsize=9,
+    )
+    ax.add_artist(size_legend)
+
+    if not math.isnan(vader_kappa) and not math.isnan(vader_macro_f1):
+        vader_handle = plt.Line2D([0], [0], marker="*", color="#5E6472", markersize=9, linewidth=1.0, linestyle="--")
+        ax.legend([vader_handle], [f"VADER baseline (κ={vader_kappa:.2f}, F1={vader_macro_f1:.2f})"], loc="upper right", frameon=False, fontsize=8)
+
+    if legend_handles:
+        ordered_labels = [_comparison_label(name).replace("Questionnaire Vs ", "") for name in legend_labels]
+        fig.legend(legend_handles, ordered_labels, title="Models (Top 10 by Macro F1)", loc="upper center", bbox_to_anchor=(0.5, -0.03), ncol=4, frameon=False, fontsize=8.2, title_fontsize=9)
+
+    fig.suptitle("Questionnaire vs automated — family contrast and tone divergence", fontsize=14)
+    fig.subplots_adjust(bottom=0.16, top=0.86)
+    fig.patch.set_facecolor("#FFFFFF")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def plot_questionnaire_extraction_item_scatter(
+    metrics_df: pd.DataFrame,
+    study: StudyConfig,
+    figure_path: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    """Scatter view for questionnaire extraction items (NDE-C + NDE-MCQ).
+
+    X axis: Cohen kappa
+    Y axis: Macro F1
+    Color: model (top 3 LLMs)
+    Marker: item
+    """
+    if metrics_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No item-level extraction data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    m8_fields_full = _field_bucket_order(study)["m8"]
+    m9_fields_full = _field_bucket_order(study)["m9"]
+    extraction_fields = m8_fields_full + m9_fields_full
+    plot_df = metrics_df[metrics_df["field"].isin(extraction_fields)].copy()
+    plot_df = plot_df[plot_df["comparison"].astype(str).str.startswith("questionnaire_vs_llm:")].copy()
+    if plot_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No questionnaire-vs-LLM extraction rows available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    selected_models = _select_top_comparisons_for_figure(
+        plot_df,
+        "questionnaire_vs_",
+        baseline_comparisons=[],
+        top_n=3,
+        ranking_metric="macro_f1",
+    )
+    selected_models = [value for value in selected_models if str(value).startswith("questionnaire_vs_llm:")]
+    plot_df = plot_df[plot_df["comparison"].isin(selected_models)].copy()
+    if plot_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No selected extraction rows available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    model_palette = ["#1D3557", "#2A9D8F", "#E76F51"]
+    model_color = {model: model_palette[index % len(model_palette)] for index, model in enumerate(selected_models)}
+
+    observed_fields = set(plot_df["field"].astype(str))
+    m8_fields = [field for field in m8_fields_full if field in observed_fields]
+    m9_fields = [field for field in m9_fields_full if field in observed_fields]
+
+    m8_marker_cycle = ["o", "8", "p", "h", "H"]
+    m9_marker_cycle = ["^", ">", "v", "<", "2"]
+    marker_map: dict[str, str] = {}
+    for index, field in enumerate(m8_fields):
+        marker_map[field] = m8_marker_cycle[index % len(m8_marker_cycle)]
+    for index, field in enumerate(m9_fields):
+        marker_map[field] = m9_marker_cycle[index % len(m9_marker_cycle)]
+
+    fig, ax = plt.subplots(figsize=(13.0, 8.0))
+
+    x_min, x_max = 0.00, 0.75
+    y_min, y_max = 0.22, 0.90
+
+    for _, row in plot_df.iterrows():
+        model = str(row["comparison"])
+        field = str(row["field"])
+        x_value = float(row["cohen_kappa"])
+        y_value = float(row["macro_f1"])
+        ax.scatter(
+            x_value,
+            y_value,
+            s=95,
+            color=model_color.get(model, "#457B9D"),
+            marker=marker_map.get(field, "o"),
+            edgecolors="#FFFFFF",
+            linewidths=0.9,
+            alpha=0.95,
+        )
+
+    # Data-driven partition: split points into 2 metric groups via lightweight 2-means,
+    # then shade the two regions separated by the centroid bisector.
+    metric_points = plot_df[["cohen_kappa", "macro_f1"]].dropna().astype(float).to_numpy().tolist()
+    if len(metric_points) >= 4:
+        def _score(point: list[float]) -> float:
+            return float(point[0]) + float(point[1])
+
+        low_center = list(min(metric_points, key=_score))
+        high_center = list(max(metric_points, key=_score))
+
+        centers = [low_center, high_center]
+        for _ in range(20):
+            clusters = [[], []]
+            for point in metric_points:
+                d0 = (point[0] - centers[0][0]) ** 2 + (point[1] - centers[0][1]) ** 2
+                d1 = (point[0] - centers[1][0]) ** 2 + (point[1] - centers[1][1]) ** 2
+                clusters[0 if d0 <= d1 else 1].append(point)
+
+            new_centers: list[list[float]] = []
+            for index, cluster in enumerate(clusters):
+                if cluster:
+                    new_centers.append([
+                        sum(point[0] for point in cluster) / len(cluster),
+                        sum(point[1] for point in cluster) / len(cluster),
+                    ])
+                else:
+                    new_centers.append(centers[index])
+
+            if max(
+                abs(new_centers[0][0] - centers[0][0]) + abs(new_centers[0][1] - centers[0][1]),
+                abs(new_centers[1][0] - centers[1][0]) + abs(new_centers[1][1] - centers[1][1]),
+            ) < 1e-5:
+                centers = new_centers
+                break
+            centers = new_centers
+
+        c0, c1 = centers[0], centers[1]
+        score0 = c0[0] + c0[1]
+        score1 = c1[0] + c1[1]
+
+        a = 2.0 * (c1[0] - c0[0])
+        b = 2.0 * (c1[1] - c0[1])
+        c = (c1[0] ** 2 + c1[1] ** 2) - (c0[0] ** 2 + c0[1] ** 2)
+
+        x_grid = [x_min + (x_max - x_min) * step / 200.0 for step in range(201)]
+        if abs(b) > 1e-8:
+            y_line = [(c - a * x_value) / b for x_value in x_grid]
+            y_line = [min(y_max, max(y_min, value)) for value in y_line]
+
+            low_region_color = "#FEE2E2" if score0 < score1 else "#DBEAFE"
+            high_region_color = "#DBEAFE" if score0 < score1 else "#FEE2E2"
+            ax.fill_between(x_grid, [y_min] * len(x_grid), y_line, color=low_region_color, alpha=0.14, zorder=0)
+            ax.fill_between(x_grid, y_line, [y_max] * len(x_grid), color=high_region_color, alpha=0.14, zorder=0)
+            ax.plot(x_grid, y_line, color="#4B5563", linestyle="--", linewidth=1.2, zorder=1)
+        elif abs(a) > 1e-8:
+            x_cut = c / a
+            x_cut = min(x_max, max(x_min, x_cut))
+            left_color = "#FEE2E2" if score0 < score1 else "#DBEAFE"
+            right_color = "#DBEAFE" if score0 < score1 else "#FEE2E2"
+            ax.axvspan(x_min, x_cut, color=left_color, alpha=0.14, zorder=0)
+            ax.axvspan(x_cut, x_max, color=right_color, alpha=0.14, zorder=0)
+            ax.axvline(x_cut, color="#4B5563", linestyle="--", linewidth=1.2, zorder=1)
+
+    ax.axvline(0.20, color="#9CA3AF", linestyle="--", linewidth=1.2, alpha=0.9)
+    ax.axvline(0.40, color="#6B7280", linestyle="--", linewidth=1.2, alpha=0.9)
+    ax.text(0.202, 0.985, "κ=0.20", transform=ax.get_xaxis_transform(), ha="left", va="top", fontsize=10, color="#6B7280")
+    ax.text(0.402, 0.985, "κ=0.40", transform=ax.get_xaxis_transform(), ha="left", va="top", fontsize=10, color="#4B5563")
+
+    ax.set_xlabel("Cohen kappa", fontsize=13)
+    ax.set_ylabel("Macro F1", fontsize=13)
+    ax.set_title("NDE-C + NDE-MCQ extraction items — top 3 LLMs", fontsize=15)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    _style_axes(ax)
+
+    model_handles = [
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor=model_color[model],
+            markeredgecolor=model_color[model],
+            markersize=8,
+            linewidth=0,
+        )
+        for model in selected_models
+    ]
+    model_labels = [str(model).split(":", 1)[1] if ":" in str(model) else _comparison_label(str(model)) for model in selected_models]
+    model_legend = ax.legend(
+        model_handles,
+        model_labels,
+        title="Models (Top 3 LLMs)",
+        frameon=False,
+        loc="lower right",
+        bbox_to_anchor=(0.985, 0.03),
+        fontsize=9,
+        title_fontsize=10,
+    )
+    ax.add_artist(model_legend)
+
+    nde_c_handles = [
+        plt.Line2D([0], [0], marker=marker_map[field], color="#374151", markerfacecolor="#374151", linestyle="", markersize=7)
+        for field in m8_fields
+    ]
+    nde_c_labels = [_field_display_label(field, study) for field in m8_fields]
+    nde_c_legend = ax.legend(
+        nde_c_handles,
+        nde_c_labels,
+        title="NDE-C (Content of the Near-Death Experience Scale) items",
+        frameon=False,
+        loc="lower right",
+        bbox_to_anchor=(0.985, 0.24),
+        fontsize=8.5,
+        title_fontsize=9.5,
+    )
+    ax.add_artist(nde_c_legend)
+
+    nde_mcq_handles = [
+        plt.Line2D([0], [0], marker=marker_map[field], color="#374151", markerfacecolor="#374151", linestyle="", markersize=7)
+        for field in m9_fields
+    ]
+    nde_mcq_labels = [_field_display_label(field, study) for field in m9_fields]
+    nde_mcq_legend = ax.legend(
+        nde_mcq_handles,
+        nde_mcq_labels,
+        title="NDE-MCQ (Impact of the NDE on Moral Cognition) items",
+        frameon=False,
+        loc="lower right",
+        bbox_to_anchor=(0.985, 0.56),
+        fontsize=8.5,
+        title_fontsize=9.5,
+    )
+    ax.add_artist(nde_mcq_legend)
+
+    fig.patch.set_facecolor("#FFFDF8")
+    fig.subplots_adjust(right=0.97)
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+
+def plot_questionnaire_family_gap_slope(
+    family_df: pd.DataFrame,
+    figure_path: Path,
+    dpi: int = 300,
+    export_pdf: bool = False,
+) -> list[str]:
+    """Slope chart contrasting NDE-C vs NDE-MCQ macro F1 for selected questionnaire comparisons."""
+    if family_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No family summary data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    plot_df = family_df[family_df["comparison"].astype(str).str.startswith("questionnaire_vs_")].copy()
+    plot_df = plot_df[plot_df["family"].isin(["m8", "m9"])].copy()
+    if plot_df.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No NDE-C/NDE-MCQ data available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    comparisons = _select_top_comparisons_for_figure(
+        plot_df.rename(columns={"cohen_kappa_mean": "cohen_kappa", "macro_f1_mean": "macro_f1"}),
+        "questionnaire_vs_",
+        baseline_comparisons=["questionnaire_vs_vader"],
+        top_n=4,
+        ranking_metric="macro_f1",
+    )
+    plot_df = plot_df[plot_df["comparison"].isin(comparisons)]
+
+    pivot = plot_df.pivot(index="comparison", columns="family", values="macro_f1_mean")
+    pivot = pivot.dropna(subset=["m8", "m9"], how="any")
+    if pivot.empty:
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        ax.text(0.5, 0.5, "No paired NDE-C/NDE-MCQ values available", ha="center", va="center", fontsize=13, color="#2B2D42")
+        ax.axis("off")
+        fig.patch.set_facecolor("#FFFDF8")
+        return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
+
+    pivot = pivot.sort_values("m8", ascending=False)
+    fig, ax = plt.subplots(figsize=(10.6, max(5.8, 0.7 * len(pivot) + 3.2)))
+    x_left, x_right = 0.0, 1.0
+    palette = ["#355070", "#6D597A", "#2A9D8F", "#B56576", "#457B9D", "#B08968"]
+
+    for index, (comparison, row) in enumerate(pivot.iterrows()):
+        left = float(row["m8"])
+        right = float(row["m9"])
+        color = palette[index % len(palette)]
+        ax.plot([x_left, x_right], [left, right], color=color, linewidth=2.2, alpha=0.9)
+        ax.scatter([x_left, x_right], [left, right], s=58, color=color, edgecolors="#F8F5F0", linewidths=0.8, zorder=3)
+        ax.text(x_left - 0.03, left, _comparison_label(str(comparison)).replace("Questionnaire Vs ", ""), ha="right", va="center", fontsize=8.3, color="#2B2D42")
+        ax.text(x_right + 0.03, right, f"Δ={right - left:+.2f}", ha="left", va="center", fontsize=8.1, color="#2B2D42")
+
+    ax.set_xticks([x_left, x_right])
+    ax.set_xticklabels(["NDE-C", "NDE-MCQ"])
+    ax.set_xlim(-0.20, 1.22)
+    ax.set_ylim(0.25, 0.90)
+    ax.set_ylabel("Mean Macro F1")
+    ax.set_title("Family gap per model: NDE-C vs NDE-MCQ")
+    _style_axes(ax)
+    fig.patch.set_facecolor("#FFFDF8")
+    return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
 def plot_comparison_summary(metrics_df: pd.DataFrame, figure_path: Path, dpi: int = 300, export_pdf: bool = False, scope_prefix: str | None = None, baseline_comparisons: list[str] | None = None, top_n: int = 3) -> list[str]:
@@ -1159,7 +1821,6 @@ def write_alignment_figures(
         path_map = {
             f"{base}_comparison_summary": str(summary_path),
             f"{base}_family_summary": str(family_summary_path),
-            f"{base}_tone_summary": str(figures_dir / f"{base}_tone_summary.png"),
             f"{base}_tone_macro_f1_heatmap": str(figures_dir / f"{base}_tone_macro_f1_heatmap.png"),
             f"{base}_tone_cohen_kappa_heatmap": str(figures_dir / f"{base}_tone_cohen_kappa_heatmap.png"),
             f"{base}_nde_c_macro_f1_heatmap": str(figures_dir / f"{base}_nde_c_macro_f1_heatmap.png"),
@@ -1173,6 +1834,15 @@ def write_alignment_figures(
             f"{base}_m9_accuracy_heatmap": str(figures_dir / f"{base}_nde_mcq_macro_f1_heatmap.png"),
             f"{base}_m9_cohen_kappa_heatmap": str(figures_dir / f"{base}_nde_mcq_cohen_kappa_heatmap.png"),
         }
+        if scope_prefix == "questionnaire_vs_":
+            path_map.update(
+                {
+                    f"{base}_family_tradeoff_map": str(figures_dir / f"{base}_family_tradeoff_map.png"),
+                    f"{base}_extraction_item_scatter": str(figures_dir / f"{base}_extraction_item_scatter.png"),
+                }
+            )
+        else:
+            path_map[f"{base}_tone_summary"] = str(figures_dir / f"{base}_tone_summary.png")
         # Select comparisons for figure: baselines + top 3 LLMs by macro_f1
         if scope_prefix == "questionnaire_vs_":
             baseline_comparisons = ["questionnaire_vs_vader"]
@@ -1180,26 +1850,42 @@ def write_alignment_figures(
             baseline_comparisons = ["human_reference_vs_questionnaire", "human_reference_vs_vader"]
         else:
             baseline_comparisons = []
-        plot_comparison_summary(
-            scoped_metrics_df,
-            summary_path,
-            dpi=dpi,
-            export_pdf=export_pdf,
-            scope_prefix=scope_prefix,
-            baseline_comparisons=baseline_comparisons,
-            top_n=3,
-        )
+        if scope_prefix == "human_reference_vs_":
+            plot_comparison_summary(
+                scoped_metrics_df,
+                summary_path,
+                dpi=dpi,
+                export_pdf=export_pdf,
+                scope_prefix=scope_prefix,
+                baseline_comparisons=baseline_comparisons,
+                top_n=3,
+            )
         scope_title = "Human vs all — family-level alignment summary" if scope_prefix == "human_reference_vs_" else "Questionnaire vs automated — family-level alignment summary"
-        plot_family_summary(
-            family_df,
-            family_summary_path,
-            title=scope_title,
-            dpi=dpi,
-            export_pdf=export_pdf,
-            scope_prefix=scope_prefix,
-            baseline_comparisons=baseline_comparisons,
-            top_n=3,
-        )
+        if scope_prefix == "human_reference_vs_":
+            plot_family_summary(
+                family_df,
+                family_summary_path,
+                title=scope_title,
+                dpi=dpi,
+                export_pdf=export_pdf,
+                scope_prefix=scope_prefix,
+                baseline_comparisons=baseline_comparisons,
+                top_n=3,
+            )
+        if scope_prefix == "questionnaire_vs_":
+            plot_questionnaire_family_tradeoff_map(
+                family_df,
+                Path(path_map[f"{base}_family_tradeoff_map"]),
+                dpi=dpi,
+                export_pdf=export_pdf,
+            )
+            plot_questionnaire_extraction_item_scatter(
+                scoped_metrics_df,
+                study,
+                Path(path_map[f"{base}_extraction_item_scatter"]),
+                dpi=dpi,
+                export_pdf=export_pdf,
+            )
         tone_summary_title = "Human vs all — tone summary" if scope_prefix == "human_reference_vs_" else "Questionnaire vs automated — Experience Tone summary"
         # Select comparisons for tone figure: baselines + top 3 LLMs by macro_f1
         if scope_prefix == "questionnaire_vs_":
@@ -1208,18 +1894,19 @@ def write_alignment_figures(
             tone_baseline_comparisons = ["human_reference_vs_questionnaire", "human_reference_vs_vader"]
         else:
             tone_baseline_comparisons = []
-        plot_single_field_metric_summary(
-            scoped_metrics_df,
-            field=study.sections["experience"].tone_internal_column,
-            study=study,
-            figure_path=Path(path_map[f"{base}_tone_summary"]),
-            title=tone_summary_title,
-            dpi=dpi,
-            export_pdf=export_pdf,
-            scope_prefix=scope_prefix,
-            baseline_comparisons=tone_baseline_comparisons,
-            top_n=3,
-        )
+        if scope_prefix == "human_reference_vs_":
+            plot_single_field_metric_summary(
+                scoped_metrics_df,
+                field=study.sections["experience"].tone_internal_column,
+                study=study,
+                figure_path=Path(path_map[f"{base}_tone_summary"]),
+                title=tone_summary_title,
+                dpi=dpi,
+                export_pdf=export_pdf,
+                scope_prefix=scope_prefix,
+                baseline_comparisons=tone_baseline_comparisons,
+                top_n=3,
+            )
         # Select comparisons for heatmap figures: baselines + top 3 LLMs by macro_f1
         if scope_prefix == "questionnaire_vs_":
             heatmap_baseline_comparisons = ["questionnaire_vs_vader"]
@@ -1676,7 +2363,7 @@ def _questionnaire_neutral_focus_lines(summary: dict[str, Any], output_dir: Path
                 "![Experience Tone confusion matrix]"
                 f"({Path(figure_paths['questionnaire_tone_confusion_matrix']).relative_to(output_dir).as_posix()})",
                 "",
-                "The matrix is row-normalized by questionnaire label and each cell shows both row percentage and absolute count, making neutral→mixed spillover visible even when class frequencies differ.",
+                "The matrix is row-normalized by questionnaire label and reports both row percentage and absolute count for exact inspection.",
                 "",
             ]
         )
@@ -1905,13 +2592,11 @@ def write_alignment_report_for_scope(
     else:
         lines.extend(
             [
-                "## Figures",
+                "## Main Figures (Narrative)",
                 "",
-                "The figures below show baseline comparisons plus the top 3 LLMs ranked by macro F1.",
+                "These lead figures prioritize integrated interpretation (agreement + prevalence behavior + error flow) before item-level detail.",
                 "",
-                f"![Overall comparison summary]({Path(figure_paths[f'{figure_prefix}_comparison_summary']).relative_to(output_dir).as_posix()})",
-                "",
-                f"![Family-level summary]({Path(figure_paths[f'{figure_prefix}_family_summary']).relative_to(output_dir).as_posix()})",
+                f"![Family tradeoff map]({Path(figure_paths.get(f'{figure_prefix}_family_tradeoff_map', figure_paths[f'{figure_prefix}_family_summary'])).relative_to(output_dir).as_posix()})",
                 "",
             ]
         )
@@ -1919,8 +2604,14 @@ def write_alignment_report_for_scope(
     lines.extend(_family_summary_lines(family_df, "Family-Level Results"))
     if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
         lines.extend(_questionnaire_interpretation_lines(family_df))
-    tone_lines = ["#### Tone", "", f"![Tone summary]({Path(figure_paths[f'{figure_prefix}_tone_summary']).relative_to(output_dir).as_posix()})", ""]
+    tone_lines = ["#### Tone Label Confusion and Per-Label F1", ""]
     if figure_prefix == "human":
+        tone_lines.extend(
+            [
+                f"![Tone summary]({Path(figure_paths[f'{figure_prefix}_tone_summary']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
         tone_lines.extend(
             [
                 f"![Tone macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_tone_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
@@ -1932,34 +2623,50 @@ def write_alignment_report_for_scope(
     else:
         tone_lines.extend(
             [
-                "In the questionnaire scope, only Experience Tone is available, so the tone section is summarized in a single three-metric figure instead of redundant heatmaps.",
+                f"![Tone confusion matrix]({Path(figure_paths['questionnaire_tone_confusion_matrix']).relative_to(output_dir).as_posix()})",
+                "",
+                "The confusion matrices focus on Positive / Negative / Mixed / Neutral labels; each panel now includes per-label F1 (pos/neg/mix/neu) for direct interpretability.",
                 "",
             ]
         )
-    # Detailed heatmaps (also filtered to baselines + top 3 LLMs)
-    lines.extend(
-        [
-            "## Detailed Heatmaps",
-            "",
-            "These heatmaps show macro F1 and Cohen kappa for the same filtered comparisons: baseline(s) plus top 3 LLMs ranked by macro F1.",
-            "",
-            *tone_lines,
-            "#### NDE-C",
-            "",
-            f"![NDE-C macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_nde_c_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            f"![NDE-C kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_c_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            "#### NDE-MCQ",
-            "",
-            f"![NDE-MCQ macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-            f"![NDE-MCQ kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
-            "",
-        ]
-    )
+    # Detailed item-level panels (also filtered to baselines + top 3 LLMs)
+    if figure_prefix == "questionnaire":
+        lines.extend(
+            [
+                "## Item-Level Structure (Extended Figures)",
+                "",
+                "This section integrates NDE-C and NDE-MCQ extraction items in one scatter figure (x=Kappa, y=Macro F1), using item markers and model colors for manuscript-oriented comparison.",
+                "",
+                *tone_lines,
+                "#### NDE-C + NDE-MCQ (Integrated Extraction View)",
+                "",
+                f"![NDE-C + NDE-MCQ extraction scatter]({Path(figure_paths[f'{figure_prefix}_extraction_item_scatter']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "## Item-Level Structure (Extended Figures)",
+                "",
+                "These panels keep macro F1 and Cohen kappa detail after the narrative figures, preserving item-level transparency for manuscript appendix use.",
+                "",
+                *tone_lines,
+                "#### NDE-C",
+                "",
+                f"![NDE-C macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_nde_c_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![NDE-C kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_c_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
+                "",
+                "#### NDE-MCQ",
+                "",
+                f"![NDE-MCQ macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
+                "",
+                f"![NDE-MCQ kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
+                "",
+            ]
+        )
     if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
-        lines.extend(_questionnaire_neutral_focus_lines(summary, output_dir, figure_paths))
         lines.extend(_questionnaire_contradiction_lines(summary, output_dir, figure_paths))
     lines.extend(_field_result_lines(metrics_df, study))
     if include_support_sections:
