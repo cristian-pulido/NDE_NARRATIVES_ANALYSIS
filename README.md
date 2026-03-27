@@ -275,6 +275,8 @@ Useful evaluation options:
 - `--llm-results-dir`: evaluate all discovered LLM prediction artifacts in a folder.
 - `--annotator-id`: restrict evaluation to selected annotators.
 - `--experiment-id`: restrict evaluation to selected experiments.
+- `--prompt-variant`: restrict evaluation to artifacts whose manifest prompt variant matches one or more selected values (with prompt-root fallback for legacy manifests).
+- `--output-dir`: write metrics, manifests, figures, and reports to a custom destination instead of the default evaluation output folder.
 - `--human-annotation-workbook` and `--llm-predictions`: explicit single-file overrides.
 
 ## Typical Workflow

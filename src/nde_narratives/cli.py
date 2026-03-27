@@ -773,6 +773,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Restrict evaluation to selected experiment ids or artifact ids discovered on disk.",
     )
+    filter_group.add_argument(
+        "--prompt-variant",
+        metavar="ID",
+        action="append",
+        default=None,
+        help="Restrict evaluation to artifacts whose manifest prompt_variant (or prompt_root fallback) matches one of the selected values.",
+    )
     auxiliary_group = evaluate.add_argument_group("Auxiliary Inputs And Output")
     auxiliary_group.add_argument(
         "--sampled-private-workbook",
@@ -1163,6 +1170,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         llm_results_dir=Path(args.llm_results_dir).resolve() if args.llm_results_dir else None,
         annotator_ids=list(args.annotator_id) if args.annotator_id else None,
         experiment_ids=list(args.experiment_id) if args.experiment_id else None,
+        prompt_variants=list(args.prompt_variant) if args.prompt_variant else None,
         sampled_private_workbook=Path(args.sampled_private_workbook).resolve() if args.sampled_private_workbook else None,
         vader_scores_path=Path(args.vader_scores).resolve() if args.vader_scores else None,
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,

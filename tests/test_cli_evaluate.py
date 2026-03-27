@@ -40,12 +40,19 @@ def _prepare_human_artifact(source_workbook: Path, human_root: Path, annotator_i
     return target
 
 
-def _prepare_llm_artifact(mapping_workbook: Path, study_config: Path, llm_root: Path, experiment_id: str, run_id: str = "run-01") -> Path:
+def _prepare_llm_artifact(
+    mapping_workbook: Path,
+    study_config: Path,
+    llm_root: Path,
+    experiment_id: str,
+    run_id: str = "run-01",
+    prompt_variant: str = "baseline",
+) -> Path:
     target_dir = llm_root / f"{experiment_id}_{run_id}"
     target_dir.mkdir(parents=True, exist_ok=True)
     prediction_path = target_dir / "predictions.jsonl"
     write_llm_predictions_fixture(mapping_workbook, study_config, prediction_path)
-    write_llm_manifest(target_dir, experiment_id=experiment_id, prompt_variant="baseline", run_id=run_id, model_variant="mock-model")
+    write_llm_manifest(target_dir, experiment_id=experiment_id, prompt_variant=prompt_variant, run_id=run_id, model_variant="mock-model")
     return prediction_path
 
 
@@ -255,3 +262,77 @@ def test_evaluate_can_filter_to_selected_experiment_and_annotator(tmp_path: Path
     assert set(llm_rows["artifact_id"]) == {"exp_two__run-02"}
     assert summary["coverage"]["n_valid_human_artifacts"] == 1
     assert summary["coverage"]["n_valid_llm_artifacts"] == 1
+
+
+def test_evaluate_can_filter_to_selected_prompt_variant_and_custom_output_dir(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    build_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert build_result.returncode == 0, build_result.stderr
+
+    source_workbook = tmp_path / "annotation_outputs" / "nde_annotation_sample.xlsx"
+    mapping_workbook = tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    human_root = tmp_path / "human_annotations"
+    llm_root = tmp_path / "llm_outputs"
+
+    populate_human_annotation_workbook(source_workbook, mapping_workbook, study_config)
+    _prepare_human_artifact(source_workbook, human_root, "ann_a")
+
+    _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-baseline", run_id="run-01", prompt_variant="baseline")
+    _prepare_llm_artifact(
+        mapping_workbook,
+        study_config,
+        llm_root,
+        "exp-smaj",
+        run_id="run-01",
+        prompt_variant="sentence_majority_v1",
+    )
+
+    sampled_private = pd.read_excel(mapping_workbook, sheet_name="sampled_private")
+    vader_rows: list[dict[str, object]] = []
+    for _, row in sampled_private.iterrows():
+        for section_name in ("context", "experience", "aftereffects"):
+            vader_rows.append(
+                {
+                    "response_id": row["response_id"],
+                    "participant_code": row["participant_code"],
+                    "section": section_name,
+                    "vader_label": "positive",
+                    "compound": 0.7,
+                    "neg": 0.0,
+                    "neu": 0.3,
+                    "pos": 0.7,
+                }
+            )
+    vader_scores_path = tmp_path / "vader_scores_fixture.csv"
+    pd.DataFrame(vader_rows).to_csv(vader_scores_path, index=False)
+
+    custom_output_dir = tmp_path / "evaluation_outputs_sentence_majority"
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--prompt-variant",
+        "sentence_majority_v1",
+        "--vader-scores",
+        str(vader_scores_path),
+        "--output-dir",
+        str(custom_output_dir),
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    metrics = pd.read_csv(custom_output_dir / "evaluation_metrics.csv")
+    summary = json.loads((custom_output_dir / "evaluation_summary.json").read_text(encoding="utf-8"))
+    llm_manifest = json.loads((custom_output_dir / "llm_artifacts_manifest.json").read_text(encoding="utf-8"))
+
+    llm_rows = metrics[metrics["comparison"].str.startswith("human_reference_vs_llm:")]
+    assert set(llm_rows["artifact_id"]) == {"exp_smaj__run-01"}
+    assert summary["coverage"]["n_valid_llm_artifacts"] == 1
+    assert len(llm_manifest["accepted"]) == 1
+    assert llm_manifest["accepted"][0]["prompt_variant"] == "sentence_majority_v1"
+    assert (custom_output_dir / "alignment_report.md").exists()
+    assert not (tmp_path / "evaluation_outputs" / "evaluation_metrics.csv").exists()
