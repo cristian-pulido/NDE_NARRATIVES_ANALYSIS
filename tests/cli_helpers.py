@@ -107,6 +107,8 @@ def write_llm_predictions_fixture(mapping_workbook: Path, study_config: Path, ou
                     "tone": str(prediction_row[section_config.tone_internal_column]),
                     "evidence_segments": [f"fixture evidence for {section}"],
                 }
+                if section == "context":
+                    section_payload["death_context_nature"] = "subjective_threat_only"
                 for column in section_config.binary_labels:
                     section_payload[column] = str(prediction_row[column])
 

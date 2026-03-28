@@ -32,6 +32,16 @@ def _set_annotation_value(annotation_workbook: Path, row_index: int, header: str
     workbook.save(annotation_workbook)
 
 
+def _add_extra_annotation_column(annotation_workbook: Path, header: str, value: str) -> None:
+    workbook = load_workbook(annotation_workbook)
+    worksheet = workbook[ANNOTATION_SHEET]
+    new_column_index = worksheet.max_column + 1
+    worksheet.cell(row=1, column=new_column_index, value=header)
+    for row_index in range(2, worksheet.max_row + 1):
+        worksheet.cell(row=row_index, column=new_column_index, value=value)
+    workbook.save(annotation_workbook)
+
+
 def _prepare_human_artifact(source_workbook: Path, human_root: Path, annotator_id: str) -> Path:
     target_dir = human_root / annotator_id
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +88,7 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     current_value = worksheet.cell(row=2, column=headers["Context Tone"]).value
     replacement = next(label for label in ("positive", "negative", "mixed") if label != current_value)
     _set_annotation_value(annotator_b, 2, "Context Tone", replacement)
+    _add_extra_annotation_column(annotator_b, "extra_reviewer_note", "not used in metrics")
 
     invalid_human_dir = human_root / "broken"
     invalid_human_dir.mkdir(parents=True, exist_ok=True)
