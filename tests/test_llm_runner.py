@@ -121,6 +121,8 @@ def _prediction_payloads(study, source_df: pd.DataFrame) -> dict[tuple[str, str]
                 "tone": str(prediction_row[section.tone_internal_column]),
                 "evidence_segments": [f"fixture evidence for {section_name}"],
             }
+            if section_name == "context":
+                section_payload["death_context_nature"] = "subjective_threat_only"
             for column in section.binary_labels:
                 section_payload[column] = str(prediction_row[column])
             payload = {section_name: section_payload}
@@ -476,7 +478,7 @@ def test_load_batch_source_excludes_preprocessed_rows_marked_to_drop(tmp_path: P
 
 def test_ollama_provider_accepts_structured_output_in_thinking() -> None:
     payload = {
-        "thinking": '{\n  "context": {\n    "tone": "neutral",\n    "evidence_segments": ["The report describes events in sequence."]\n  }\n}',
+        "thinking": '{\n  "context": {\n    "tone": "neutral",\n    "death_context_nature": "no_death_context",\n    "evidence_segments": ["The report describes events in sequence."]\n  }\n}',
         "response": "",
     }
 

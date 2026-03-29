@@ -91,6 +91,7 @@ Important notes:
 - `all_records = false` means it applies the study-level row filters by default.
 - Each experiment should have its own `experiment_id` or `run_id` so artifacts stay traceable.
 - Use one experiment for smoke tests and a different one for the full run.
+- If you change analysis prompt/schema contracts (for example adding `context.death_context_nature`), run a fresh experiment artifact (`experiment_id`/`run_id`) or clear old artifacts before rerunning so all rows are regenerated under the new contract.
 
 ### Bedrock runtime option (AWS)
 
@@ -197,6 +198,11 @@ This is the recommended first test because it:
 - verifies the prompts and schemas
 - writes a real artifact you can inspect quickly
 - avoids waiting for the full dataset
+
+Human comparison compatibility note:
+
+- evaluation aligns on required study label columns and ignores extra columns in human annotation workbooks
+- additional extraction-only fields in LLM nested output (such as `death_context_nature`) are tolerated and do not break human-vs-LLM alignment
 
 If you prefer to smoke-test only the validation sample instead of the filtered survey, first set this in `config/paths.local.toml`:
 

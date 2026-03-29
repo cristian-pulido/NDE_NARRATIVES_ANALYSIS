@@ -174,6 +174,7 @@ For JSONL, records may be provided in one of these contracts:
   "prediction": {
     "context": {
       "tone": "neutral",
+      "death_context_nature": "subjective_threat_only",
       "evidence_segments": ["short verbatim span"]
     },
     "experience": {
@@ -204,6 +205,16 @@ For JSONL, records may be provided in one of these contracts:
 - or a top-level `prediction` object containing shared field keys
 
 In both cases, `nde evaluate` normalizes to shared internal columns before metrics are computed.
+
+### Context-only extraction field (LLM output)
+
+The context section schema now also requires:
+
+- `death_context_nature`: `no_death_context` | `subjective_threat_only` | `objective_medical_context`
+
+This field is intentionally extraction-only for the current phase and is not part of the shared evaluation label matrix. Evaluation tolerates this additional field in LLM outputs and still aligns human vs LLM metrics on the existing shared columns.
+
+Human annotation workbooks may also include extra columns; evaluation ignores non-required columns and validates/aligned only on the required study-defined labels.
 
 Each candidate artifact is validated independently. Invalid artifacts are reported in `llm_artifacts_manifest.json` and skipped.
 

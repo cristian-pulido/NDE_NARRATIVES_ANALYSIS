@@ -8,11 +8,19 @@
     "context": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tone", "evidence_segments"],
+      "required": ["tone", "death_context_nature", "evidence_segments"],
       "properties": {
         "tone": {
           "type": "string",
           "enum": ["positive", "negative", "mixed", "neutral"]
+        },
+        "death_context_nature": {
+          "type": "string",
+          "enum": [
+            "no_death_context",
+            "subjective_threat_only",
+            "objective_medical_context"
+          ]
         },
         "evidence_segments": {
           "type": "array",
