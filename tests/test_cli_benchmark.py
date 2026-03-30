@@ -102,7 +102,7 @@ def test_benchmark_report_sections_follow_required_order(tmp_path: Path) -> None
     positions = [report_text.index(section) for section in section_order]
     assert positions == sorted(positions)
     assert "![Benchmark macro_f1 vs cohen_kappa](figures/benchmark_macro_f1_vs_kappa.png)" in report_text
-    assert "Emoji overlay per point: 😀 positive F1, 😐 neutral F1, ☹️ negative F1" in report_text
+    assert "Marker color encodes dataset, marker shape encodes model family, and compact mini bars" in report_text
     assert "- Dataset: benchmark_fixture" in report_text
 
 

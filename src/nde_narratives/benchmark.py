@@ -15,6 +15,8 @@ matplotlib.use("Agg")
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.offsetbox import AnnotationBbox, DrawingArea
+from matplotlib.patches import Rectangle
 
 from .config import BenchmarkConfig, BenchmarkExperimentConfig, BenchmarkRuntimeConfig, PathsConfig
 from .constants import PROJECT_ROOT
@@ -105,6 +107,19 @@ def _normalize_dataset_display_name(dataset_name: object, *, input_path: object 
     return raw_name or "dataset"
 
 
+def _presentation_dataset_name(name: object) -> str:
+    raw = str(name or "").strip()
+    normalized = raw.lower()
+    alias_map = {
+        "amazon_reviews_multi_normalized": "Amazon Reviews Multi (normalized)",
+        "amazon_reviews_multi": "Amazon Reviews Multi",
+        "imdb": "IMDb",
+    }
+    if normalized in alias_map:
+        return alias_map[normalized]
+    return raw or "Dataset"
+
+
 def _resolve_local_dataset_name(benchmark: BenchmarkConfig, dataset_path: Path) -> str:
     configured_name = str(getattr(benchmark.dataset, "dataset_name", "") or "").strip()
     # Keep explicit custom names, but avoid leaking the default external benchmark label for local CSVs.
@@ -127,6 +142,59 @@ def _normalize_model_family(artifact_id: object, source: object) -> str:
     return base or "unknown"
 
 
+def _model_base_id(artifact_id: object) -> str:
+    raw = str(artifact_id or "").strip()
+    return raw.split("__", 1)[0] if "__" in raw else raw
+
+
+def _presentation_model_name(identifier: object) -> str:
+    raw = str(identifier or "").strip()
+    if not raw:
+        return raw
+    if raw.lower() == "vader":
+        return "VADER"
+
+    normalized = raw.replace("-", "_").replace(":", "_")
+    normalized = normalized.replace("__run_", "__").replace("__run-", "__")
+    if "__" in normalized:
+        normalized = normalized.split("__", 1)[0]
+
+    alias_map = {
+        "deepseek_r1_32": "DeepSeek-R1 32B",
+        "deepseek-r1_32": "DeepSeek-R1 32B",
+        "gemma3_27": "Gemma 3 27B",
+        "llama31_8": "Llama 3.1 8B",
+        "ministral3_14": "Ministral 3 14B",
+        "qwen35_08": "Qwen 3.5 0.8B",
+        "qwen35_9": "Qwen 3.5 9B",
+        "qwen35_27": "Qwen 3.5 27B",
+        "qwen35_35": "Qwen 3.5 35B",
+        "qwen3_32": "Qwen 3 32B",
+        "qwen3_32b": "Qwen 3 32B",
+    }
+    if normalized in alias_map:
+        return alias_map[normalized]
+
+    fallback = normalized.replace("_", " ").strip()
+    return fallback.title()
+
+
+def _presentation_model_family_name(identifier: object) -> str:
+    raw = str(identifier or "").strip().lower()
+    alias_map = {
+        "vader": "VADER",
+        "qwen35": "Qwen 3.5",
+        "qwen3": "Qwen 3",
+        "llama31": "Llama 3.1",
+        "gemma3": "Gemma 3",
+        "deepseek-r1": "DeepSeek-R1",
+        "ministral3": "Ministral 3",
+    }
+    if raw in alias_map:
+        return alias_map[raw]
+    return _presentation_model_name(raw)
+
+
 def _plot_benchmark_scatter(
     metrics_df: pd.DataFrame,
     *,
@@ -138,6 +206,9 @@ def _plot_benchmark_scatter(
         return None
 
     plot_df = metrics_df.copy()
+    excluded_model_bases = {"qwen35_08"}
+    if "artifact_id" in plot_df.columns:
+        plot_df = plot_df[~plot_df["artifact_id"].astype(str).map(_model_base_id).isin(excluded_model_bases)].copy()
     plot_df["macro_f1"] = pd.to_numeric(plot_df["macro_f1"], errors="coerce")
     plot_df["cohen_kappa"] = pd.to_numeric(plot_df["cohen_kappa"], errors="coerce")
     plot_df = plot_df.dropna(subset=["macro_f1", "cohen_kappa"])
@@ -152,31 +223,71 @@ def _plot_benchmark_scatter(
         _normalize_model_family(row.get("artifact_id"), row.get("source"))
         for _, row in plot_df.iterrows()
     ]
+    plot_df["artifact_display"] = [
+        _presentation_model_name(row.get("artifact_id"))
+        for _, row in plot_df.iterrows()
+    ]
 
-    families = sorted(plot_df["model_family"].astype(str).unique().tolist())
+    family_rank_df = (
+        plot_df.groupby("model_family", as_index=False)["macro_f1"]
+        .mean(numeric_only=True)
+        .sort_values(["macro_f1", "model_family"], ascending=[False, True], na_position="last")
+    )
+    families = family_rank_df["model_family"].astype(str).tolist()
+    model_rank_df = (
+        plot_df[plot_df["source"].astype(str).str.lower() == "llm"].copy()
+        .assign(model_base=lambda df: df["artifact_id"].astype(str).map(_model_base_id))
+        .groupby("model_base", as_index=False)["macro_f1"]
+        .mean(numeric_only=True)
+        .sort_values(["macro_f1", "model_base"], ascending=[False, True], na_position="last")
+    )
+    models = model_rank_df["model_base"].astype(str).tolist()
     datasets = sorted(plot_df["dataset_display"].astype(str).unique().tolist())
+    family_labels = {family: _presentation_model_family_name(family) for family in families}
+    dataset_labels = {dataset: _presentation_dataset_name(dataset) for dataset in datasets}
 
-    family_cmap = plt.get_cmap("tab20")
-    family_colors = {family: family_cmap(index % 20) for index, family in enumerate(families)}
+    label_order = ("positive", "neutral", "negative")
+    label_colors = {
+        "positive": "#2A9D8F",
+        "neutral": "#6B7280",
+        "negative": "#E76F51",
+    }
+
     dataset_cmap = plt.get_cmap("Set2")
-    dataset_edge_colors = {dataset: dataset_cmap(index % 8) for index, dataset in enumerate(datasets)}
-    marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "*"]
-    dataset_markers = {dataset: marker_cycle[index % len(marker_cycle)] for index, dataset in enumerate(datasets)}
+    dataset_colors = {dataset: dataset_cmap(index % 8) for index, dataset in enumerate(datasets)}
+    marker_cycle = ["P", "o", "<", "X", ">", "D", "s", "v", "^", "h", "8", "p"]
+    preferred_model_order = [
+        "deepseek-r1_32",
+        "gemma3_27",
+        "llama31_8",
+        "ministral3_14",
+        "nemotron_3_nano",
+        "qwen35_27",
+        "qwen35_35",
+        "qwen35_9",
+        "qwen3_32",
+    ]
+    ordered_models = [model for model in preferred_model_order if model in models] + [model for model in models if model not in preferred_model_order]
+    model_markers = {model: marker_cycle[index % len(marker_cycle)] for index, model in enumerate(ordered_models)}
 
-    fig, ax = plt.subplots(figsize=(9, 7))
+    fig, ax = plt.subplots(figsize=(11.5, 7.4))
     for _, row in plot_df.iterrows():
         family = str(row["model_family"])
+        artifact_id = str(row.get("artifact_id", ""))
+        model_base = _model_base_id(artifact_id)
         dataset = str(row["dataset_display"])
-        x_value = float(row["macro_f1"])
-        y_value = float(row["cohen_kappa"])
+        x_value = float(row["cohen_kappa"])
+        y_value = float(row["macro_f1"])
+        source_name = str(row.get("source", "")).strip().lower()
+        marker_value = "*" if source_name == "vader" else model_markers.get(model_base, "o")
         ax.scatter(
             x_value,
             y_value,
-            c=[family_colors[family]],
-            marker=dataset_markers[dataset],
-            s=130,
-            alpha=0.88,
-            edgecolors=[dataset_edge_colors[dataset]],
+            c=[dataset_colors[dataset]],
+            marker=marker_value,
+            s=165 if source_name == "vader" else 130,
+            alpha=0.90,
+            edgecolors=[dataset_colors[dataset]],
             linewidths=1.2,
             zorder=3,
         )
@@ -189,86 +300,147 @@ def _plot_benchmark_scatter(
                 & (per_label_df["dataset_config"].astype(str) == str(row.get("dataset_config", "")))
             ].copy()
             if not label_subset.empty:
-                emoji_by_label = {"positive": "😀", "neutral": "😐", "negative": "☹️"}
                 label_subset["label"] = label_subset["label"].astype(str).str.lower()
                 f1_by_label = {
                     str(item["label"]): float(item["f1"])
                     for _, item in label_subset.iterrows()
-                    if str(item.get("label", "")).lower() in emoji_by_label
+                    if str(item.get("label", "")).lower() in label_order
                 }
-                ordered_labels = [label for label in ("positive", "neutral", "negative") if label in f1_by_label]
-                emoji_offsets = {"positive": -6, "neutral": 0, "negative": 6}
-                emoji_colors = {"positive": "#1B9E3E", "neutral": "#6E6E6E", "negative": "#C62828"}
-                for idx, label in enumerate(ordered_labels):
-                    f1_value = min(1.0, max(0.0, float(f1_by_label[label])))
-                    alpha = 0.12 + (0.88 * f1_value)
-                    ax.annotate(
-                        emoji_by_label[label],
+                if f1_by_label:
+                    bar_width = 2.8
+                    bar_gap = 1.3
+                    bar_max_height = 10.0
+                    glyph_width = len(label_order) * bar_width + (len(label_order) - 1) * bar_gap
+                    glyph = DrawingArea(glyph_width, bar_max_height + 1.0, 0, 0)
+                    for idx, label in enumerate(label_order):
+                        if label not in f1_by_label:
+                            continue
+                        f1_value = min(1.0, max(0.0, float(f1_by_label[label])))
+                        bar_height = max(1.2, bar_max_height * f1_value)
+                        x_origin = idx * (bar_width + bar_gap)
+                        glyph.add_artist(
+                            Rectangle(
+                                (x_origin, 0),
+                                bar_width,
+                                bar_height,
+                                facecolor=label_colors[label],
+                                edgecolor=label_colors[label],
+                                linewidth=0.0,
+                                alpha=0.95,
+                            )
+                        )
+
+                    glyph_annotation = AnnotationBbox(
+                        glyph,
                         (x_value, y_value),
-                        xytext=(emoji_offsets.get(label, idx * 6), 0),
-                        textcoords="offset points",
-                        ha="center",
-                        va="center",
-                        fontsize=8,
-                        color=emoji_colors.get(label, "#333333"),
-                        alpha=alpha,
+                        xybox=(10, 0),
+                        xycoords="data",
+                        boxcoords="offset points",
+                        frameon=False,
+                        box_alignment=(0.0, 0.5),
                         zorder=4,
                     )
+                    ax.add_artist(glyph_annotation)
 
-    best_row = plot_df.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
-    worst_row = plot_df.sort_values(["macro_f1", "cohen_kappa"], ascending=True).iloc[0]
-    for labeled_row in (best_row, worst_row):
-        ax.annotate(
-            str(labeled_row.get("artifact_id", "n/a")),
-            (float(labeled_row["macro_f1"]), float(labeled_row["cohen_kappa"])),
-            xytext=(6, 6),
-            textcoords="offset points",
-            fontsize=8,
-        )
-
-    family_handles = [
+    dataset_handles = [
         Line2D(
             [0],
             [0],
             marker="o",
             linestyle="None",
-            markerfacecolor=family_colors[family],
-            markeredgecolor="black",
-            markeredgewidth=0.4,
+            markerfacecolor=dataset_colors[dataset],
+            markeredgecolor=dataset_colors[dataset],
+            markeredgewidth=0.8,
             markersize=8,
-            label=family,
-        )
-        for family in families
-    ]
-    dataset_handles = [
-        Line2D(
-            [0],
-            [0],
-            marker=dataset_markers[dataset],
-            linestyle="None",
-            markerfacecolor="#f5f5f5",
-            markeredgecolor=dataset_edge_colors[dataset],
-            markeredgewidth=1.3,
-            markersize=8,
-            label=dataset,
+            label=dataset_labels.get(dataset, dataset),
         )
         for dataset in datasets
     ]
+    model_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=model_markers.get(model, "o"),
+            linestyle="None",
+            markerfacecolor="#FFFFFF",
+            markeredgecolor="#374151",
+            markeredgewidth=1.3,
+            markersize=8,
+            label=_presentation_model_name(model),
+        )
+        for model in ordered_models
+    ]
 
-    family_legend = ax.legend(handles=family_handles, title="Model family", loc="lower right")
-    ax.add_artist(family_legend)
-    ax.legend(handles=dataset_handles, title="Dataset", loc="upper left")
+    model_handles_with_baseline = [
+        *model_handles,
+        Line2D(
+            [0],
+            [0],
+            marker="*",
+            linestyle="None",
+            markerfacecolor="#FFFFFF",
+            markeredgecolor="#374151",
+            markeredgewidth=1.3,
+            markersize=11,
+            label="VADER",
+        ),
+    ]
 
-    ax.set_xlim(0.0, 1.0)
-    ax.set_ylim(0.0, 1.0)
-    ax.set_xlabel("Macro F1")
-    ax.set_ylabel("Cohen kappa")
-    ax.set_title("Benchmark performance: macro_f1 vs cohen_kappa")
+    label_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="s",
+            linestyle="None",
+            markerfacecolor=label_colors[label],
+            markeredgecolor=label_colors[label],
+            markersize=7,
+            label=f"{label.title()} F1",
+        )
+        for label in label_order
+    ]
+    legend_section = lambda text: Line2D([0], [0], linestyle="None", marker="", label=text)
+    combined_handles = [
+        legend_section("Dataset"),
+        *dataset_handles,
+        legend_section(f"Models ({len(ordered_models) + 1})"),
+        *model_handles_with_baseline,
+        legend_section("Mini-bar encoding"),
+        *label_handles,
+    ]
+    ax.legend(
+        handles=combined_handles,
+        loc="lower right",
+        bbox_to_anchor=(0.99, 0.02),
+        frameon=True,
+        facecolor="white",
+        edgecolor="#D1D5DB",
+        framealpha=0.92,
+        ncol=1,
+        columnspacing=1.0,
+        handletextpad=0.6,
+        fontsize=12,
+    )
+
+    x_min = float(plot_df["cohen_kappa"].min())
+    x_max = float(plot_df["cohen_kappa"].max())
+    y_min = float(plot_df["macro_f1"].min())
+    y_max = float(plot_df["macro_f1"].max())
+    x_pad = max(0.02, (x_max - x_min) * 0.12)
+    y_pad = max(0.02, (y_max - y_min) * 0.12)
+
+    ax.set_xlim(max(0.0, x_min - x_pad), min(1.0, x_max + x_pad))
+    ax.set_ylim(max(0.0, y_min - y_pad), min(1.0, y_max + y_pad))
+    ax.set_xlabel("Cohen κ", fontsize=16)
+    ax.set_ylabel("Macro F1", fontsize=16)
+    ax.set_title("Benchmark performance (Cohen κ vs Macro F1)", fontsize=19)
+    ax.tick_params(axis="both", labelsize=13)
     ax.grid(True, alpha=0.25)
 
     figure_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(figure_path, dpi=dpi, bbox_inches="tight")
+    fig.savefig(figure_path.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
     return figure_path
 
@@ -1064,6 +1236,10 @@ def write_benchmark_report(
             metrics_df = pd.concat([metrics_df, comparison_metrics_df], ignore_index=True)
             per_label_df = pd.concat([per_label_df, comparison_per_label_df], ignore_index=True)
 
+    excluded_model_bases = {"qwen35_08"}
+    metrics_df = metrics_df[~metrics_df["artifact_id"].astype(str).map(_model_base_id).isin(excluded_model_bases)].copy()
+    per_label_df = per_label_df[~per_label_df["artifact_id"].astype(str).map(_model_base_id).isin(excluded_model_bases)].copy()
+
     report_dir = _ensure_dir(output_dir)
     report_path = report_dir / "benchmark_report.md"
     figure_path = report_dir / "figures" / "benchmark_macro_f1_vs_kappa.png"
@@ -1119,8 +1295,8 @@ def write_benchmark_report(
             [
                 "",
                 "## Visual Summary",
-                "Scatter plot with macro_f1 (x) and cohen_kappa (y): marker fill color = model family; marker shape + border color = dataset.",
-                "Emoji overlay per point: 😀 positive F1, 😐 neutral F1, ☹️ negative F1 (higher opacity = higher F1).",
+                "Scatter plot with cohen_kappa (x) and macro_f1 (y), aligned to the principal analysis figure.",
+                "Marker color encodes dataset, marker shape encodes model family, and compact mini bars next to each point encode per-label F1 (positive, neutral, negative).",
                 f"![Benchmark macro_f1 vs cohen_kappa]({written_figure_path.relative_to(report_dir).as_posix()})",
             ]
         )
