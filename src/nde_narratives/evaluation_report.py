@@ -31,8 +31,43 @@ def _comparison_label(comparison: str) -> str:
     base, _, detail = comparison.partition(":")
     label = base.replace("_vs_", " vs ").replace("_", " ").title()
     if detail:
-        return f"{label} ({detail})"
+        return f"{label} ({_presentation_model_name(detail)})"
     return label
+
+
+def _presentation_model_name(identifier: str) -> str:
+    raw = str(identifier or "").strip()
+    if not raw:
+        return raw
+    if raw.lower() == "vader":
+        return "VADER"
+
+    normalized = raw.replace("-", "_").replace(":", "_")
+    normalized = normalized.replace("__run_", "__").replace("__run-", "__")
+    if "__" in normalized:
+        normalized = normalized.split("__", 1)[0]
+
+    alias_map = {
+        "deepseek_r1_32": "DeepSeek-R1 32B",
+        "gemma3_27": "Gemma 3 27B",
+        "llama31_8": "Llama 3.1 8B",
+        "ministral3_14": "Ministral 3 14B",
+        "nemotron_3_nano": "Nemotron-3 Nano 30B",
+        "qwen35_9": "Qwen 3.5 9B",
+        "qwen35_27": "Qwen 3.5 27B",
+        "qwen35_35": "Qwen 3.5 35B",
+        "qwen3_32": "Qwen 3 32B",
+        "claude3_haiku": "Claude 3 Haiku",
+        "claude35_sonnet": "Claude 3.5 Sonnet",
+        "llama3_70b": "Llama 3 70B",
+        "mistral_large3": "Mistral Large 3",
+        "qwen3_32b": "Qwen 3 32B",
+    }
+    if normalized in alias_map:
+        return alias_map[normalized]
+
+    fallback = normalized.replace("_", " ").strip()
+    return fallback.title()
 
 
 def _wrap_label(label: str, width: int = 24) -> str:
@@ -234,6 +269,10 @@ def _style_axes(ax) -> None:
     ax.set_axisbelow(True)
 
 
+def _legend_title_with_count(base: str, count: int) -> str:
+    return f"{base} ({count})"
+
+
 def _save_figure(fig, figure_path: Path, dpi: int = 300, export_pdf: bool = False) -> list[str]:
     figure_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout(pad=1.2)
@@ -363,7 +402,7 @@ def plot_questionnaire_tone_confusion_matrix(
         if comparison_key == "questionnaire_vs_vader":
             panel_label = "VADER"
         elif comparison_key.startswith("questionnaire_vs_llm:"):
-            panel_label = comparison_key.split(":", 1)[1]
+            panel_label = _presentation_model_name(comparison_key.split(":", 1)[1])
         else:
             panel_label = _comparison_label(comparison_key)
         title_text = _wrap_label(panel_label, width=28)
@@ -926,7 +965,7 @@ def plot_questionnaire_family_tradeoff_map(
         fig.patch.set_facecolor("#FFFDF8")
         return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
-    fig, ax = plt.subplots(figsize=(12.8, 7.0))
+    fig, ax = plt.subplots(figsize=(13.6, 8.2))
 
     marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h", "*"]
     marker_map = {comparison: marker_cycle[index % len(marker_cycle)] for index, comparison in enumerate(selected_llm)}
@@ -951,10 +990,10 @@ def plot_questionnaire_family_tradeoff_map(
         if math.isnan(x) or math.isnan(y):
             continue
         if family == "tone":
-            size = 170
+            size = 250
         else:
             recall_yes = float(row["recall_yes_mean"]) if pd.notna(row["recall_yes_mean"]) else 0.35
-            size = 110 + 520 * max(0.0, min(1.0, recall_yes))
+            size = 180 + 720 * max(0.0, min(1.0, recall_yes))
         marker = marker_map.get(comparison_name, "o")
         ax.scatter(
             [x],
@@ -975,7 +1014,7 @@ def plot_questionnaire_family_tradeoff_map(
                 color="none",
                 markerfacecolor="#9AA0A6",
                 markeredgecolor="#2B2D42",
-                markersize=7,
+                markersize=8.5,
                 linewidth=0,
             )
             legend_handles.append(handle)
@@ -998,7 +1037,7 @@ def plot_questionnaire_family_tradeoff_map(
     if not math.isnan(vader_macro_f1):
         ax.axhline(vader_macro_f1, color="#5E6472", linestyle=":", linewidth=1.0, alpha=0.85)
     if not math.isnan(vader_kappa) and not math.isnan(vader_macro_f1):
-        ax.scatter([vader_kappa], [vader_macro_f1], s=120, color="#5E6472", marker="*", edgecolors="#F8F5F0", linewidths=0.8, zorder=4)
+        ax.scatter([vader_kappa], [vader_macro_f1], s=220, color="#5E6472", marker="*", edgecolors="#F8F5F0", linewidths=0.8, zorder=4)
 
     all_xy = plot_df[["cohen_kappa_mean", "macro_f1_mean"]].dropna()
     x_min = float(all_xy["cohen_kappa_mean"].min())
@@ -1011,22 +1050,22 @@ def plot_questionnaire_family_tradeoff_map(
     if not math.isnan(vader_macro_f1):
         y_min = min(y_min, vader_macro_f1)
         y_max = max(y_max, vader_macro_f1)
-    x_pad = max(0.015, (x_max - x_min) * 0.22)
-    y_pad = max(0.015, (y_max - y_min) * 0.22)
+    x_pad = max(0.010, (x_max - x_min) * 0.12)
+    y_pad = max(0.012, (y_max - y_min) * 0.12)
 
-    ax.set_title("Single panel — NDE-C, NDE-MCQ, and Experience Tone", fontsize=12)
-    ax.set_xlabel("Mean Cohen kappa")
-    ax.set_ylabel("Mean Macro F1")
-    ax.set_xlim(max(-0.02, x_min - x_pad), min(0.90, x_max + x_pad))
-    ax.set_ylim(max(0.20, y_min - y_pad), min(0.92, y_max + y_pad))
+    ax.set_xlabel("Mean Cohen kappa", fontsize=15)
+    ax.set_ylabel("Mean Macro F1", fontsize=15)
+    ax.set_xlim(max(0.00, x_min - x_pad), x_max + x_pad)
+    ax.set_ylim(max(0.22, y_min - y_pad), y_max + y_pad)
     ax.set_facecolor("#FFFFFF")
     ax.grid(axis="both", color="#E5E7EB", linestyle="--", linewidth=0.8, alpha=0.9)
     ax.set_axisbelow(True)
+    ax.tick_params(axis="both", labelsize=14)
 
     family_handles = [
-        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["m8"], markeredgecolor=family_colors["m8"], markersize=7, linewidth=0),
-        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["m9"], markeredgecolor=family_colors["m9"], markersize=7, linewidth=0),
-        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["tone"], markeredgecolor=family_colors["tone"], markersize=7, linewidth=0),
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["m8"], markeredgecolor=family_colors["m8"], markersize=10, linewidth=0),
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["m9"], markeredgecolor=family_colors["m9"], markersize=10, linewidth=0),
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=family_colors["tone"], markeredgecolor=family_colors["tone"], markersize=10, linewidth=0),
     ]
     family_legend = ax.legend(
         family_handles,
@@ -1038,14 +1077,14 @@ def plot_questionnaire_family_tradeoff_map(
         loc="upper left",
         frameon=False,
         title="Family grouping",
-        title_fontsize=9,
-        fontsize=8.1,
+        title_fontsize=14,
+        fontsize=13.5,
     )
     ax.add_artist(family_legend)
 
     size_legend_sizes = [0.30, 0.55, 0.80]
     size_handles = [
-        plt.scatter([], [], s=110 + 520 * value, color="#BFC5CE", edgecolors="#2B2D42", linewidths=0.6)
+        plt.scatter([], [], s=180 + 720 * value, color="#BFC5CE", edgecolors="#2B2D42", linewidths=0.6)
         for value in size_legend_sizes
     ]
     size_legend = ax.legend(
@@ -1053,22 +1092,35 @@ def plot_questionnaire_family_tradeoff_map(
         [f"Recall yes ≈ {value:.2f}" for value in size_legend_sizes],
         loc="lower right",
         frameon=False,
-        fontsize=8,
-        title="Bubble size",
-        title_fontsize=9,
+        fontsize=13,
+        title="Bubble size (recall yes)",
+        title_fontsize=14,
+        labelspacing=0.8,
+        handletextpad=0.9,
+        borderaxespad=1.0,
     )
     ax.add_artist(size_legend)
 
     if not math.isnan(vader_kappa) and not math.isnan(vader_macro_f1):
-        vader_handle = plt.Line2D([0], [0], marker="*", color="#5E6472", markersize=9, linewidth=1.0, linestyle="--")
-        ax.legend([vader_handle], [f"VADER baseline (κ={vader_kappa:.2f}, F1={vader_macro_f1:.2f})"], loc="upper right", frameon=False, fontsize=8)
+        vader_handle = plt.Line2D([0], [0], marker="*", color="#5E6472", markersize=13, linewidth=1.0, linestyle="--")
+        ax.legend([vader_handle], [f"VADER baseline (κ={vader_kappa:.2f}, F1={vader_macro_f1:.2f})"], loc="upper right", frameon=False, fontsize=13)
 
     if legend_handles:
-        ordered_labels = [_comparison_label(name).replace("Questionnaire Vs ", "") for name in legend_labels]
-        fig.legend(legend_handles, ordered_labels, title="Models (Top 10 by Macro F1)", loc="upper center", bbox_to_anchor=(0.5, -0.03), ncol=4, frameon=False, fontsize=8.2, title_fontsize=9)
+        ordered_labels = [_presentation_model_name(name.split(":", 1)[1]) if ":" in name else _presentation_model_name(name) for name in legend_labels]
+        fig.legend(
+            legend_handles,
+            ordered_labels,
+            title=_legend_title_with_count("Models", len(ordered_labels)),
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.03),
+            ncol=5,
+            frameon=False,
+            fontsize=14,
+            title_fontsize=15,
+        )
 
-    fig.suptitle("Questionnaire vs automated — family contrast and tone divergence", fontsize=14)
-    fig.subplots_adjust(bottom=0.16, top=0.86)
+    fig.suptitle("Questionnaire vs automated — family-level agreement landscape", fontsize=17)
+    fig.subplots_adjust(bottom=0.17, top=0.92, left=0.07, right=0.99)
     fig.patch.set_facecolor("#FFFFFF")
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
@@ -1137,7 +1189,7 @@ def plot_questionnaire_extraction_item_scatter(
     for index, field in enumerate(m9_fields):
         marker_map[field] = m9_marker_cycle[index % len(m9_marker_cycle)]
 
-    fig, ax = plt.subplots(figsize=(13.0, 8.0))
+    fig, ax = plt.subplots(figsize=(13.4, 8.4))
 
     x_min, x_max = 0.00, 0.75
     y_min, y_max = 0.22, 0.90
@@ -1150,7 +1202,7 @@ def plot_questionnaire_extraction_item_scatter(
         ax.scatter(
             x_value,
             y_value,
-            s=95,
+            s=130,
             color=model_color.get(model, "#457B9D"),
             marker=marker_map.get(field, "o"),
             edgecolors="#FFFFFF",
@@ -1223,15 +1275,15 @@ def plot_questionnaire_extraction_item_scatter(
 
     ax.axvline(0.20, color="#9CA3AF", linestyle="--", linewidth=1.2, alpha=0.9)
     ax.axvline(0.40, color="#6B7280", linestyle="--", linewidth=1.2, alpha=0.9)
-    ax.text(0.202, 0.985, "κ=0.20", transform=ax.get_xaxis_transform(), ha="left", va="top", fontsize=10, color="#6B7280")
-    ax.text(0.402, 0.985, "κ=0.40", transform=ax.get_xaxis_transform(), ha="left", va="top", fontsize=10, color="#4B5563")
+    ax.text(0.202, 0.985, "κ=0.20", transform=ax.get_xaxis_transform(), ha="left", va="top", fontsize=13, color="#6B7280")
+    ax.text(0.402, 0.985, "κ=0.40", transform=ax.get_xaxis_transform(), ha="left", va="top", fontsize=13, color="#4B5563")
 
-    ax.set_xlabel("Cohen kappa", fontsize=13)
-    ax.set_ylabel("Macro F1", fontsize=13)
-    ax.set_title("NDE-C + NDE-MCQ extraction items — top 3 LLMs", fontsize=15)
+    ax.set_xlabel("Cohen kappa", fontsize=15)
+    ax.set_ylabel("Macro F1", fontsize=15)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     _style_axes(ax)
+    ax.tick_params(axis="both", labelsize=14)
 
     model_handles = [
         plt.Line2D(
@@ -1246,16 +1298,19 @@ def plot_questionnaire_extraction_item_scatter(
         )
         for model in selected_models
     ]
-    model_labels = [str(model).split(":", 1)[1] if ":" in str(model) else _comparison_label(str(model)) for model in selected_models]
+    model_labels = [
+        _presentation_model_name(str(model).split(":", 1)[1]) if ":" in str(model) else _presentation_model_name(str(model))
+        for model in selected_models
+    ]
     model_legend = ax.legend(
         model_handles,
         model_labels,
-        title="Models (Top 3 LLMs)",
+        title=_legend_title_with_count("Top models", len(model_labels)),
         frameon=False,
-        loc="lower right",
-        bbox_to_anchor=(0.985, 0.03),
-        fontsize=9,
-        title_fontsize=10,
+        loc="upper left",
+        bbox_to_anchor=(0.02, 0.98),
+        fontsize=13,
+        title_fontsize=14,
     )
     ax.add_artist(model_legend)
 
@@ -1269,10 +1324,10 @@ def plot_questionnaire_extraction_item_scatter(
         nde_c_labels,
         title="NDE-C (Content of the Near-Death Experience Scale) items",
         frameon=False,
-        loc="lower right",
+        loc="center right",
         bbox_to_anchor=(0.985, 0.24),
-        fontsize=8.5,
-        title_fontsize=9.5,
+        fontsize=12.5,
+        title_fontsize=14,
     )
     ax.add_artist(nde_c_legend)
 
@@ -1286,15 +1341,15 @@ def plot_questionnaire_extraction_item_scatter(
         nde_mcq_labels,
         title="NDE-MCQ (Impact of the NDE on Moral Cognition) items",
         frameon=False,
-        loc="lower right",
-        bbox_to_anchor=(0.985, 0.56),
-        fontsize=8.5,
-        title_fontsize=9.5,
+        loc="upper right",
+        bbox_to_anchor=(0.985, 0.64),
+        fontsize=12.5,
+        title_fontsize=14,
     )
     ax.add_artist(nde_mcq_legend)
 
     fig.patch.set_facecolor("#FFFDF8")
-    fig.subplots_adjust(right=0.97)
+    fig.subplots_adjust(right=0.97, top=0.97)
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
@@ -1986,7 +2041,7 @@ def _coverage_lines(summary: dict[str, Any]) -> list[str]:
     if isinstance(accepted, list) and accepted:
         lines.extend([
             "- Valid LLMs included in this report:",
-            *[f"  - `{artifact.get('artifact_id', 'unknown')}`" for artifact in accepted],
+            *[f"  - `{_presentation_model_name(str(artifact.get('artifact_id', 'unknown')))}`" for artifact in accepted],
         ])
     else:
         lines.append("- Valid LLMs included in this report: none")
@@ -2242,7 +2297,7 @@ def _questionnaire_contradiction_lines(summary: dict[str, Any], output_dir: Path
             "### Scope and Definition",
             "",
             f"- {payload.get('definition', 'Strict polarity contradiction definition not available.')}",
-            f"- Top LLMs selected for qualitative analysis: {', '.join(payload.get('selected_llm_artifact_ids', [])) or 'none'}",
+            f"- Top LLMs selected for qualitative analysis: {', '.join(_presentation_model_name(value) for value in payload.get('selected_llm_artifact_ids', [])) or 'none'}",
             "- VADER is retained only as a quantitative baseline because it does not provide extractive evidence spans.",
             "",
             "### Quantitative Contradiction Overview",
@@ -2594,7 +2649,7 @@ def write_alignment_report_for_scope(
             [
                 "## Main Figures (Narrative)",
                 "",
-                "These lead figures prioritize integrated interpretation (agreement + prevalence behavior + error flow) before item-level detail.",
+                "These lead figures prioritize integrated interpretation before item-level detail. Model names are standardized for readability, and captions carry the explanatory context instead of duplicating chart titles.",
                 "",
                 f"![Family tradeoff map]({Path(figure_paths.get(f'{figure_prefix}_family_tradeoff_map', figure_paths[f'{figure_prefix}_family_summary'])).relative_to(output_dir).as_posix()})",
                 "",
@@ -2625,7 +2680,7 @@ def write_alignment_report_for_scope(
             [
                 f"![Tone confusion matrix]({Path(figure_paths['questionnaire_tone_confusion_matrix']).relative_to(output_dir).as_posix()})",
                 "",
-                "The confusion matrices focus on Positive / Negative / Mixed / Neutral labels; each panel now includes per-label F1 (pos/neg/mix/neu) for direct interpretability.",
+                "Rows are questionnaire labels and columns are automated labels. Each panel reports row-normalized percentages together with counts, and the per-panel subtitle includes per-label F1 for compact comparison.",
                 "",
             ]
         )
@@ -2635,7 +2690,7 @@ def write_alignment_report_for_scope(
             [
                 "## Item-Level Structure (Extended Figures)",
                 "",
-                "This section integrates NDE-C and NDE-MCQ extraction items in one scatter figure (x=Kappa, y=Macro F1), using item markers and model colors for manuscript-oriented comparison.",
+                "This section integrates NDE-C and NDE-MCQ extraction items in one scatter figure (x = kappa, y = macro F1), with standardized model names, larger markers, and compact legends for article readability.",
                 "",
                 *tone_lines,
                 "#### NDE-C + NDE-MCQ (Integrated Extraction View)",
