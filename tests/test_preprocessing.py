@@ -19,12 +19,15 @@ class FakePreprocessingProvider:
         self.resegment_calls: list[str] = []
         self.validation_num_ctx: list[int | None] = []
         self.resegment_num_ctx: list[int | None] = []
+        self.validation_call_counts: dict[str, int] = {}
 
     def generate_structured(self, request) -> LLMProviderResponse:
         if request.section == "preprocess_validate":
             self.validation_calls.append(request.participant_code)
             self.validation_num_ctx.append(request.metadata.get("num_ctx"))
-            if request.participant_code == self.invalid_participant:
+            count = self.validation_call_counts.get(str(request.participant_code), 0) + 1
+            self.validation_call_counts[str(request.participant_code)] = count
+            if request.participant_code == self.invalid_participant and count == 1:
                 payload = {
                     "context_assessment": "invalid",
                     "experience_assessment": "valid",
@@ -38,6 +41,15 @@ class FakePreprocessingProvider:
                     "aftereffects_assessment": "valid",
                     "needs_resegmentation": "no",
                 }
+            return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+
+        if request.section == "preprocess_validate_post_resegment":
+            payload = {
+                "context_assessment": "valid",
+                "experience_assessment": "valid",
+                "aftereffects_assessment": "valid",
+                "needs_resegmentation": "no",
+            }
             return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
 
         self.resegment_calls.append(request.participant_code)
@@ -267,3 +279,108 @@ def test_preprocessing_treats_nan_section_values_as_empty_strings(tmp_path: Path
     assert row["n_valid_sections_cleaned"] == 1
     assert pd.isna(row["original_experience"])
     assert pd.isna(row["original_aftereffects"])
+
+
+def test_preprocess_prefers_translated_dataset_when_present_and_no_input_path(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths = load_paths_config(paths_config)
+    preprocessing = load_preprocessing_config(paths_config)
+
+    translated_path = paths.preprocessing_output_dir / "translated_dataset.csv"
+    translated_df = pd.read_csv(FIXTURES / "survey_fixture.csv")
+    translated_df.loc[translated_df.index[0], study.id_column] = 999
+    translated_df.to_csv(translated_path, index=False)
+
+    result = run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=preprocessing,
+        provider_factory=lambda _: FakePreprocessingProvider(),
+    )
+
+    assert result["summary"]["input_path"].endswith("translated_dataset.csv")
+    cleaned_df = pd.read_csv(result["cleaned_dataset_csv"])
+    assert 999 in set(cleaned_df[study.id_column])
+
+
+def test_resegmentation_fails_when_post_validation_still_invalid(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths = load_paths_config(paths_config)
+    preprocessing = load_preprocessing_config(paths_config)
+
+    class AlwaysInvalidPostValidationProvider(FakePreprocessingProvider):
+        def generate_structured(self, request):
+            if request.section == "preprocess_validate":
+                payload = {
+                    "context_assessment": "invalid",
+                    "experience_assessment": "valid",
+                    "aftereffects_assessment": "invalid",
+                    "needs_resegmentation": "yes",
+                }
+                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            if request.section == "preprocess_validate_post_resegment":
+                payload = {
+                    "context_assessment": "invalid",
+                    "experience_assessment": "valid",
+                    "aftereffects_assessment": "invalid",
+                    "needs_resegmentation": "yes",
+                }
+                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            return super().generate_structured(request)
+
+    result = run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=preprocessing,
+        limit=1,
+        provider_factory=lambda _: AlwaysInvalidPostValidationProvider(),
+    )
+
+    records = [json.loads(line) for line in Path(result["participant_results_file"]).read_text(encoding="utf-8-sig").splitlines() if line]
+    assert records[0]["preprocessing_status"] == "post_validation_failed"
+    assert records[0]["status"] == "failed"
+    cleaned_df = pd.read_csv(result["cleaned_dataset_csv"])
+    assert "post_validation_assessments" in cleaned_df.columns
+    assert "post_validation_needs_resegmentation" in cleaned_df.columns
+
+
+def test_resegmentation_allows_warning_when_two_sections_valid_after_post_validation(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths = load_paths_config(paths_config)
+    preprocessing = load_preprocessing_config(paths_config)
+
+    class WarningPostValidationProvider(FakePreprocessingProvider):
+        def generate_structured(self, request):
+            if request.section == "preprocess_validate":
+                payload = {
+                    "context_assessment": "invalid",
+                    "experience_assessment": "valid",
+                    "aftereffects_assessment": "invalid",
+                    "needs_resegmentation": "yes",
+                }
+                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            if request.section == "preprocess_validate_post_resegment":
+                payload = {
+                    "context_assessment": "valid",
+                    "experience_assessment": "invalid",
+                    "aftereffects_assessment": "valid",
+                    "needs_resegmentation": "yes",
+                }
+                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            return super().generate_structured(request)
+
+    result = run_preprocessing_pipeline(
+        study=study,
+        paths=paths,
+        preprocessing=preprocessing,
+        limit=1,
+        provider_factory=lambda _: WarningPostValidationProvider(),
+    )
+
+    records = [json.loads(line) for line in Path(result["participant_results_file"]).read_text(encoding="utf-8-sig").splitlines() if line]
+    assert records[0]["status"] == "success"
+    assert records[0]["preprocessing_status"] == "post_validation_warning"
+    assert records[0]["n_valid_sections_cleaned"] == 2

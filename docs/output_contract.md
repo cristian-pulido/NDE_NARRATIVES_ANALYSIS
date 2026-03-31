@@ -2,6 +2,27 @@
 
 The repository normalizes human annotations, LLM outputs, questionnaire-derived labels, and VADER tone outputs to comparable field names where appropriate.
 
+## Translation Artifact Contract
+
+`nde translate` writes optional translation artifacts under `preprocessing_output_dir`.
+
+Typical files:
+
+- `manifest_translate.json`
+- `participant_results_translate.jsonl`
+- `raw_responses_translate.jsonl`
+- `errors_translate.jsonl`
+- `run_summary_translate.json`
+- `translated_dataset.csv`
+- `translated_dataset.xlsx`
+
+The translated dataset preserves the original section source column names (same shape expected by downstream extraction), but values are normalized to English and augmented with audit fields:
+
+- `detected_language_context`
+- `detected_language_experience`
+- `detected_language_aftereffects`
+- `detected_language_row`
+
 ## Preprocessing Artifact Contract
 
 [`nde preprocess`](src/nde_narratives/cli.py:202) writes a dedicated preprocessing artifact directory under `preprocessing_output_dir`.
@@ -253,7 +274,16 @@ Source selection behavior for `nde sentiment-sensitivity`:
 
 - if `--input-path` is provided, that file is used
 - otherwise, if [`preprocessing_outputs/cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:23) exists, VADER uses the cleaned dataset
-- if no cleaned dataset exists, VADER falls back to the configured survey source
+- otherwise, if `preprocessing_outputs/translated_dataset.csv` exists, VADER uses the translated dataset
+- otherwise, VADER falls back to the configured survey source
+
+Source priority for all `survey`-mode downstream consumers without explicit `--input-path`:
+
+1. `cleaned_dataset.csv`
+2. `translated_dataset.csv`
+3. configured `survey_csv`
+
+If none exists, execution fails with explicit `FileNotFoundError` including attempted paths.
 
 Optional field:
 

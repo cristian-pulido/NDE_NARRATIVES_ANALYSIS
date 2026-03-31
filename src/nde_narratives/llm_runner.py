@@ -18,7 +18,7 @@ from .config import (
 )
 from .llm import LLMProvider, LLMRequest, build_llm_provider
 from .llm.parsing import parse_structured_response
-from .prompting import build_llm_batch_records, load_batch_source, resolve_prompt_root
+from .prompting import build_llm_batch_records, load_batch_source, resolve_prompt_root, resolve_survey_source_path
 from .sampling import is_meaningful_text
 
 
@@ -288,10 +288,7 @@ def _source_input_path(paths: PathsConfig, source: str, input_path: Path | None)
     if input_path is not None:
         return Path(input_path)
     if source == "survey":
-        preprocessed_path = paths.preprocessing_output_dir / "cleaned_dataset.csv"
-        if preprocessed_path.exists():
-            return preprocessed_path
-        return paths.survey_csv
+        return resolve_survey_source_path(paths, None)
     if source == "sampled-private":
         return paths.sampled_private_workbook
     raise ValueError(f"Unsupported LLM source: {source}")
@@ -410,6 +407,7 @@ def _run_single_experiment(
     output_root: Path,
     retry_exhausted: bool,
     provider_factory: Callable[[LLMRuntimeConfig], LLMProvider] | None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> ExperimentRunResult:
     artifact_dir = output_root / resolved.metadata.artifact_id
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -432,6 +430,8 @@ def _run_single_experiment(
 
     batches = build_llm_batch_records(source_df, study, experiment=resolved.metadata, prompt_root=resolved.prompt_root, paths=paths)
     source_rows = source_df.set_index("participant_code")
+    total_items = int(len(source_df) * len(study.section_order))
+    processed_items = 0
 
     for section_name in study.section_order:
         for batch_record in batches[section_name]:
@@ -465,6 +465,19 @@ def _run_single_experiment(
                     skipped_no_text=skipped_no_text,
                     final=False,
                 )
+                processed_items += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "stage": "run_llm",
+                            "artifact_id": resolved.metadata.artifact_id,
+                            "current": processed_items,
+                            "total": total_items,
+                            "status": "skipped_no_text",
+                            "participant_code": participant_code,
+                            "section": section_name,
+                        }
+                    )
                 continue
 
             attempts = int(current.get("attempts", 0))
@@ -472,10 +485,36 @@ def _run_single_experiment(
             if status == SUCCESS_STATUS:
                 ledger[key] = current
                 skipped_existing_success += 1
+                processed_items += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "stage": "run_llm",
+                            "artifact_id": resolved.metadata.artifact_id,
+                            "current": processed_items,
+                            "total": total_items,
+                            "status": "skipped_existing_success",
+                            "participant_code": participant_code,
+                            "section": section_name,
+                        }
+                    )
                 continue
             if status == EXHAUSTED_STATUS and not retry_exhausted:
                 ledger[key] = current
                 skipped_exhausted += 1
+                processed_items += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "stage": "run_llm",
+                            "artifact_id": resolved.metadata.artifact_id,
+                            "current": processed_items,
+                            "total": total_items,
+                            "status": "skipped_exhausted",
+                            "participant_code": participant_code,
+                            "section": section_name,
+                        }
+                    )
                 continue
             if status in {FAILED_STATUS, PENDING_STATUS} and attempts >= resolved.runtime.max_attempts and not retry_exhausted:
                 current["status"] = EXHAUSTED_STATUS
@@ -494,6 +533,19 @@ def _run_single_experiment(
                     skipped_no_text=skipped_no_text,
                     final=False,
                 )
+                processed_items += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "stage": "run_llm",
+                            "artifact_id": resolved.metadata.artifact_id,
+                            "current": processed_items,
+                            "total": total_items,
+                            "status": "skipped_exhausted",
+                            "participant_code": participant_code,
+                            "section": section_name,
+                        }
+                    )
                 continue
 
             work_items += 1
@@ -576,6 +628,19 @@ def _run_single_experiment(
                 error_record=error_record,
                 final=False,
             )
+            processed_items += 1
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "run_llm",
+                        "artifact_id": resolved.metadata.artifact_id,
+                        "current": processed_items,
+                        "total": total_items,
+                        "status": str(current.get("status", "unknown")),
+                        "participant_code": participant_code,
+                        "section": section_name,
+                    }
+                )
 
     summary = _persist_run_state(
         artifact_dir,
@@ -616,6 +681,7 @@ def run_llm_experiments(
     retry_exhausted: bool = False,
     output_dir: Path | None = None,
     provider_factory: Callable[[LLMRuntimeConfig], LLMProvider] | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     selected = _select_experiments(llm_config, experiment_ids, all_experiments)
     output_root = Path(output_dir or paths.llm_results_dir)
@@ -650,6 +716,7 @@ def run_llm_experiments(
                 output_root=output_root,
                 retry_exhausted=retry_exhausted,
                 provider_factory=provider_factory,
+                progress_callback=progress_callback,
             )
         )
 

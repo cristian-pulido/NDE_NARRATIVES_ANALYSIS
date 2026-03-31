@@ -304,9 +304,15 @@ class PreprocessingConfig:
     path: Path
     provider: str = "ollama"
     base_url: str = "http://localhost:11434"
+    aws_region: str = "us-east-1"
+    aws_profile: str | None = None
     timeout_seconds: int = 120
     max_attempts: int = 2
     temperature: float = 0.0
+    max_tokens: int = 1024
+    top_p: float | None = None
+    top_k: int | None = None
+    stop_sequences: list[str] | None = None
     model: str | None = None
     prompt_version: str = "v1"
     dynamic_context_enabled: bool = True
@@ -318,9 +324,58 @@ class PreprocessingConfig:
         return {
             "provider": self.provider,
             "base_url": self.base_url,
+            "aws_region": self.aws_region,
+            "aws_profile": self.aws_profile,
             "timeout_seconds": self.timeout_seconds,
             "max_attempts": self.max_attempts,
             "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "stop_sequences": list(self.stop_sequences or []),
+            "model": self.model,
+            "prompt_version": self.prompt_version,
+            "dynamic_context_enabled": self.dynamic_context_enabled,
+            "num_ctx_min": self.num_ctx_min,
+            "num_ctx_max": self.num_ctx_max,
+            "chars_per_token": self.chars_per_token,
+        }
+
+
+@dataclass(frozen=True)
+class TranslateConfig:
+    path: Path
+    provider: str = "ollama"
+    base_url: str = "http://localhost:11434"
+    aws_region: str = "us-east-1"
+    aws_profile: str | None = None
+    timeout_seconds: int = 120
+    max_attempts: int = 2
+    temperature: float = 0.0
+    max_tokens: int = 1024
+    top_p: float | None = None
+    top_k: int | None = None
+    stop_sequences: list[str] | None = None
+    model: str | None = None
+    prompt_version: str = "v1"
+    dynamic_context_enabled: bool = True
+    num_ctx_min: int = 4096
+    num_ctx_max: int = 16384
+    chars_per_token: float = 4.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "aws_region": self.aws_region,
+            "aws_profile": self.aws_profile,
+            "timeout_seconds": self.timeout_seconds,
+            "max_attempts": self.max_attempts,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "stop_sequences": list(self.stop_sequences or []),
             "model": self.model,
             "prompt_version": self.prompt_version,
             "dynamic_context_enabled": self.dynamic_context_enabled,
@@ -557,13 +612,29 @@ def load_preprocessing_config(path: str | Path | None = None) -> PreprocessingCo
     raw = _load_toml(resolved)
     preprocessing_raw = dict(raw.get("preprocessing", {}))
 
+    stop_sequences_raw = preprocessing_raw.get("stop_sequences")
+    if stop_sequences_raw is None:
+        stop_sequences: list[str] | None = None
+    elif isinstance(stop_sequences_raw, list):
+        stop_sequences = [str(item) for item in stop_sequences_raw]
+    else:
+        raise ValueError(
+            f"preprocessing.stop_sequences must be a TOML array of strings in {resolved}"
+        )
+
     config = PreprocessingConfig(
         path=resolved,
         provider=_coerce_str(preprocessing_raw.get("provider"), "ollama"),
         base_url=_coerce_str(preprocessing_raw.get("base_url"), "http://localhost:11434"),
+        aws_region=_coerce_str(preprocessing_raw.get("aws_region"), "us-east-1"),
+        aws_profile=(str(preprocessing_raw["aws_profile"]) if preprocessing_raw.get("aws_profile") is not None else None),
         timeout_seconds=_coerce_int(preprocessing_raw.get("timeout_seconds"), 120),
         max_attempts=_coerce_int(preprocessing_raw.get("max_attempts"), 2),
         temperature=_coerce_float(preprocessing_raw.get("temperature"), 0.0),
+        max_tokens=_coerce_int(preprocessing_raw.get("max_tokens"), 1024),
+        top_p=(float(preprocessing_raw["top_p"]) if preprocessing_raw.get("top_p") is not None else None),
+        top_k=(int(preprocessing_raw["top_k"]) if preprocessing_raw.get("top_k") is not None else None),
+        stop_sequences=stop_sequences,
         model=(str(preprocessing_raw["model"]) if preprocessing_raw.get("model") is not None else None),
         prompt_version=_coerce_str(preprocessing_raw.get("prompt_version"), "v1"),
         dynamic_context_enabled=_coerce_bool(preprocessing_raw.get("dynamic_context_enabled"), True),
@@ -573,12 +644,62 @@ def load_preprocessing_config(path: str | Path | None = None) -> PreprocessingCo
     )
     if config.max_attempts < 1:
         raise ValueError(f"preprocessing.max_attempts must be >= 1 in {resolved}")
+    if config.max_tokens < 1:
+        raise ValueError(f"preprocessing.max_tokens must be >= 1 in {resolved}")
     if config.num_ctx_min < 1:
         raise ValueError(f"preprocessing.num_ctx_min must be >= 1 in {resolved}")
     if config.num_ctx_max < config.num_ctx_min:
         raise ValueError(f"preprocessing.num_ctx_max must be >= preprocessing.num_ctx_min in {resolved}")
     if config.chars_per_token <= 0:
         raise ValueError(f"preprocessing.chars_per_token must be > 0 in {resolved}")
+    return config
+
+
+def load_translate_config(path: str | Path | None = None) -> TranslateConfig:
+    resolved = Path(path or default_paths_config_path()).resolve()
+    raw = _load_toml(resolved)
+    translate_raw = dict(raw.get("translate", {}))
+
+    stop_sequences_raw = translate_raw.get("stop_sequences")
+    if stop_sequences_raw is None:
+        stop_sequences: list[str] | None = None
+    elif isinstance(stop_sequences_raw, list):
+        stop_sequences = [str(item) for item in stop_sequences_raw]
+    else:
+        raise ValueError(
+            f"translate.stop_sequences must be a TOML array of strings in {resolved}"
+        )
+
+    config = TranslateConfig(
+        path=resolved,
+        provider=_coerce_str(translate_raw.get("provider"), "ollama"),
+        base_url=_coerce_str(translate_raw.get("base_url"), "http://localhost:11434"),
+        aws_region=_coerce_str(translate_raw.get("aws_region"), "us-east-1"),
+        aws_profile=(str(translate_raw["aws_profile"]) if translate_raw.get("aws_profile") is not None else None),
+        timeout_seconds=_coerce_int(translate_raw.get("timeout_seconds"), 120),
+        max_attempts=_coerce_int(translate_raw.get("max_attempts"), 2),
+        temperature=_coerce_float(translate_raw.get("temperature"), 0.0),
+        max_tokens=_coerce_int(translate_raw.get("max_tokens"), 1024),
+        top_p=(float(translate_raw["top_p"]) if translate_raw.get("top_p") is not None else None),
+        top_k=(int(translate_raw["top_k"]) if translate_raw.get("top_k") is not None else None),
+        stop_sequences=stop_sequences,
+        model=(str(translate_raw["model"]) if translate_raw.get("model") is not None else None),
+        prompt_version=_coerce_str(translate_raw.get("prompt_version"), "v1"),
+        dynamic_context_enabled=_coerce_bool(translate_raw.get("dynamic_context_enabled"), True),
+        num_ctx_min=_coerce_int(translate_raw.get("num_ctx_min"), 4096),
+        num_ctx_max=_coerce_int(translate_raw.get("num_ctx_max"), 16384),
+        chars_per_token=_coerce_float(translate_raw.get("chars_per_token"), 4.0),
+    )
+    if config.max_attempts < 1:
+        raise ValueError(f"translate.max_attempts must be >= 1 in {resolved}")
+    if config.max_tokens < 1:
+        raise ValueError(f"translate.max_tokens must be >= 1 in {resolved}")
+    if config.num_ctx_min < 1:
+        raise ValueError(f"translate.num_ctx_min must be >= 1 in {resolved}")
+    if config.num_ctx_max < config.num_ctx_min:
+        raise ValueError(f"translate.num_ctx_max must be >= translate.num_ctx_min in {resolved}")
+    if config.chars_per_token <= 0:
+        raise ValueError(f"translate.chars_per_token must be > 0 in {resolved}")
     return config
 
 

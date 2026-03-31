@@ -12,7 +12,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from .config import PathsConfig, StudyConfig
 from .io_utils import read_tabular_file
-from .prompting import PREPROCESSED_DATASET_FILENAME, load_batch_source
+from .prompting import load_batch_source, resolve_survey_source_path
 from .sampling import apply_dataset_row_filters, is_meaningful_text
 
 
@@ -292,8 +292,8 @@ def run_vader_sensitivity(
             source_mode = "explicit_input"
             prefiltered = False
         else:
-            cleaned_path = paths.preprocessing_output_dir / PREPROCESSED_DATASET_FILENAME
-            if cleaned_path.exists():
+            resolved_source_path = resolve_survey_source_path(paths, None)
+            if resolved_source_path != Path(paths.survey_csv):
                 source = load_batch_source(
                     study=study,
                     paths=paths,
@@ -301,7 +301,7 @@ def run_vader_sensitivity(
                     all_records=all_records,
                     min_valid_sections=(3 if not all_records else None),
                 )
-                source_mode = "preprocessed_cleaned"
+                source_mode = "translated" if resolved_source_path.name == "translated_dataset.csv" else "preprocessed_cleaned"
                 prefiltered = True
             else:
                 source = read_tabular_file(Path(paths.survey_csv))

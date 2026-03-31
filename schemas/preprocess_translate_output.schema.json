@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PreprocessTranslateOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["translation", "source_language"],
+  "properties": {
+    "translation": {
+      "type": "string"
+    },
+    "source_language": {
+      "type": "string"
+    }
+  }
+}

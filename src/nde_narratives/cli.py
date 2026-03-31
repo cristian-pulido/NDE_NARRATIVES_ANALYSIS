@@ -8,6 +8,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
+from typing import Any, Callable
 
 from .config import (
     default_paths_config_path,
@@ -17,11 +18,12 @@ from .config import (
     load_paths_config,
     load_preprocessing_config,
     load_study_config,
+    load_translate_config,
 )
 from .constants import PROJECT_ROOT
 from .excel import write_annotation_outputs
 from .io_utils import read_tabular_file
-from .prompting import PREPROCESSED_DATASET_FILENAME, write_llm_batches
+from .prompting import resolve_survey_source_path, write_llm_batches
 from .sampling import create_annotation_frames
 
 
@@ -119,6 +121,30 @@ class NDEHelpFormatter(argparse.RawDescriptionHelpFormatter):
 
 def _examples_block(*lines: str) -> str:
     return "Examples:\n" + "\n".join(f"  {line}" for line in lines)
+
+
+def _render_progress_bar(current: int, total: int, *, width: int = 28) -> str:
+    safe_total = max(int(total), 1)
+    safe_current = min(max(int(current), 0), safe_total)
+    ratio = safe_current / safe_total
+    filled = int(round(width * ratio))
+    return "█" * filled + "-" * (width - filled)
+
+
+def _make_progress_callback(label: str) -> Callable[[dict[str, Any]], None]:
+    def _callback(event: dict[str, Any]) -> None:
+        current = int(event.get("current", 0))
+        total = int(event.get("total", 0))
+        safe_total = max(total, 1)
+        percent = (100.0 * min(max(current, 0), safe_total)) / safe_total
+        bar = _render_progress_bar(current, safe_total)
+        status = str(event.get("status", "running"))
+        message = f"\r[{label}] [{bar}] {percent:6.2f}% ({current}/{safe_total}) status={status}"
+        print(message, end="", file=sys.stderr, flush=True)
+        if current >= safe_total:
+            print(file=sys.stderr, flush=True)
+
+    return _callback
 
 
 def _display_path(path: Path) -> str:
@@ -278,6 +304,63 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite any existing preprocessing validation sample files.",
     )
     preprocess.set_defaults(handler=cmd_preprocess)
+
+    translate = subparsers.add_parser(
+        "translate",
+        formatter_class=NDEHelpFormatter,
+        help="Run the narrative translation pipeline and write an English-normalized dataset copy.",
+        description=dedent(
+            """\
+            Detect original language and translate the configured narrative sections
+            (context, experience, aftereffects) to English. The command writes
+            resumable artifacts and a translated dataset copy without modifying source files.
+            """
+        ),
+        epilog=_examples_block(
+            "nde translate",
+            "nde translate --limit 10",
+            "nde translate --retry-exhausted",
+            "nde translate --from-scratch",
+        ),
+    )
+    _add_config_arguments(translate)
+    source_group = translate.add_argument_group("Source And Scope")
+    source_group.add_argument(
+        "--input-path",
+        metavar="PATH",
+        default=None,
+        help="Explicit tabular input file path that overrides the configured survey source.",
+    )
+    source_group.add_argument(
+        "--limit",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Limit the number of source rows for debugging or smoke tests.",
+    )
+    source_group.add_argument(
+        "--all-records",
+        action="store_true",
+        help="Bypass study-level row filters and process every source row.",
+    )
+    execution_group = translate.add_argument_group("Execution Controls")
+    execution_group.add_argument(
+        "--retry-exhausted",
+        action="store_true",
+        help="Retry rows already marked as exhausted instead of leaving them untouched.",
+    )
+    execution_group.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help="Delete any existing translation ledger state in the target output directory and rebuild the run from zero.",
+    )
+    execution_group.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Write translation artifacts to this directory instead of preprocessing_output_dir.",
+    )
+    translate.set_defaults(handler=cmd_translate)
 
     build_annotation = subparsers.add_parser(
         "build-annotation-sample",
@@ -846,6 +929,7 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
     llm_config = load_llm_config(args.paths_config)
+    translate_config = load_translate_config(args.paths_config)
 
     placeholders = study.placeholder_questionnaire_columns()
     if placeholders:
@@ -869,6 +953,7 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
         "created_output_directories": created_dirs,
         "llm_runtime": llm_config.runtime.to_dict(),
         "llm_experiments": [experiment.to_dict() for experiment in llm_config.experiments],
+        "translate_runtime": translate_config.to_dict(),
     }
     print("Configuration valid.")
     print(json.dumps(summary, indent=2))
@@ -878,16 +963,27 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
 def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
-    preprocessed_path = paths.preprocessing_output_dir / PREPROCESSED_DATASET_FILENAME
-    source_path = paths.survey_csv
-    source_df = read_tabular_file(source_path)
+    required_columns = [study.id_column, study.stratify_column, *study.text_columns().values()]
+    source_candidates = [
+        paths.preprocessing_output_dir / "cleaned_dataset.csv",
+        paths.preprocessing_output_dir / "translated_dataset.csv",
+        Path(paths.survey_csv),
+    ]
 
-    if preprocessed_path.exists():
-        preprocessed_df = read_tabular_file(preprocessed_path)
-        required_columns = [study.id_column, study.stratify_column, *study.text_columns().values()]
-        if all(column in preprocessed_df.columns for column in required_columns):
-            source_path = preprocessed_path
-            source_df = preprocessed_df
+    source_path: Path | None = None
+    source_df = None
+    for candidate in source_candidates:
+        if not candidate.exists():
+            continue
+        candidate_df = read_tabular_file(candidate)
+        if all(column in candidate_df.columns for column in required_columns):
+            source_path = candidate
+            source_df = candidate_df
+            break
+
+    if source_path is None or source_df is None:
+        source_path = resolve_survey_source_path(paths, None)
+        source_df = read_tabular_file(source_path)
 
     annotation_df, mapping_df, column_map_df, sampled_private_df, summary = create_annotation_frames(
         source_df=source_df,
@@ -928,6 +1024,29 @@ def cmd_preprocess(args: argparse.Namespace) -> int:
         validation_n_total=args.validation_n_total,
         validation_random_state=args.validation_random_state,
         force_validation_sample=bool(args.force_validation_sample),
+        progress_callback=_make_progress_callback("preprocess"),
+    )
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+def cmd_translate(args: argparse.Namespace) -> int:
+    from .preprocessing_translate import run_translate_pipeline
+
+    study = load_study_config(args.study_config)
+    paths = load_paths_config(args.paths_config)
+    translate = load_translate_config(args.paths_config)
+    summary = run_translate_pipeline(
+        study=study,
+        paths=paths,
+        translate=translate,
+        input_path=Path(args.input_path).resolve() if args.input_path else None,
+        output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        limit=args.limit,
+        all_records=bool(args.all_records),
+        retry_exhausted=bool(args.retry_exhausted),
+        from_scratch=bool(args.from_scratch),
+        progress_callback=_make_progress_callback("translate"),
     )
     print(json.dumps(summary, indent=2))
     return 0
@@ -972,6 +1091,7 @@ def cmd_run_llm(args: argparse.Namespace) -> int:
         min_valid_sections=args.min_valid_sections,
         retry_exhausted=bool(args.retry_exhausted),
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        progress_callback=_make_progress_callback("run-llm"),
     )
     print(json.dumps(summary, indent=2))
     return 0
