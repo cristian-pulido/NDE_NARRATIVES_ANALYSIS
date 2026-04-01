@@ -877,6 +877,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to an existing VADER scores file. If omitted and the default file is missing, evaluate generates it automatically.",
     )
     auxiliary_group.add_argument(
+        "--skip-vader",
+        action="store_true",
+        help="Skip VADER loading/scoring and omit all VADER-based comparisons from evaluation outputs.",
+    )
+    auxiliary_group.add_argument(
         "--output-dir",
         metavar="PATH",
         default=None,
@@ -1293,6 +1298,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         prompt_variants=list(args.prompt_variant) if args.prompt_variant else None,
         sampled_private_workbook=Path(args.sampled_private_workbook).resolve() if args.sampled_private_workbook else None,
         vader_scores_path=Path(args.vader_scores).resolve() if args.vader_scores else None,
+        skip_vader=bool(args.skip_vader),
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
         figure_dpi=int(args.figure_dpi),
         export_figures_pdf=bool(args.export_figures_pdf),

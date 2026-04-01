@@ -1239,6 +1239,7 @@ def evaluate_outputs(
     sampled_private_workbook: Path | None = None,
     output_dir: Path | None = None,
     vader_scores_path: Path | None = None,
+    skip_vader: bool = False,
     figure_dpi: int = 300,
     export_figures_pdf: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, str]]:
@@ -1257,23 +1258,28 @@ def evaluate_outputs(
     participant_codes = set(reference_df["participant_code"])
 
     questionnaire_df = load_questionnaire_labels(paths.survey_csv, study)
-    vader_df, vader_summary = load_vader_predictions(
-        study,
-        paths,
-        resolved_sampled_private,
-        vader_scores_path=Path(vader_scores_path) if vader_scores_path else None,
-        output_dir=evaluation_dir,
-    )
+    if skip_vader:
+        vader_df = pd.DataFrame(columns=["participant_code", *study.tone_columns()])
+        vader_summary = None
+    else:
+        vader_df, vader_summary = load_vader_predictions(
+            study,
+            paths,
+            resolved_sampled_private,
+            vader_scores_path=Path(vader_scores_path) if vader_scores_path else None,
+            output_dir=evaluation_dir,
+        )
 
     questionnaire_source = _comparison_source("questionnaire", questionnaire_df, study)
-    vader_source = _comparison_source("vader", vader_df, study)
+    vader_source = _comparison_source("vader", vader_df, study) if not skip_vader else None
 
     questionnaire_tone_columns = [study.sections["experience"].tone_internal_column]
     metrics_frames = [
         compute_comparison_metrics(reference_df, questionnaire_df, questionnaire_tone_columns, study, "human_reference_vs_questionnaire"),
         compute_comparison_metrics(reference_df, questionnaire_df, study.binary_columns(), study, "human_reference_vs_questionnaire"),
-        compute_comparison_metrics(reference_df, vader_df, study.tone_columns(), study, "human_reference_vs_vader"),
     ]
+    if not skip_vader:
+        metrics_frames.append(compute_comparison_metrics(reference_df, vader_df, study.tone_columns(), study, "human_reference_vs_vader"))
 
     llm_candidates, rejected_llm = discover_llm_prediction_artifacts(
         study,
@@ -1341,7 +1347,9 @@ def evaluate_outputs(
         }
         artifact_summary_path.write_text(json.dumps(artifact_summary, indent=2), encoding="utf-8")
 
-    additional_sources = [questionnaire_source, vader_source, *accepted_llm_sources]
+    additional_sources = [questionnaire_source, *accepted_llm_sources]
+    if vader_source is not None:
+        additional_sources.append(vader_source)
     for left_source, right_source in combinations(additional_sources, 2):
         pair_metrics = _compute_source_pair_metrics(left_source, right_source, study)
         if pair_metrics is not None:
@@ -1383,6 +1391,9 @@ def evaluate_outputs(
         "llm_artifacts": {
             "accepted": accepted_llm,
             "rejected": rejected_llm,
+        },
+        "vader": {
+            "enabled": not skip_vader,
         },
     }
 
