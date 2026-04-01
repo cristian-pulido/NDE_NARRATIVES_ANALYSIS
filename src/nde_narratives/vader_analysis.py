@@ -109,9 +109,16 @@ def build_vader_scores(
         if section.source_column not in prepared.columns:
             raise ValueError(f"Source data is missing text column: {section.source_column}")
 
-        section_df = prepared.loc[prepared[section.source_column].apply(is_meaningful_text)].copy()
+        section_df = prepared.copy()
         for _, record in section_df.iterrows():
-            scores = analyzer.polarity_scores(str(record[section.source_column]))
+            raw_text = record.get(section.source_column)
+            text = "" if pd.isna(raw_text) else str(raw_text)
+            if is_meaningful_text(raw_text):
+                scores = analyzer.polarity_scores(text)
+                label = derive_vader_label(float(scores["compound"]))
+            else:
+                scores = {"neg": 0.0, "neu": 1.0, "pos": 0.0, "compound": 0.0}
+                label = "mixed"
             row = {
                 study.id_column: record[study.id_column],
                 "participant_code": record.get("participant_code", ""),
@@ -121,10 +128,10 @@ def build_vader_scores(
                 "neu": float(scores["neu"]),
                 "pos": float(scores["pos"]),
                 "compound": float(scores["compound"]),
-                "vader_label": derive_vader_label(float(scores["compound"])),
+                "vader_label": label,
             }
             if include_text:
-                row["text"] = str(record[section.source_column])
+                row["text"] = text
             rows.append(row)
 
     scores_df = pd.DataFrame(rows, columns=[study.id_column] + vader_score_columns(include_text=include_text))
