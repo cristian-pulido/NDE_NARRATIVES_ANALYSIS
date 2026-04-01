@@ -290,6 +290,27 @@ Useful evaluation options:
 - `--output-dir`: write metrics, manifests, figures, and reports to a custom destination instead of the default evaluation output folder.
 - `--human-annotation-workbook` and `--llm-predictions`: explicit single-file overrides.
 
+Compare multiple evaluation output folders (for example, to quantify preprocessing effects such as translation or re-segmentation) and generate a manuscript-style appendix report with unified tables and figures:
+
+    nde compare-evaluation-outputs --condition standard=./Data/Alignment/Results/evaluation_outputs --condition translate_run=./Data/Alignment/Results/evaluation_outputs_translate_run --output-dir ./Data/Alignment/Results/comparison_outputs
+
+Input modes for `nde compare-evaluation-outputs`:
+
+- Repeatable `--condition NAME=PATH` (recommended for quick runs).
+- `--config path/to/compare_config.toml` for reusable multi-condition setups.
+
+Important precedence rule:
+
+- If `--config` is provided, it takes precedence and inline `--condition` entries are ignored.
+
+Useful comparison options:
+
+- `--baseline NAME`: choose the reference condition used for delta columns and narratives.
+- `--focus-scope questionnaire_vs_llm|human_reference_vs_llm|all`: restrict analysis to selected comparison scopes.
+- `--metric macro_f1|accuracy|cohen_kappa`: select the primary ranking metric used in summary panels.
+- `--title "Custom comparison title"`: override report title.
+- `--output-dir PATH`: write comparison tables, figures, and markdown report to a custom destination.
+
 ## Typical Workflow
 
 ### Multiple annotators and multiple experiments
