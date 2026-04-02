@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import importlib.util
 
 import pandas as pd
+import pytest
 
 from tests.cli_helpers import FIXTURES, make_paths_config, run_cli
+
+_HAS_VADER = importlib.util.find_spec("vaderSentiment") is not None
 
 
 def test_sentiment_sensitivity_preserves_schema_with_zero_rows(tmp_path: Path) -> None:
@@ -145,3 +149,53 @@ def test_sentiment_sensitivity_prefers_cleaned_dataset_when_available(tmp_path: 
     assert "UNIQUE CLEANED CONTEXT TEXT" in set(scores["text"])
     assert "UNIQUE CLEANED EXPERIENCE TEXT" in set(scores["text"])
     assert "UNIQUE CLEANED AFTEREFFECTS TEXT" in set(scores["text"])
+
+
+@pytest.mark.skipif(not _HAS_VADER, reason="vaderSentiment is not installed")
+def test_sentiment_sensitivity_prefers_cleaned_dataset_over_translated(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+    output_dir = tmp_path / "sentiment_outputs_translated"
+
+    pre_dir = tmp_path / "preprocessing_outputs"
+    pre_dir.mkdir(parents=True, exist_ok=True)
+
+    cleaned = pd.DataFrame(
+        [
+            {
+                "response_id": 1001,
+                "participant_code": "ANN_CLEANED",
+                "nde_context": "ONLY CLEANED CONTEXT",
+                "nde_description": "ONLY CLEANED EXPERIENCE",
+                "nde_aftereffects": "ONLY CLEANED AFTEREFFECTS",
+                "n_valid_sections": 3,
+                "n_valid_sections_cleaned": 3,
+            }
+        ]
+    )
+    cleaned.to_csv(pre_dir / "cleaned_dataset.csv", index=False)
+
+    translated = cleaned.copy()
+    translated.loc[:, "response_id"] = 1002
+    translated.loc[:, "nde_context"] = "ONLY TRANSLATED CONTEXT"
+    translated.loc[:, "nde_description"] = "ONLY TRANSLATED EXPERIENCE"
+    translated.loc[:, "nde_aftereffects"] = "ONLY TRANSLATED AFTEREFFECTS"
+    translated.to_csv(pre_dir / "translated_dataset.csv", index=False)
+
+    result = run_cli(
+        "sentiment-sensitivity",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--output-dir",
+        str(output_dir),
+        "--include-text",
+    )
+
+    assert result.returncode == 0, result.stderr
+    scores = pd.read_csv(output_dir / "vader_sentiment_scores.csv")
+    assert "ONLY CLEANED CONTEXT" in set(scores["text"])
+    assert "ONLY CLEANED EXPERIENCE" in set(scores["text"])
+    assert "ONLY CLEANED AFTEREFFECTS" in set(scores["text"])

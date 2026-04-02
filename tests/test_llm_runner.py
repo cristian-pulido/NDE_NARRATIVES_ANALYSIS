@@ -61,9 +61,20 @@ class InterruptingProvider(FakeProvider):
 class FakePreprocessingProvider:
     def __init__(self, invalid_participant: str | None = None) -> None:
         self.invalid_participant = invalid_participant
+        self.validation_call_counts: dict[str, int] = {}
 
     def generate_structured(self, request) -> LLMProviderResponse:
         if request.section == "preprocess_validate":
+            count = self.validation_call_counts.get(str(request.participant_code), 0) + 1
+            self.validation_call_counts[str(request.participant_code)] = count
+            payload = {
+                "context_assessment": "invalid" if request.participant_code == self.invalid_participant and count == 1 else "valid",
+                "experience_assessment": "valid",
+                "aftereffects_assessment": "invalid" if request.participant_code == self.invalid_participant and count == 1 else "valid",
+                "needs_resegmentation": "yes" if request.participant_code == self.invalid_participant and count == 1 else "no",
+            }
+            return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+        if request.section == "preprocess_validate_post_resegment":
             payload = {
                 "context_assessment": "invalid" if request.participant_code == self.invalid_participant else "valid",
                 "experience_assessment": "valid",
@@ -473,6 +484,27 @@ def test_load_batch_source_excludes_preprocessed_rows_marked_to_drop(tmp_path: P
 
     assert 101 not in set(filtered_df[study.id_column])
     assert 101 in set(all_records_df[study.id_column])
+
+
+def test_load_batch_source_prefers_preprocessed_dataset_over_translated(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
+    paths = load_paths_config(paths_config)
+
+    cleaned = pd.read_csv(survey_csv).head(1).copy()
+    cleaned.loc[:, study.id_column] = 5101
+    cleaned.loc[:, "participant_code"] = "ANN_CLEANED"
+    cleaned.to_csv(paths.preprocessing_output_dir / "cleaned_dataset.csv", index=False)
+
+    translated = cleaned.copy()
+    translated.loc[:, study.id_column] = 5102
+    translated.loc[:, "participant_code"] = "ANN_TRANSLATED"
+    translated.to_csv(paths.preprocessing_output_dir / "translated_dataset.csv", index=False)
+
+    preferred_df = load_batch_source(study, paths, source="survey", all_records=False)
+
+    assert set(preferred_df[study.id_column]) == {5101}
 
 
 

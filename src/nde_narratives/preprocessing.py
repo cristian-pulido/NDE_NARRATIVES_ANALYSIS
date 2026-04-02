@@ -25,6 +25,7 @@ CLEANED_DATASET_FILENAME = "cleaned_dataset.csv"
 CLEANED_DATASET_XLSX_FILENAME = "cleaned_dataset.xlsx"
 VALIDATION_SAMPLE_FILENAME = "preprocessing_validation_sample.xlsx"
 VALIDATION_MAPPING_FILENAME = "preprocessing_validation_mapping_private.xlsx"
+TRANSLATED_DATASET_FILENAME = "translated_dataset.csv"
 SUCCESS_STATUS = "success"
 FAILED_STATUS = "failed"
 PENDING_STATUS = "pending"
@@ -116,6 +117,18 @@ def _render_validation_prompt(row: pd.Series, study: StudyConfig, prompt_root: P
     return template
 
 
+def _render_validation_prompt_from_texts(section_texts: dict[str, str], prompt_root: Path) -> str:
+    template = _load_prompt(prompt_root / "validate_sections_prompt.md")
+    replacements = {
+        "{{context_text}}": _coerce_text(section_texts.get("context")),
+        "{{experience_text}}": _coerce_text(section_texts.get("experience")),
+        "{{aftereffects_text}}": _coerce_text(section_texts.get("aftereffects")),
+    }
+    for token, value in replacements.items():
+        template = template.replace(token, value)
+    return template
+
+
 def _render_resegment_prompt(row: pd.Series, study: StudyConfig, prompt_root: Path) -> str:
     template = _load_prompt(prompt_root / "resegment_narrative_prompt.md")
     merged = "\n\n".join(
@@ -178,6 +191,8 @@ def _base_record(row: pd.Series, study: StudyConfig) -> dict[str, Any]:
         "experience_clean": "",
         "aftereffects_clean": "",
         "changed_sections": [],
+        "post_validation_assessments": {},
+        "post_validation_needs_resegmentation": None,
         "last_error_type": None,
         "last_error_message": None,
         "updated_at": _utc_now(),
@@ -192,7 +207,7 @@ def _coerce_status(value: str) -> str:
 
 
 def _source_frame(study: StudyConfig, paths: PathsConfig, input_path: Path | None, *, all_records: bool, limit: int | None) -> pd.DataFrame:
-    survey_path = Path(input_path or paths.survey_csv)
+    survey_path = _resolve_preprocess_input_path(paths, input_path)
     if not survey_path.exists():
         raise FileNotFoundError(f"Survey source not found: {survey_path}")
     raw = read_tabular_file(survey_path)
@@ -208,6 +223,15 @@ def _source_frame(study: StudyConfig, paths: PathsConfig, input_path: Path | Non
     if limit is not None:
         prepared = prepared.head(limit).copy()
     return prepared
+
+
+def _resolve_preprocess_input_path(paths: PathsConfig, input_path: Path | None) -> Path:
+    if input_path is not None:
+        return Path(input_path)
+    translated_path = paths.preprocessing_output_dir / TRANSLATED_DATASET_FILENAME
+    if translated_path.exists():
+        return translated_path
+    return Path(paths.survey_csv)
 
 
 def _record_has_meaningful_text(row: pd.Series, study: StudyConfig) -> bool:
@@ -351,13 +375,93 @@ def _process_row(
             "experience_clean": parsed_resegmentation["experience"],
             "aftereffects_clean": parsed_resegmentation["aftereffects"],
         }
-        n_valid_sections_cleaned = _count_meaningful_sections_from_texts(cleaned)
         changed_sections = [
             section_name
             for section_name in study.section_order
             if cleaned[f"{section_name}_clean"] != original[f"{section_name}_clean"]
         ]
+
+        post_validation_prompt = _render_validation_prompt_from_texts(
+            {
+                "context": cleaned["context_clean"],
+                "experience": cleaned["experience_clean"],
+                "aftereffects": cleaned["aftereffects_clean"],
+            },
+            prompt_root,
+        )
+        post_validation_request = LLMRequest(
+            participant_code=str(row["participant_code"]),
+            section="preprocess_validate_post_resegment",
+            prompt=post_validation_prompt,
+            response_schema=validation_schema,
+            model=str(preprocessing.model),
+            temperature=preprocessing.temperature,
+            metadata=_build_request_metadata(post_validation_prompt, preprocessing),
+        )
+        post_validation_response = provider.generate_structured(post_validation_request)
+        raw_responses.append(
+            {
+                study.id_column: row[study.id_column],
+                "participant_code": row["participant_code"],
+                "stage": "post_validation",
+                "raw_text": post_validation_response.raw_text,
+                "provider_metadata": post_validation_response.metadata,
+                "request_metadata": post_validation_request.metadata,
+            }
+        )
+        parsed_post_validation = parse_structured_response(post_validation_response.raw_text, validation_schema)
+        post_section_states = {
+            "context": _coerce_status(parsed_post_validation["context_assessment"]),
+            "experience": _coerce_status(parsed_post_validation["experience_assessment"]),
+            "aftereffects": _coerce_status(parsed_post_validation["aftereffects_assessment"]),
+        }
+        post_needs_resegmentation = str(parsed_post_validation["needs_resegmentation"]).strip().lower() == "yes"
+        n_valid_sections_cleaned = sum(1 for value in post_section_states.values() if value == "valid")
+        has_invalid_after_resegment = any(value == "invalid" for value in post_section_states.values())
+
         preprocessing_status = "fully_resegmented" if len(changed_sections) == len(study.section_order) else "partially_corrected"
+        if has_invalid_after_resegment or post_needs_resegmentation:
+            # Allow soft acceptance to reduce false negatives when the resegmented output
+            # is still broadly usable (>=2 valid sections) but one section is flagged invalid.
+            if n_valid_sections_cleaned >= 2:
+                return {
+                    **record,
+                    **cleaned,
+                    "attempts_validation": int(record.get("attempts_validation", 0)) + 1,
+                    "attempts_resegmentation": int(record.get("attempts_resegmentation", 0)) + 1,
+                    "n_valid_sections": n_valid_sections_cleaned,
+                    "n_valid_sections_original": n_valid_sections_original,
+                    "n_valid_sections_cleaned": n_valid_sections_cleaned,
+                    "preprocessing_status": "post_validation_warning",
+                    "status": SUCCESS_STATUS,
+                    "changed_sections": changed_sections,
+                    "post_validation_assessments": post_section_states,
+                    "post_validation_needs_resegmentation": post_needs_resegmentation,
+                    "last_error_type": "PostValidationWarning",
+                    "last_error_message": "Resegmented output remains partially off-section but is usable (>=2 valid sections).",
+                    "updated_at": _utc_now(),
+                }, raw_responses, errors
+
+            next_attempts = int(record.get("attempts_resegmentation", 0)) + 1
+            status = EXHAUSTED_STATUS if next_attempts >= preprocessing.max_attempts else FAILED_STATUS
+            return {
+                **record,
+                **cleaned,
+                "attempts_validation": int(record.get("attempts_validation", 0)) + 1,
+                "attempts_resegmentation": next_attempts,
+                "n_valid_sections": n_valid_sections_cleaned,
+                "n_valid_sections_original": n_valid_sections_original,
+                "n_valid_sections_cleaned": n_valid_sections_cleaned,
+                "preprocessing_status": "post_validation_failed",
+                "status": status,
+                "changed_sections": changed_sections,
+                "post_validation_assessments": post_section_states,
+                "post_validation_needs_resegmentation": post_needs_resegmentation,
+                "last_error_type": "PostValidationFailed",
+                "last_error_message": "Resegmented output still contains invalid/off-section content.",
+                "updated_at": _utc_now(),
+            }, raw_responses, errors
+
         return {
             **record,
             **cleaned,
@@ -369,6 +473,8 @@ def _process_row(
             "preprocessing_status": preprocessing_status,
             "status": SUCCESS_STATUS,
             "changed_sections": changed_sections,
+            "post_validation_assessments": post_section_states,
+            "post_validation_needs_resegmentation": post_needs_resegmentation,
             "last_error_type": None,
             "last_error_message": None,
             "updated_at": _utc_now(),
@@ -440,6 +546,8 @@ def _build_cleaned_dataset(source_df: pd.DataFrame, records: dict[str, dict[str,
             "n_valid_sections_cleaned": record.get("n_valid_sections_cleaned"),
             "preprocessing_run_status": record.get("status"),
             "changed_sections": "|".join(record.get("changed_sections", [])),
+            "post_validation_assessments": json.dumps(record.get("post_validation_assessments", {}), ensure_ascii=False),
+            "post_validation_needs_resegmentation": record.get("post_validation_needs_resegmentation"),
             "original_context": _coerce_text(row.get(study.sections["context"].source_column)),
             "original_experience": _coerce_text(row.get(study.sections["experience"].source_column)),
             "original_aftereffects": _coerce_text(row.get(study.sections["aftereffects"].source_column)),
@@ -499,6 +607,7 @@ def run_preprocessing_pipeline(
     validation_random_state: int | None = None,
     force_validation_sample: bool = False,
     provider_factory: Callable[[PreprocessingConfig], LLMProvider] | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     if not preprocessing.model:
         raise ValueError("Missing preprocessing.model in paths config. Configure a dedicated preprocessing model before running this command.")
@@ -511,7 +620,8 @@ def run_preprocessing_pipeline(
     prompt_root = project_root / "prompts" / "preprocessing"
     validation_schema = _load_schema(project_root / "schemas" / "preprocess_validation_output.schema.json")
     resegmentation_schema = _load_schema(project_root / "schemas" / "preprocess_resegmentation_output.schema.json")
-    source_df = _source_frame(study, paths, input_path, all_records=all_records, limit=limit)
+    resolved_input_path = _resolve_preprocess_input_path(paths, input_path)
+    source_df = _source_frame(study, paths, resolved_input_path, all_records=all_records, limit=limit)
 
     participant_results_path = effective_output_dir / PARTICIPANT_RESULTS_FILENAME
     raw_responses_path = effective_output_dir / RAW_RESPONSES_FILENAME
@@ -526,13 +636,21 @@ def run_preprocessing_pipeline(
     provider = (provider_factory or build_llm_provider)(preprocessing)
     no_op = True
 
+    total_rows = int(len(source_df))
+    processed_rows = 0
     for _, row in source_df.iterrows():
         participant_code = str(row["participant_code"])
         record = existing_records.get(participant_code, _base_record(row, study))
         status = str(record.get("status", PENDING_STATUS))
         if status == SUCCESS_STATUS or status == SKIPPED_NO_TEXT_STATUS:
+            processed_rows += 1
+            if progress_callback is not None:
+                progress_callback({"stage": "preprocess", "current": processed_rows, "total": total_rows, "participant_code": participant_code, "status": "skipped_completed"})
             continue
         if status == EXHAUSTED_STATUS and not retry_exhausted:
+            processed_rows += 1
+            if progress_callback is not None:
+                progress_callback({"stage": "preprocess", "current": processed_rows, "total": total_rows, "participant_code": participant_code, "status": "skipped_exhausted"})
             continue
         updated, new_raw, new_errors = _process_row(
             row,
@@ -551,6 +669,9 @@ def run_preprocessing_pipeline(
         _write_jsonl(participant_results_path, [existing_records[key] for key in sorted(existing_records)])
         _write_jsonl(raw_responses_path, raw_responses)
         _write_jsonl(errors_path, errors)
+        processed_rows += 1
+        if progress_callback is not None:
+            progress_callback({"stage": "preprocess", "current": processed_rows, "total": total_rows, "participant_code": participant_code, "status": str(updated.get("status", "unknown"))})
 
     cleaned_df = _build_cleaned_dataset(source_df, existing_records, study)
     written = {
@@ -571,7 +692,7 @@ def run_preprocessing_pipeline(
         )
 
     summary = {
-        "input_path": str(Path(input_path or paths.survey_csv)),
+        "input_path": str(resolved_input_path),
         "output_dir": str(effective_output_dir),
         "prompt_root": str(prompt_root),
         "records": int(len(source_df)),
@@ -582,7 +703,7 @@ def run_preprocessing_pipeline(
     }
     manifest = {
         "pipeline": "preprocessing",
-        "input_path": str(Path(input_path or paths.survey_csv)),
+        "input_path": str(resolved_input_path),
         "study_config": str(study.path),
         "prompt_root": str(prompt_root),
         "config": preprocessing.to_dict(),

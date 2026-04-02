@@ -74,7 +74,8 @@ If you omit the rest, the repository resolves these defaults relative to `data_d
 
 Local runtime settings are split by purpose in [`config/paths.local.toml`](config/paths.local.toml):
 
-- `[preprocessing]` defines the one canonical model configuration used by [`nde preprocess`](src/nde_narratives/cli.py:202)
+- `[translate]` defines the optional one-time translation stage used by `nde translate`
+- `[preprocessing]` defines the one canonical segmentation/validation cleaning model used by [`nde preprocess`](src/nde_narratives/cli.py:202)
 - `[llm]` and `[[llm.experiments]]` define downstream analysis experiments used by [`nde run-llm`](src/nde_narratives/cli.py:382)
 
 For the practical LLM setup, smoke-test flow, prompt variants layout, and full run instructions, see [LLM Workflow](docs/llm_workflow.md).
@@ -194,7 +195,11 @@ Validate that the study config, path config, and source CSV are aligned:
 
     nde validate-config
 
-Run the one-time preprocessing stage that validates section structure, resegments invalid rows when needed, resumes failures, and writes a cleaned dataset copy under `preprocessing_output_dir`:
+Optional translation stage (detect source language per record and translate the three narrative columns to English):
+
+    nde translate
+
+Run the one-time segmentation/validation preprocessing stage that validates section structure, resegments invalid rows when needed, resumes failures, and writes a cleaned dataset copy under `preprocessing_output_dir`:
 
     nde preprocess
 
@@ -215,7 +220,13 @@ Useful preprocessing config knobs in `paths.local.toml` under `[preprocessing]`:
 
 By default, preprocessing is intentionally more inclusive than downstream analysis: it accepts rows with at least one meaningful narrative section so partially populated originals can still be rescued before the final `3-section` filter is applied.
 
-If [`cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:23) exists under `preprocessing_output_dir`, downstream analysis commands using the `survey` source automatically prefer that cleaned file over the raw configured survey file.
+When no explicit `--input-path` is passed for `survey` source, downstream commands now resolve source with this priority:
+
+1. `preprocessing_output_dir/cleaned_dataset.csv`
+2. `preprocessing_output_dir/translated_dataset.csv`
+3. configured `survey_csv`
+
+If none of these sources exists, the workflow fails with an explicit `FileNotFoundError` listing attempted paths.
 
 Build the annotation workbook sample outside the repository:
 

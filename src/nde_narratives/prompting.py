@@ -13,6 +13,31 @@ from .sampling import apply_dataset_row_filters, assign_participant_codes, filte
 
 
 PREPROCESSED_DATASET_FILENAME = "cleaned_dataset.csv"
+TRANSLATED_DATASET_FILENAME = "translated_dataset.csv"
+
+
+def resolve_survey_source_path(paths: PathsConfig, input_path: Path | None = None) -> Path:
+    explicit_input_path = Path(input_path) if input_path is not None else None
+    if explicit_input_path is not None:
+        if not explicit_input_path.exists():
+            raise FileNotFoundError(f"Survey source not found: {explicit_input_path}")
+        return explicit_input_path
+
+    candidates = [
+        paths.preprocessing_output_dir / PREPROCESSED_DATASET_FILENAME,
+        paths.preprocessing_output_dir / TRANSLATED_DATASET_FILENAME,
+        Path(paths.survey_csv),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    attempted = "\n".join(f"- {candidate}" for candidate in candidates)
+    raise FileNotFoundError(
+        "No survey source available for source='survey'. "
+        "Expected one of the following (in priority order):\n"
+        f"{attempted}"
+    )
 
 
 def resolve_prompt_root(
@@ -102,10 +127,10 @@ def load_batch_source(
             raise FileNotFoundError(f"Sampled private workbook not found: {workbook}")
         df = pd.read_excel(workbook, sheet_name=SAMPLED_PRIVATE_SHEET)
     elif source == "survey":
-        preprocessed_path = paths.preprocessing_output_dir / PREPROCESSED_DATASET_FILENAME
         explicit_input_path = Path(input_path) if input_path is not None else None
-        if explicit_input_path is None and preprocessed_path.exists():
-            prepared = read_tabular_file(preprocessed_path).sort_values(study.id_column).reset_index(drop=True)
+        resolved_survey_source = resolve_survey_source_path(paths, explicit_input_path)
+        if explicit_input_path is None and resolved_survey_source != Path(paths.survey_csv):
+            prepared = read_tabular_file(resolved_survey_source).sort_values(study.id_column).reset_index(drop=True)
             if not all_records:
                 prepared = _filter_preprocessed_dataset(prepared)
             if "participant_code" not in prepared.columns:
@@ -114,10 +139,7 @@ def load_batch_source(
                 prepared = _filter_preprocessed_dataset(prepared)
             df = prepared
         else:
-            survey_path = Path(explicit_input_path or paths.survey_csv)
-            if not survey_path.exists():
-                raise FileNotFoundError(f"Survey source not found: {survey_path}")
-            raw = read_tabular_file(survey_path)
+            raw = read_tabular_file(resolved_survey_source)
             prepared = raw.copy() if all_records else filter_source_data(raw, study)
             prepared = prepared.sort_values(study.id_column).reset_index(drop=True)
             df = assign_participant_codes(prepared, study)

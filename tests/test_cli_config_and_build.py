@@ -142,6 +142,33 @@ def test_build_annotation_sample_prefers_preprocessed_dataset_when_available(tmp
     assert int(sampled_private.loc[0, "response_id"]) == 999
 
 
+def test_build_annotation_sample_prefers_preprocessed_dataset_over_translated(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    preprocessed_dir = tmp_path / "preprocessing_outputs"
+    preprocessed_dir.mkdir(parents=True, exist_ok=True)
+
+    cleaned = pd.read_csv(survey_csv).head(1).copy()
+    cleaned.loc[:, "response_id"] = 901
+    cleaned.to_csv(preprocessed_dir / "cleaned_dataset.csv", index=False)
+
+    translated = pd.read_csv(survey_csv).head(1).copy()
+    translated.loc[:, "response_id"] = 902
+    translated.to_csv(preprocessed_dir / "translated_dataset.csv", index=False)
+
+    result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["source_path"].endswith("preprocessing_outputs/cleaned_dataset.csv")
+
+    sampled_private = pd.read_excel(tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx", sheet_name="sampled_private")
+    assert len(sampled_private) == 1
+    assert int(sampled_private.loc[0, "response_id"]) == 901
+
+
 def test_build_annotation_sample_falls_back_to_survey_when_preprocessed_missing_valence(tmp_path: Path) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"

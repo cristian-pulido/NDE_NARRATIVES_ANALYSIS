@@ -29,6 +29,7 @@ Then edit [`config/paths.local.toml`](config/paths.local.toml):
 - set `[paths].data_dir`
 - set `[paths].survey_csv`
 - confirm or override the derived output folders if needed
+- add optional `[translate]` block for one-time translation to English
 - add the `[preprocessing]` block for one-time cleaning
 - add the `[llm]` and `[[llm.experiments]]` blocks for downstream analysis experiments
 
@@ -46,6 +47,15 @@ Example:
 [paths]
 data_dir = "D:/data/nde"
 survey_csv = "D:/data/nde/results-survey.csv"
+
+[translate]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+model = "qwen3.5:latest"
+prompt_version = "v1"
 
 [preprocessing]
 provider = "ollama"
@@ -84,7 +94,8 @@ temperature = 0.0
 
 Important notes:
 
-- [`nde preprocess`](src/nde_narratives/cli.py:202) is the canonical one-time cleaning step and does not use analysis experiments.
+- `nde translate` is the optional one-time translation step and does not use analysis experiments.
+- [`nde preprocess`](src/nde_narratives/cli.py:202) is the canonical one-time segmentation/validation cleaning step and does not use analysis experiments.
 - `[preprocessing]` should describe the single model configuration used to create the cleaned dataset.
 - `source = "survey"` means the runner uses the survey CSV, not the human annotation sample.
 - If you want to run only the generated validation sample, set `source = "sampled-private"` instead. That makes `run-llm` use `sampled_private_workbook`, which is the same sample used by the human validation workflow.
@@ -120,6 +131,12 @@ nde run-llm --paths-config config/paths.bedrock.toml --all-experiments
 ```
 
 ## 3. Run Preprocessing First
+
+Optional first stage (translation to English with per-record language audit):
+
+```bash
+nde translate
+```
 
 Before running any downstream analysis, generate the cleaned narrative dataset:
 
@@ -186,7 +203,13 @@ Before running the full dataset, execute a tiny subset:
 nde run-llm --experiment-id smoke_qwen08 --limit 2
 ```
 
-If [`cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:504) exists in `preprocessing_output_dir`, [`nde run-llm`](src/nde_narratives/cli.py:402) now uses it automatically when the LLM source is `survey`. In that auto-detected cleaned-dataset path, downstream loading keeps rows based on post-preprocessing validity instead of the raw strict completeness rule: by default it excludes rows with fewer than 3 cleaned sections and excludes rows where `TO_DROP == True`. [`--min-valid-sections`](src/nde_narratives/cli.py:454) still overrides the section threshold when you need a different cutoff:
+When `llm.source = "survey"` and no explicit `--input-path` is passed, [`nde run-llm`](src/nde_narratives/cli.py:402) resolves source priority as:
+
+1. `preprocessing_output_dir/cleaned_dataset.csv`
+2. `preprocessing_output_dir/translated_dataset.csv`
+3. configured `survey_csv`
+
+In auto-detected translated/cleaned paths, downstream loading keeps rows based on post-preprocessing validity metadata when available (and still honors [`--min-valid-sections`](src/nde_narratives/cli.py:454) when provided):
 
 ```bash
 nde run-llm --experiment-id smoke_qwen08 --min-valid-sections 3

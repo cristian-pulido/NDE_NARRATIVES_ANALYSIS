@@ -46,6 +46,19 @@ num_ctx_min = 4096
 num_ctx_max = 16384
 chars_per_token = 4.0
 
+[translate]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+model = "qwen2.5:7b"
+prompt_version = "v1"
+dynamic_context_enabled = true
+num_ctx_min = 4096
+num_ctx_max = 16384
+chars_per_token = 4.0
+
 [[llm.experiments]]
 experiment_id = "qwen25_baseline"
 enabled = true
