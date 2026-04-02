@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
+from textwrap import fill
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -100,192 +102,463 @@ def _load_condition_outputs(spec: ConditionSpec) -> dict[str, Any]:
     }
 
 
-def _figure_pipeline_performance(
+def _figure_family_dumbbell(
     *,
-    coverage_df: pd.DataFrame,
-    global_df: pd.DataFrame,
-    family_delta_df: pd.DataFrame,
+    baseline_contrast_df: pd.DataFrame,
     baseline: str,
     path: Path,
 ) -> None:
-    cov = coverage_df.copy().sort_values("condition").reset_index(drop=True)
-    glob = global_df.copy().sort_values("condition").reset_index(drop=True)
-
-    baseline_records = cov.loc[cov["condition"] == baseline, "n_preprocessed_three_sections_total"]
-    baseline_llm = cov.loc[cov["condition"] == baseline, "n_valid_llm_artifacts"]
-    base_records = float(baseline_records.iloc[0]) if not baseline_records.empty else float("nan")
-    base_llm = float(baseline_llm.iloc[0]) if not baseline_llm.empty else float("nan")
-
-    cov["records_pct_vs_baseline"] = (
-        (cov["n_preprocessed_three_sections_total"] / base_records) * 100.0 if pd.notna(base_records) and base_records else float("nan")
-    )
-    cov["llm_pct_vs_baseline"] = (
-        (cov["n_valid_llm_artifacts"] / base_llm) * 100.0 if pd.notna(base_llm) and base_llm else float("nan")
-    )
-
-    # Family delta aggregation for a compact inference-effect trace on panel B.
-    if family_delta_df.empty:
-        family_delta_mean = pd.DataFrame(columns=["condition", "mean_family_delta"])
-    else:
-        family_delta_mean = (
-            family_delta_df.groupby("condition", as_index=False)["delta_vs_baseline"]
-            .mean()
-            .rename(columns={"delta_vs_baseline": "mean_family_delta"})
+    if baseline_contrast_df.empty:
+        fig, ax = plt.subplots(figsize=(10, 3), constrained_layout=True)
+        ax.axis("off")
+        ax.text(
+            0.5,
+            0.5,
+            "No baseline-family shared model support available for dumbbell figure.",
+            ha="center",
+            va="center",
+            fontsize=11,
         )
+        fig.savefig(path, dpi=220)
+        plt.close(fig)
+        return
 
-    glob = glob.merge(family_delta_mean, on="condition", how="left")
-    glob["mean_family_delta"] = glob["mean_family_delta"].fillna(0.0)
+    def _family_short(label: Any) -> str:
+        text = str(label)
+        lower = text.lower()
+        if "tone" in lower:
+            return "Tone"
+        if "nde-c" in lower or "content of the near-death experience" in lower:
+            return "NDE-C"
+        if "nde-mcq" in lower or "moral cognition" in lower:
+            return "NDE-MCQ"
+        return text
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+    def _condition_short(name: Any) -> str:
+        text = str(name).replace("_", " ").strip()
+        return text
 
-    # Panel A: Pipeline effect (% vs baseline)
-    x = list(range(len(cov)))
-    w = 0.38
-    axes[0].bar(
-        [v - (w / 2.0) for v in x],
-        cov["records_pct_vs_baseline"],
-        width=w,
-        color="#4C78A8",
-        label="Usable records (% vs baseline)",
+    def _compute_xlim(values: pd.Series, *, bounded: tuple[float, float] | None = None) -> tuple[float, float]:
+        numeric = pd.to_numeric(values, errors="coerce").dropna()
+        if numeric.empty:
+            return (0.0, 1.0) if bounded is not None else (-0.5, 0.5)
+        vmin = float(numeric.min())
+        vmax = float(numeric.max())
+        spread = max(vmax - vmin, 1e-9)
+        pad = max(0.015, spread * 0.10)
+        left = vmin - pad
+        right = vmax + pad
+
+        if bounded is not None:
+            lo, hi = bounded
+            left = max(lo, left)
+            right = min(hi, right)
+            min_width = 0.10
+            if right - left < min_width:
+                center = (left + right) / 2.0
+                left = max(lo, center - min_width / 2.0)
+                right = min(hi, center + min_width / 2.0)
+                if right - left < min_width:
+                    # Edge case when centered expansion hits both bounds.
+                    if abs(left - lo) < 1e-9:
+                        right = min(hi, lo + min_width)
+                    else:
+                        left = max(lo, hi - min_width)
+        return left, right
+
+    plot_df = baseline_contrast_df.copy()
+    plot_df["family_short"] = plot_df["family_label"].apply(_family_short)
+    plot_df["condition_short"] = plot_df["condition"].apply(_condition_short)
+    plot_df["label_raw"] = plot_df["family_short"]
+    plot_df = plot_df.sort_values(["family_label", "condition"]).reset_index(drop=True)
+
+    n_rows = len(plot_df)
+    n_conditions = int(plot_df["condition"].nunique()) if "condition" in plot_df.columns else 1
+    max_label_len = max((len(str(value)) for value in plot_df["label_raw"].tolist()), default=18)
+
+    # Adaptive wrapping and typography so the same code scales from 2 to many conditions.
+    wrap_width = 16 if n_conditions <= 3 else 18 if n_conditions <= 5 else 20
+    plot_df["label"] = plot_df["label_raw"].apply(
+        lambda value: fill(str(value), width=wrap_width, break_long_words=False, break_on_hyphens=False)
     )
-    axes[0].bar(
-        [v + (w / 2.0) for v in x],
-        cov["llm_pct_vs_baseline"],
-        width=w,
-        color="#F58518",
-        label="Valid LLM artifacts (% vs baseline)",
+
+    # Shrink whitespace for small comparisons, expand only when rows genuinely increase.
+    row_height = 0.31 if n_rows <= 12 else 0.29 if n_rows <= 22 else 0.27
+    height = max(3.9, row_height * n_rows + 1.55)
+
+    # Left margin needs to follow wrapped label complexity.
+    fig_width = 9.2 if max_label_len <= 18 else 9.8 if max_label_len <= 30 else 10.4
+
+    title_fs = 12 if n_rows <= 22 else 11
+    label_fs = 11
+    tick_fs = 9 if n_rows <= 18 else 8
+    ytick_fs = 9 if n_rows <= 14 else 8 if n_rows <= 24 else 7
+    marker_size = 34 if n_rows <= 22 else 30
+
+    y = list(range(len(plot_df)))
+
+    # Condition-specific color mapping so each pipeline is visually distinct.
+    unique_conditions = list(plot_df["condition"].dropna().unique())
+    palette = [
+        "#E45756",
+        "#72B7B2",
+        "#F58518",
+        "#54A24B",
+        "#B279A2",
+        "#EECA3B",
+        "#4C78A8",
+        "#FF9DA6",
+    ]
+    condition_colors = {cond: palette[idx % len(palette)] for idx, cond in enumerate(unique_conditions)}
+
+    macro_xlim = _compute_xlim(
+        pd.concat([plot_df["baseline_macro_f1"], plot_df["condition_macro_f1"]], axis=0),
+        bounded=(0.0, 1.0),
     )
-    axes[0].axhline(100.0, color="black", linestyle="--", linewidth=1.0, alpha=0.6)
-    axes[0].set_xticks(x)
-    axes[0].set_xticklabels(cov["condition"], rotation=30, ha="right")
-    axes[0].set_ylabel("% of baseline")
-    axes[0].set_title("Panel A — Pipeline coverage effect")
-    axes[0].legend(loc="upper right", fontsize=8)
-
-    # Panel B: Performance + mean family deltas
-    x2 = list(range(len(glob)))
-    axes[1].bar(x2, glob["macro_f1_mean"], color="#54A24B", alpha=0.9, label="Global Macro F1")
-    axes[1].set_xticks(x2)
-    axes[1].set_xticklabels(glob["condition"], rotation=30, ha="right")
-    axes[1].set_ylabel("Macro F1 (all-available summary)")
-    axes[1].set_title("Panel B — Inference outcome effect")
-
-    ax2 = axes[1].twinx()
-    ax2.plot(
-        x2,
-        glob["mean_family_delta"],
-        color="#E45756",
-        marker="o",
-        linewidth=2.0,
-        label="Mean family Δ vs baseline",
+    kappa_xlim = _compute_xlim(
+        pd.concat([plot_df["baseline_cohen_kappa"], plot_df["condition_cohen_kappa"]], axis=0),
+        bounded=(-1.0, 1.0),
     )
-    ax2.axhline(0.0, color="#E45756", linestyle="--", linewidth=1.0, alpha=0.6)
-    ax2.set_ylabel("Mean family Δ Macro F1 vs baseline")
 
-    handles_left, labels_left = axes[1].get_legend_handles_labels()
-    handles_right, labels_right = ax2.get_legend_handles_labels()
-    axes[1].legend(handles_left + handles_right, labels_left + labels_right, loc="upper right", fontsize=8)
+    fig, axes = plt.subplots(1, 2, figsize=(fig_width, height), sharey=True, constrained_layout=True)
 
+    # Panel A: Macro F1
+    for idx, row in plot_df.reset_index(drop=True).iterrows():
+        c = condition_colors.get(row["condition"], "#E45756")
+        axes[0].hlines(
+            y[idx],
+            row["baseline_macro_f1"],
+            row["condition_macro_f1"],
+            color=c,
+            linewidth=1.6,
+            alpha=0.55,
+        )
+        axes[0].scatter(row["baseline_macro_f1"], y[idx], color="#5B5B5B", s=marker_size, zorder=3)
+        axes[0].scatter(row["condition_macro_f1"], y[idx], color=c, s=marker_size, zorder=3)
+    axes[0].set_title("Family Macro F1", fontsize=title_fs)
+    axes[0].set_xlabel("Macro F1", fontsize=label_fs)
+    axes[0].set_xlim(*macro_xlim)
+    axes[0].grid(axis="x", alpha=0.25)
+
+    # Panel B: Cohen's kappa
+    for idx, row in plot_df.reset_index(drop=True).iterrows():
+        c = condition_colors.get(row["condition"], "#E45756")
+        axes[1].hlines(
+            y[idx],
+            row["baseline_cohen_kappa"],
+            row["condition_cohen_kappa"],
+            color=c,
+            linewidth=1.6,
+            alpha=0.55,
+        )
+        axes[1].scatter(row["baseline_cohen_kappa"], y[idx], color="#5B5B5B", s=marker_size, zorder=3)
+        axes[1].scatter(row["condition_cohen_kappa"], y[idx], color=c, s=marker_size, zorder=3)
+    axes[1].axvline(0.0, linestyle="--", linewidth=1.0, color="#666", alpha=0.7)
+    axes[1].set_title("Family Cohen's kappa", fontsize=title_fs)
+    axes[1].set_xlabel("Cohen's kappa", fontsize=label_fs)
+    axes[1].set_xlim(*kappa_xlim)
+    axes[1].grid(axis="x", alpha=0.25)
+
+    axes[0].set_yticks(y)
+    axes[0].set_yticklabels(plot_df["label"])
+    axes[0].invert_yaxis()
+    axes[1].set_yticks(y)
+    axes[1].set_yticklabels(plot_df["label"])
+
+    for axis in axes:
+        axis.tick_params(axis="x", labelsize=tick_fs)
+        axis.tick_params(axis="y", labelsize=ytick_fs)
+
+    # Compact but readable placement; avoids large blank area on small matrices.
+    fig.set_constrained_layout_pads(w_pad=0.01, h_pad=0.01, hspace=0.01, wspace=0.02)
+
+    # Compact legend: baseline plus one entry per condition.
+    legend_handles = [
+        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="#5B5B5B", markersize=6, label=f"{baseline} (baseline)"),
+    ]
+    legend_handles.extend(
+        [
+            plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=color, markersize=6, label=_condition_short(cond))
+            for cond, color in condition_colors.items()
+        ]
+    )
+    axes[0].legend(
+        handles=legend_handles,
+        loc="lower right",
+        fontsize=7 if n_rows <= 24 else 6,
+        frameon=True,
+        borderpad=0.4,
+        labelspacing=0.3,
+        handletextpad=0.4,
+    )
     fig.savefig(path, dpi=220)
     plt.close(fig)
 
 
-def _shared_item_deltas(
+def _pairwise_item_deltas(
     all_metrics_df: pd.DataFrame,
     *,
     focus_scope: str,
-    metric_col: str,
-    baseline: str,
     conditions: list[str],
 ) -> pd.DataFrame:
     df = all_metrics_df.copy()
     df = df[df["scope"] == focus_scope]
-    df = df[df[metric_col].notna()]
     df = df[df["model_variant"].notna()]
-
     if df.empty:
         return pd.DataFrame(
             columns=[
+                "condition_a",
+                "condition_b",
                 "model_variant",
                 "field",
-                "condition",
-                "value",
-                "n",
-                "baseline_value",
-                "delta_vs_baseline",
+                "n_a",
+                "n_b",
+                "macro_f1_a",
+                "macro_f1_b",
+                "delta_macro_f1",
+                "cohen_kappa_a",
+                "cohen_kappa_b",
+                "delta_cohen_kappa",
             ]
         )
 
-    key_counts = (
-        df[["model_variant", "field", "condition"]]
-        .drop_duplicates()
-        .groupby(["model_variant", "field"], as_index=False)["condition"]
-        .nunique()
-        .rename(columns={"condition": "n_conditions"})
-    )
-    shared_keys = key_counts[key_counts["n_conditions"] == len(conditions)][["model_variant", "field"]]
-    if shared_keys.empty:
+    rows: list[pd.DataFrame] = []
+    for condition_a, condition_b in combinations(conditions, 2):
+        left = (
+            df[df["condition"] == condition_a][["model_variant", "field", "n", "macro_f1", "cohen_kappa"]]
+            .rename(columns={"n": "n_a", "macro_f1": "macro_f1_a", "cohen_kappa": "cohen_kappa_a"})
+            .drop_duplicates(subset=["model_variant", "field"], keep="last")
+        )
+        right = (
+            df[df["condition"] == condition_b][["model_variant", "field", "n", "macro_f1", "cohen_kappa"]]
+            .rename(columns={"n": "n_b", "macro_f1": "macro_f1_b", "cohen_kappa": "cohen_kappa_b"})
+            .drop_duplicates(subset=["model_variant", "field"], keep="last")
+        )
+        merged = left.merge(right, on=["model_variant", "field"], how="inner")
+        if merged.empty:
+            continue
+        merged["condition_a"] = condition_a
+        merged["condition_b"] = condition_b
+        merged["delta_macro_f1"] = merged["macro_f1_b"] - merged["macro_f1_a"]
+        merged["delta_cohen_kappa"] = merged["cohen_kappa_b"] - merged["cohen_kappa_a"]
+        rows.append(merged)
+
+    if not rows:
         return pd.DataFrame(
             columns=[
+                "condition_a",
+                "condition_b",
                 "model_variant",
                 "field",
-                "condition",
-                "value",
-                "n",
-                "baseline_value",
-                "delta_vs_baseline",
+                "n_a",
+                "n_b",
+                "macro_f1_a",
+                "macro_f1_b",
+                "delta_macro_f1",
+                "cohen_kappa_a",
+                "cohen_kappa_b",
+                "delta_cohen_kappa",
             ]
         )
 
-    shared_df = df.merge(shared_keys, on=["model_variant", "field"], how="inner")
-    shared_df = shared_df[["model_variant", "field", "condition", metric_col, "n"]].rename(columns={metric_col: "value"})
-
-    baseline_map = (
-        shared_df[shared_df["condition"] == baseline][["model_variant", "field", "value"]]
-        .rename(columns={"value": "baseline_value"})
-        .drop_duplicates()
-    )
-    shared_df = shared_df.merge(baseline_map, on=["model_variant", "field"], how="left")
-    shared_df["delta_vs_baseline"] = shared_df["value"] - shared_df["baseline_value"]
-    return shared_df.sort_values(["model_variant", "field", "condition"]).reset_index(drop=True)
+    out = pd.concat(rows, ignore_index=True)
+    return out.sort_values(["condition_a", "condition_b", "model_variant", "field"]).reset_index(drop=True)
 
 
-def _shared_family_deltas(
+def _pairwise_family_deltas(
     all_family_df: pd.DataFrame,
     *,
+    focus_scope: str,
+    conditions: list[str],
+) -> pd.DataFrame:
+    df = all_family_df.copy()
+    df = df[(df["scope"] == focus_scope) & (df["model_key"].notna())]
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "condition_a",
+                "condition_b",
+                "model_key",
+                "family_label",
+                "macro_f1_a",
+                "macro_f1_b",
+                "delta_macro_f1",
+                "cohen_kappa_a",
+                "cohen_kappa_b",
+                "delta_cohen_kappa",
+                "n_a",
+                "n_b",
+            ]
+        )
+
+    rows: list[pd.DataFrame] = []
+    for condition_a, condition_b in combinations(conditions, 2):
+        left = (
+            df[df["condition"] == condition_a][
+                ["model_key", "family_label", "macro_f1_mean", "cohen_kappa_mean", "n_mean"]
+            ]
+            .rename(
+                columns={
+                    "macro_f1_mean": "macro_f1_a",
+                    "cohen_kappa_mean": "cohen_kappa_a",
+                    "n_mean": "n_a",
+                }
+            )
+            .drop_duplicates(subset=["model_key", "family_label"], keep="last")
+        )
+        right = (
+            df[df["condition"] == condition_b][
+                ["model_key", "family_label", "macro_f1_mean", "cohen_kappa_mean", "n_mean"]
+            ]
+            .rename(
+                columns={
+                    "macro_f1_mean": "macro_f1_b",
+                    "cohen_kappa_mean": "cohen_kappa_b",
+                    "n_mean": "n_b",
+                }
+            )
+            .drop_duplicates(subset=["model_key", "family_label"], keep="last")
+        )
+        merged = left.merge(right, on=["model_key", "family_label"], how="inner")
+        if merged.empty:
+            continue
+        merged["condition_a"] = condition_a
+        merged["condition_b"] = condition_b
+        merged["delta_macro_f1"] = merged["macro_f1_b"] - merged["macro_f1_a"]
+        merged["delta_cohen_kappa"] = merged["cohen_kappa_b"] - merged["cohen_kappa_a"]
+        rows.append(merged)
+
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "condition_a",
+                "condition_b",
+                "model_key",
+                "family_label",
+                "macro_f1_a",
+                "macro_f1_b",
+                "delta_macro_f1",
+                "cohen_kappa_a",
+                "cohen_kappa_b",
+                "delta_cohen_kappa",
+                "n_a",
+                "n_b",
+            ]
+        )
+
+    out = pd.concat(rows, ignore_index=True)
+    return out.sort_values(["condition_a", "condition_b", "model_key", "family_label"]).reset_index(drop=True)
+
+
+def _pairwise_global_deltas(global_df: pd.DataFrame) -> pd.DataFrame:
+    if global_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "condition_a",
+                "condition_b",
+                "macro_f1_mean_a",
+                "macro_f1_mean_b",
+                "delta_macro_f1",
+                "cohen_kappa_mean_a",
+                "cohen_kappa_mean_b",
+                "delta_cohen_kappa",
+            ]
+        )
+
+    rows: list[dict[str, Any]] = []
+    indexed = global_df.set_index("condition")
+    for condition_a, condition_b in combinations(indexed.index.tolist(), 2):
+        a = indexed.loc[condition_a]
+        b = indexed.loc[condition_b]
+        rows.append(
+            {
+                "condition_a": condition_a,
+                "condition_b": condition_b,
+                "macro_f1_mean_a": a.get("macro_f1_mean"),
+                "macro_f1_mean_b": b.get("macro_f1_mean"),
+                "delta_macro_f1": b.get("macro_f1_mean") - a.get("macro_f1_mean"),
+                "cohen_kappa_mean_a": a.get("cohen_kappa_mean"),
+                "cohen_kappa_mean_b": b.get("cohen_kappa_mean"),
+                "delta_cohen_kappa": b.get("cohen_kappa_mean") - a.get("cohen_kappa_mean"),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _baseline_family_contrast(
+    *,
+    all_family_df: pd.DataFrame,
     focus_scope: str,
     baseline: str,
     conditions: list[str],
 ) -> pd.DataFrame:
     df = all_family_df.copy()
-    df = df[(df["scope"] == focus_scope) & (df["macro_f1_mean"].notna()) & (df["model_key"].notna())]
-    if df.empty:
+    df = df[(df["scope"] == focus_scope) & (df["model_key"].notna())]
+    if df.empty or baseline not in conditions:
         return pd.DataFrame(
-            columns=["model_key", "family_label", "condition", "macro_f1_mean", "baseline_value", "delta_vs_baseline"]
+            columns=[
+                "condition",
+                "family_label",
+                "shared_models",
+                "baseline_macro_f1",
+                "condition_macro_f1",
+                "delta_macro_f1",
+                "baseline_cohen_kappa",
+                "condition_cohen_kappa",
+                "delta_cohen_kappa",
+            ]
         )
 
-    key_counts = (
-        df[["model_key", "family_label", "condition"]]
-        .drop_duplicates()
-        .groupby(["model_key", "family_label"], as_index=False)["condition"]
-        .nunique()
-        .rename(columns={"condition": "n_conditions"})
+    baseline_df = (
+        df[df["condition"] == baseline][["model_key", "family_label", "macro_f1_mean", "cohen_kappa_mean"]]
+        .rename(columns={"macro_f1_mean": "baseline_macro_f1", "cohen_kappa_mean": "baseline_cohen_kappa"})
+        .drop_duplicates(subset=["model_key", "family_label"], keep="last")
     )
-    shared_keys = key_counts[key_counts["n_conditions"] == len(conditions)][["model_key", "family_label"]]
-    if shared_keys.empty:
+
+    rows: list[pd.DataFrame] = []
+    for condition in conditions:
+        if condition == baseline:
+            continue
+        condition_df = (
+            df[df["condition"] == condition][["model_key", "family_label", "macro_f1_mean", "cohen_kappa_mean"]]
+            .rename(columns={"macro_f1_mean": "condition_macro_f1", "cohen_kappa_mean": "condition_cohen_kappa"})
+            .drop_duplicates(subset=["model_key", "family_label"], keep="last")
+        )
+        merged = baseline_df.merge(condition_df, on=["model_key", "family_label"], how="inner")
+        if merged.empty:
+            continue
+        grouped = (
+            merged.groupby("family_label", as_index=False)
+            .agg(
+                shared_models=("model_key", "nunique"),
+                baseline_macro_f1=("baseline_macro_f1", "mean"),
+                condition_macro_f1=("condition_macro_f1", "mean"),
+                baseline_cohen_kappa=("baseline_cohen_kappa", "mean"),
+                condition_cohen_kappa=("condition_cohen_kappa", "mean"),
+            )
+            .assign(condition=condition)
+        )
+        grouped["delta_macro_f1"] = grouped["condition_macro_f1"] - grouped["baseline_macro_f1"]
+        grouped["delta_cohen_kappa"] = grouped["condition_cohen_kappa"] - grouped["baseline_cohen_kappa"]
+        rows.append(grouped)
+
+    if not rows:
         return pd.DataFrame(
-            columns=["model_key", "family_label", "condition", "macro_f1_mean", "baseline_value", "delta_vs_baseline"]
+            columns=[
+                "condition",
+                "family_label",
+                "shared_models",
+                "baseline_macro_f1",
+                "condition_macro_f1",
+                "delta_macro_f1",
+                "baseline_cohen_kappa",
+                "condition_cohen_kappa",
+                "delta_cohen_kappa",
+            ]
         )
 
-    shared_df = df.merge(shared_keys, on=["model_key", "family_label"], how="inner")
-    baseline_map = (
-        shared_df[shared_df["condition"] == baseline][["model_key", "family_label", "macro_f1_mean"]]
-        .rename(columns={"macro_f1_mean": "baseline_value"})
-        .drop_duplicates()
-    )
-    shared_df = shared_df.merge(baseline_map, on=["model_key", "family_label"], how="left")
-    shared_df["delta_vs_baseline"] = shared_df["macro_f1_mean"] - shared_df["baseline_value"]
-    return shared_df.sort_values(["model_key", "family_label", "condition"]).reset_index(drop=True)
+    return pd.concat(rows, ignore_index=True).sort_values(["family_label", "condition"]).reset_index(drop=True)
 
 
 def _write_report(
@@ -297,8 +570,11 @@ def _write_report(
     conditions: list[ConditionSpec],
     coverage_df: pd.DataFrame,
     global_df: pd.DataFrame,
-    item_delta_df: pd.DataFrame,
-    family_delta_df: pd.DataFrame,
+    pairwise_global_df: pd.DataFrame,
+    family_summary_df: pd.DataFrame,
+    pairwise_item_df: pd.DataFrame,
+    pairwise_family_df: pd.DataFrame,
+    baseline_family_contrast_df: pd.DataFrame,
 ) -> None:
     lines: list[str] = []
     lines.append(f"# {title}")
@@ -316,11 +592,11 @@ def _write_report(
     lines.append("")
     lines.append("## Methodological guardrails")
     lines.append("")
-    lines.append("- Two views are reported: (1) all-available summaries and (2) fair-intersection deltas.")
+    lines.append("- Two views are reported: (1) all-available summaries and (2) fair-intersection paired deltas.")
     lines.append(
-        "- Fair-intersection deltas only compare model/field (or model/family) keys present in **all** conditions to avoid confounding from missing models or differing field coverage."
+        "- Pairwise deltas are computed on shared keys per condition pair (model+field for item-level and model+family for family-level) to avoid confounding from unequal model sets or missing outputs."
     )
-    lines.append("- Deltas are computed against the baseline condition shown below.")
+    lines.append("- The report remains fully pairwise, while the narrative emphasis remains baseline vs translate-run style contrasts.")
     lines.append("")
     lines.append(f"**Baseline condition:** `{baseline}`")
     lines.append("")
@@ -330,58 +606,85 @@ def _write_report(
     lines.append("")
     lines.append(_dataframe_to_markdown(coverage_df))
     lines.append("")
-    lines.append("## Combined figure (pipeline vs inference)")
+    lines.append("## Primary figure (family dumbbell, dual metrics)")
     lines.append("")
     lines.append(
-        "Panel A shows coverage change induced by preprocessing (usable records and valid LLM artifacts, normalized to baseline = 100%). "
-        "Panel B shows outcome change (global Macro F1 bars) and mean family-level deltas vs baseline (line)."
+        "Each row compares baseline vs one condition within a family, with paired points connected by a dumbbell segment. "
+        "Panel A reports Macro F1 and Panel B reports Cohen's kappa."
     )
     lines.append("")
-    lines.append("![Pipeline vs inference composite](figures/pipeline_performance_composite.png)")
+    lines.append("![Family dumbbell dual metric](figures/family_dumbbell_dual_metric.png)")
     lines.append("")
-    lines.append("## Global comparison summary")
+    lines.append("## Global comparison summary (all-available)")
     lines.append("")
     lines.append(_dataframe_to_markdown(global_df))
     lines.append("")
-    lines.append("## Fair-intersection deltas (model x field)")
+    lines.append("## Global pairwise deltas (condition B − condition A)")
     lines.append("")
-    if item_delta_df.empty:
-        lines.append("No shared model+field keys were available across all conditions for the selected scope.")
+    if pairwise_global_df.empty:
+        lines.append("No global pairwise deltas were available.")
     else:
-        agg_item = (
-            item_delta_df.groupby("condition", as_index=False)["delta_vs_baseline"]
-            .mean()
-            .rename(columns={"delta_vs_baseline": "mean_delta_macro_f1"})
-        )
-        lines.append(_dataframe_to_markdown(agg_item))
+        lines.append(_dataframe_to_markdown(pairwise_global_df))
     lines.append("")
-    lines.append("## Fair-intersection deltas (model x family)")
+    lines.append("## Family summary (all-available)")
     lines.append("")
-    if family_delta_df.empty:
-        lines.append("No shared model+family keys were available across all conditions for the selected scope.")
+    if family_summary_df.empty:
+        lines.append("No family summary rows were available.")
     else:
-        agg_family = (
-            family_delta_df.groupby(["family_label", "condition"], as_index=False)["delta_vs_baseline"]
-            .mean()
+        lines.append(_dataframe_to_markdown(family_summary_df))
+    lines.append("")
+    lines.append("## Family pairwise deltas (paired fair-intersection)")
+    lines.append("")
+    if pairwise_family_df.empty:
+        lines.append("No shared model+family support was available across condition pairs.")
+    else:
+        family_pair_summary = (
+            pairwise_family_df.groupby(["condition_a", "condition_b", "family_label"], as_index=False)
+            .agg(
+                shared_models=("model_key", "nunique"),
+                delta_macro_f1_mean=("delta_macro_f1", "mean"),
+                delta_cohen_kappa_mean=("delta_cohen_kappa", "mean"),
+            )
+            .sort_values(["condition_a", "condition_b", "family_label"])
         )
-        lines.append(_dataframe_to_markdown(agg_family))
+        lines.append(_dataframe_to_markdown(family_pair_summary))
+    lines.append("")
+    lines.append("## Item pairwise deltas (paired fair-intersection)")
+    lines.append("")
+    if pairwise_item_df.empty:
+        lines.append("No shared model+field support was available across condition pairs.")
+    else:
+        item_pair_summary = (
+            pairwise_item_df.groupby(["condition_a", "condition_b"], as_index=False)
+            .agg(
+                shared_model_fields=("field", "count"),
+                delta_macro_f1_mean=("delta_macro_f1", "mean"),
+                delta_cohen_kappa_mean=("delta_cohen_kappa", "mean"),
+            )
+            .sort_values(["condition_a", "condition_b"])
+        )
+        lines.append(_dataframe_to_markdown(item_pair_summary))
+    lines.append("")
+    lines.append("## Baseline-focused family contrast")
+    lines.append("")
+    if baseline_family_contrast_df.empty:
+        lines.append("No baseline family contrast rows were available.")
+    else:
+        lines.append(_dataframe_to_markdown(baseline_family_contrast_df))
     lines.append("")
     lines.append("## Interpretation notes")
     lines.append("")
     lines.append(
-        "- Pipeline effects are read first (Panel A): large shifts in usable rows or artifact validity indicate preprocessing-induced evaluation frame changes."
+        "- Prioritize pairwise fair-intersection deltas for methodological claims when conditions differ in sample size, accepted models, or valid sections."
     )
     lines.append(
-        "- Inference effects are read second (Panel B): differences in Macro F1 and family deltas after controlling for baseline indicate model-behavior changes under the available evidence frame."
+        "- Read Macro F1 and Cohen's kappa together: F1 tracks label balance-sensitive agreement, while kappa discounts chance agreement and is stricter under class imbalance."
     )
     lines.append(
-        "- Positive delta means the condition improved Macro F1 relative to baseline under fair intersection constraints."
+        "- A positive pairwise delta means condition B outperforms condition A for the same shared support; a negative delta indicates degradation."
     )
     lines.append(
-        "- Negative delta means the condition reduced Macro F1 relative to baseline for the same shared model-field support."
-    )
-    lines.append(
-        "- When coverage differs strongly between conditions, prioritize fair-intersection deltas over all-available summaries for causal interpretation."
+        "- Baseline-vs-translate-run interpretations should be drawn from the baseline-focused family contrast table and dumbbell figure, while retaining all-pairs tables for methodological completeness."
     )
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -426,15 +729,26 @@ def compare_evaluation_outputs(
         .sort_values("condition")
     )
 
-    item_delta_df = _shared_item_deltas(
+    family_summary_df = (
+        all_family_df[all_family_df["scope"] == focus_scope]
+        .groupby("condition", as_index=False)[["accuracy_mean", "cohen_kappa_mean", "macro_f1_mean", "field_count", "n_mean"]]
+        .mean()
+        .sort_values("condition")
+    )
+
+    pairwise_item_df = _pairwise_item_deltas(
         all_metrics_df,
         focus_scope=focus_scope,
-        metric_col=metric_col,
-        baseline=baseline_name,
         conditions=condition_names,
     )
-    family_delta_df = _shared_family_deltas(
+    pairwise_family_df = _pairwise_family_deltas(
         all_family_df,
+        focus_scope=focus_scope,
+        conditions=condition_names,
+    )
+    pairwise_global_df = _pairwise_global_deltas(global_df)
+    baseline_family_contrast_df = _baseline_family_contrast(
+        all_family_df=all_family_df,
         focus_scope=focus_scope,
         baseline=baseline_name,
         conditions=condition_names,
@@ -442,26 +756,27 @@ def compare_evaluation_outputs(
 
     coverage_csv = output_dir / "coverage_comparison.csv"
     global_csv = output_dir / "global_comparison_summary.csv"
-    family_csv = output_dir / "family_comparison_summary.csv"
-    item_delta_csv = output_dir / "shared_model_field_deltas.csv"
-    family_delta_csv = output_dir / "shared_model_family_deltas.csv"
+    family_csv = output_dir / "family_scope_summary.csv"
+    pairwise_global_csv = output_dir / "pairwise_global_deltas.csv"
+    pairwise_item_csv = output_dir / "pairwise_model_field_deltas.csv"
+    pairwise_family_csv = output_dir / "pairwise_model_family_deltas.csv"
+    baseline_family_csv = output_dir / "baseline_family_contrast.csv"
     report_md = output_dir / "preprocessing_effect_report.md"
 
     coverage_df.to_csv(coverage_csv, index=False)
     global_df.to_csv(global_csv, index=False)
-    all_family_df.to_csv(family_csv, index=False)
-    item_delta_df.to_csv(item_delta_csv, index=False)
-    family_delta_df.to_csv(family_delta_csv, index=False)
+    family_summary_df.to_csv(family_csv, index=False)
+    pairwise_global_df.to_csv(pairwise_global_csv, index=False)
+    pairwise_item_df.to_csv(pairwise_item_csv, index=False)
+    pairwise_family_df.to_csv(pairwise_family_csv, index=False)
+    baseline_family_contrast_df.to_csv(baseline_family_csv, index=False)
 
-    composite_fig = figures_dir / "pipeline_performance_composite.png"
-    if not global_df.empty:
-        _figure_pipeline_performance(
-            coverage_df=coverage_df,
-            global_df=global_df,
-            family_delta_df=family_delta_df,
-            baseline=baseline_name,
-            path=composite_fig,
-        )
+    dumbbell_fig = figures_dir / "family_dumbbell_dual_metric.png"
+    _figure_family_dumbbell(
+        baseline_contrast_df=baseline_family_contrast_df,
+        baseline=baseline_name,
+        path=dumbbell_fig,
+    )
 
     _write_report(
         report_path=report_md,
@@ -471,8 +786,11 @@ def compare_evaluation_outputs(
         conditions=conditions,
         coverage_df=coverage_df,
         global_df=global_df,
-        item_delta_df=item_delta_df,
-        family_delta_df=family_delta_df,
+        pairwise_global_df=pairwise_global_df,
+        family_summary_df=family_summary_df,
+        pairwise_item_df=pairwise_item_df,
+        pairwise_family_df=pairwise_family_df,
+        baseline_family_contrast_df=baseline_family_contrast_df,
     )
 
     return {
@@ -480,9 +798,11 @@ def compare_evaluation_outputs(
         "coverage_csv": str(coverage_csv),
         "global_csv": str(global_csv),
         "family_csv": str(family_csv),
-        "item_delta_csv": str(item_delta_csv),
-        "family_delta_csv": str(family_delta_csv),
-        "composite_figure": str(composite_fig),
+        "pairwise_global_csv": str(pairwise_global_csv),
+        "pairwise_item_csv": str(pairwise_item_csv),
+        "pairwise_family_csv": str(pairwise_family_csv),
+        "baseline_family_csv": str(baseline_family_csv),
+        "dumbbell_figure": str(dumbbell_fig),
     }
 
 
