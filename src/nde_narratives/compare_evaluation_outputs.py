@@ -18,6 +18,11 @@ class ConditionSpec:
     path: Path
 
 
+def _save_figure_png_pdf(fig: plt.Figure, path: Path, *, dpi: int = 220) -> None:
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+
+
 def _escape_markdown_cell(value: Any) -> str:
     if pd.isna(value):
         return ""
@@ -119,7 +124,7 @@ def _figure_family_dumbbell(
             va="center",
             fontsize=11,
         )
-        fig.savefig(path, dpi=220)
+        _save_figure_png_pdf(fig, path, dpi=220)
         plt.close(fig)
         return
 
@@ -291,7 +296,7 @@ def _figure_family_dumbbell(
         labelspacing=0.3,
         handletextpad=0.4,
     )
-    fig.savefig(path, dpi=220)
+    _save_figure_png_pdf(fig, path, dpi=220)
     plt.close(fig)
 
 
@@ -614,6 +619,7 @@ def _write_report(
     )
     lines.append("")
     lines.append("![Family dumbbell dual metric](figures/family_dumbbell_dual_metric.png)")
+    lines.append("[Family dumbbell dual metric (PDF)](figures/family_dumbbell_dual_metric.pdf)")
     lines.append("")
     lines.append("## Global comparison summary (all-available)")
     lines.append("")
@@ -803,6 +809,7 @@ def compare_evaluation_outputs(
         "pairwise_family_csv": str(pairwise_family_csv),
         "baseline_family_csv": str(baseline_family_csv),
         "dumbbell_figure": str(dumbbell_fig),
+        "dumbbell_figure_pdf": str(dumbbell_fig.with_suffix(".pdf")),
     }
 
 
