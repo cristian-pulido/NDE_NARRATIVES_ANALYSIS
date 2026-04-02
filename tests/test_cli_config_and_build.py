@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -17,7 +17,13 @@ def test_validate_config_passes_with_synthetic_fixture(tmp_path: Path) -> None:
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
 
-    result = run_cli("validate-config", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    result = run_cli(
+        "validate-config",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
 
     assert result.returncode == 0, result.stderr
     assert "Configuration valid." in result.stdout
@@ -77,12 +83,22 @@ def test_build_annotation_sample_creates_workbooks(tmp_path: Path) -> None:
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
 
-    result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
 
     assert result.returncode == 0, result.stderr
     annotation_workbook = tmp_path / "annotation_outputs" / "nde_annotation_sample.xlsx"
-    mapping_workbook = tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
-    column_map_workbook = tmp_path / "annotation_outputs" / "nde_annotation_column_mapping_private.xlsx"
+    mapping_workbook = (
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    )
+    column_map_workbook = (
+        tmp_path / "annotation_outputs" / "nde_annotation_column_mapping_private.xlsx"
+    )
 
     assert annotation_workbook.exists()
     assert mapping_workbook.exists()
@@ -101,21 +117,37 @@ def test_build_annotation_sample_creates_workbooks(tmp_path: Path) -> None:
     assert "participant_code" in sampled_private.columns
 
 
-def test_build_annotation_sample_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
+def test_build_annotation_sample_refuses_to_overwrite_without_force(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
 
-    first_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    first_result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
     assert first_result.returncode == 0, first_result.stderr
 
-    second_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    second_result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
 
     assert second_result.returncode == 1
     assert "Refusing to overwrite existing annotation artifacts" in second_result.stderr
 
 
-def test_build_annotation_sample_prefers_preprocessed_dataset_when_available(tmp_path: Path) -> None:
+def test_build_annotation_sample_prefers_preprocessed_dataset_when_available(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
@@ -131,18 +163,29 @@ def test_build_annotation_sample_prefers_preprocessed_dataset_when_available(tmp
         one_row = one_row.drop(columns=["m11_quality_label"])
     one_row.to_csv(preprocessed_csv, index=False)
 
-    result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["source_path"].endswith("preprocessing_outputs/cleaned_dataset.csv")
 
-    sampled_private = pd.read_excel(tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx", sheet_name="sampled_private")
+    sampled_private = pd.read_excel(
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx",
+        sheet_name="sampled_private",
+    )
     assert len(sampled_private) == 1
     assert int(sampled_private.loc[0, "response_id"]) == 999
 
 
-def test_build_annotation_sample_prefers_preprocessed_dataset_over_translated(tmp_path: Path) -> None:
+def test_build_annotation_sample_prefers_preprocessed_dataset_over_translated(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
@@ -158,18 +201,29 @@ def test_build_annotation_sample_prefers_preprocessed_dataset_over_translated(tm
     translated.loc[:, "response_id"] = 902
     translated.to_csv(preprocessed_dir / "translated_dataset.csv", index=False)
 
-    result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["source_path"].endswith("preprocessing_outputs/cleaned_dataset.csv")
 
-    sampled_private = pd.read_excel(tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx", sheet_name="sampled_private")
+    sampled_private = pd.read_excel(
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx",
+        sheet_name="sampled_private",
+    )
     assert len(sampled_private) == 1
     assert int(sampled_private.loc[0, "response_id"]) == 901
 
 
-def test_build_annotation_sample_falls_back_to_survey_when_preprocessed_missing_valence(tmp_path: Path) -> None:
+def test_build_annotation_sample_falls_back_to_survey_when_preprocessed_missing_valence(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
@@ -182,22 +236,39 @@ def test_build_annotation_sample_falls_back_to_survey_when_preprocessed_missing_
     broken = source.head(1).copy().drop(columns=["valence"])
     broken.to_csv(preprocessed_csv, index=False)
 
-    result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["source_path"].endswith("survey_fixture.csv")
 
-    sampled_private = pd.read_excel(tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx", sheet_name="sampled_private")
+    sampled_private = pd.read_excel(
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx",
+        sheet_name="sampled_private",
+    )
     assert len(sampled_private) == 3
 
 
-def test_build_llm_batch_writes_experiment_directory_and_manifest(tmp_path: Path) -> None:
+def test_build_llm_batch_writes_experiment_directory_and_manifest(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
 
-    run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
     result = run_cli(
         "build-llm-batch",
         "--study-config",
@@ -225,10 +296,17 @@ def test_build_llm_batch_writes_experiment_directory_and_manifest(tmp_path: Path
     for section in ("context", "experience", "aftereffects"):
         batch_path = batch_dir / f"{section}_batch.jsonl"
         assert batch_path.exists()
-        records = [json.loads(line) for line in batch_path.read_text(encoding="utf-8").splitlines() if line]
+        records = [
+            json.loads(line)
+            for line in batch_path.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
         assert len(records) == 3
         assert {record["section"] for record in records} == {section}
-        assert all(record["experiment"]["artifact_id"] == "exp-alpha__run-01" for record in records)
+        assert all(
+            record["experiment"]["artifact_id"] == "exp-alpha__run-01"
+            for record in records
+        )
 
 
 def test_validate_config_accepts_minimal_data_dir_paths_config(tmp_path: Path) -> None:
@@ -243,7 +321,13 @@ survey_csv = "{survey_csv.as_posix()}"
     paths_config = tmp_path / "paths.local.toml"
     paths_config.write_text(content, encoding="utf-8")
 
-    result = run_cli("validate-config", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    result = run_cli(
+        "validate-config",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
 
     assert result.returncode == 0, result.stderr
     assert (data_dir / "annotation_outputs").exists()
@@ -300,3 +384,66 @@ random_state = 20
     assert len(benchmark.datasets) == 2
     assert benchmark.datasets[0].dataset_name == "amazon_reviews_multi"
     assert benchmark.datasets[1].dataset_name == "imdb"
+
+
+def test_load_benchmark_config_deduplicates_by_model_and_temperature(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "paths.local.toml"
+    config_path.write_text(
+        """[paths]
+data_dir = "/tmp/nde-data"
+survey_csv = "/tmp/nde-data/survey.csv"
+
+[llm]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+
+[benchmark.runtime]
+provider = "ollama"
+base_url = "http://localhost:11434"
+timeout_seconds = 120
+max_attempts = 2
+temperature = 0.0
+
+[[llm.experiments]]
+experiment_id = "exp_a"
+model = "qwen3.5:9b"
+run_id = "01"
+temperature = 0.0
+
+[[llm.experiments]]
+experiment_id = "exp_b"
+model = "qwen3.5:9b"
+run_id = "RA1"
+temperature = 0.0
+
+[[llm.experiments]]
+experiment_id = "exp_c"
+model = "qwen3.5:9b"
+run_id = "T01"
+temperature = 0.2
+
+[[llm.experiments]]
+experiment_id = "exp_d"
+model = "llama3.1:8b"
+run_id = "01"
+""",
+        encoding="utf-8",
+    )
+
+    benchmark = load_benchmark_config(config_path)
+    deduped_pairs = {
+        (experiment.model, experiment.temperature)
+        for experiment in benchmark.experiments
+    }
+
+    assert len(benchmark.experiments) == 3
+    assert deduped_pairs == {
+        ("qwen3.5:9b", 0.0),
+        ("qwen3.5:9b", 0.2),
+        ("llama3.1:8b", None),
+    }
