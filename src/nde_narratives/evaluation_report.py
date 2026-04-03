@@ -1481,14 +1481,19 @@ def build_family_summary_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
                 "n_min",
                 "n_max",
                 "accuracy_mean",
+                "accuracy_std",
                 "cohen_kappa_mean",
+                "cohen_kappa_std",
                 "macro_f1_mean",
+                "macro_f1_std",
                 "precision_yes_mean",
                 "recall_yes_mean",
+                "recall_yes_std",
                 "f1_yes_mean",
                 "prevalence_reference_yes_mean",
                 "prevalence_candidate_yes_mean",
                 "prevalence_gap_yes_mean",
+                "prevalence_gap_yes_std",
             ]
         )
     family_df = metrics_df.copy()
@@ -1501,14 +1506,19 @@ def build_family_summary_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
             n_min=("n", "min"),
             n_max=("n", "max"),
             accuracy_mean=("accuracy", "mean"),
+            accuracy_std=("accuracy", "std"),
             cohen_kappa_mean=("cohen_kappa", "mean"),
+            cohen_kappa_std=("cohen_kappa", "std"),
             macro_f1_mean=("macro_f1", "mean"),
+            macro_f1_std=("macro_f1", "std"),
             precision_yes_mean=("precision_yes", "mean"),
             recall_yes_mean=("recall_yes", "mean"),
+            recall_yes_std=("recall_yes", "std"),
             f1_yes_mean=("f1_yes", "mean"),
             prevalence_reference_yes_mean=("prevalence_reference_yes", "mean"),
             prevalence_candidate_yes_mean=("prevalence_candidate_yes", "mean"),
             prevalence_gap_yes_mean=("prevalence_gap_yes", "mean"),
+            prevalence_gap_yes_std=("prevalence_gap_yes", "std"),
         )
         .copy()
     )
@@ -2075,17 +2085,25 @@ def _summary_table_lines(metrics_df: pd.DataFrame, title: str) -> list[str]:
         .agg(
             fields=("field", "count"),
             accuracy_mean=("accuracy", "mean"),
+            accuracy_std=("accuracy", "std"),
             cohen_kappa_mean=("cohen_kappa", "mean"),
+            cohen_kappa_std=("cohen_kappa", "std"),
             macro_f1_mean=("macro_f1", "mean"),
+            macro_f1_std=("macro_f1", "std"),
         )
     )
     # Sort by macro_f1 descending
     grouped = grouped.sort_values("macro_f1_mean", ascending=False, na_position="last")
-    lines = [f"## {title}", "", "| Comparison | Fields | Mean Accuracy | Mean Kappa | Mean Macro F1 |", "| --- | ---: | ---: | ---: | ---: |"]
+    lines = [
+        f"## {title}",
+        "",
+        "| Comparison | Fields | Mean Accuracy | SD Accuracy | Mean Kappa | SD Kappa | Mean Macro F1 | SD Macro F1 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
     for _, row in grouped.iterrows():
         comparison = row["comparison"]
         lines.append(
-            f"| {_comparison_label(comparison)} | {int(row['fields'])} | {float(row['accuracy_mean']):.3f} | {float(row['cohen_kappa_mean']):.3f} | {float(row['macro_f1_mean']):.3f} |"
+            f"| {_comparison_label(comparison)} | {int(row['fields'])} | {float(row['accuracy_mean']):.3f} | {float(row['accuracy_std']):.3f} | {float(row['cohen_kappa_mean']):.3f} | {float(row['cohen_kappa_std']):.3f} | {float(row['macro_f1_mean']):.3f} | {float(row['macro_f1_std']):.3f} |"
         )
     lines.append("")
     return lines
@@ -2097,8 +2115,8 @@ def _family_summary_lines(family_df: pd.DataFrame, title: str) -> list[str]:
         lines.extend(["- No family-level comparisons were available in this run.", ""])
         return lines
     lines.extend([
-        "| Comparison | Family | Fields | Mean Kappa | Mean Macro F1 | Recall Yes | Prevalence Gap | Mean N |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Comparison | Family | Fields | Mean Kappa | SD Kappa | Mean Macro F1 | SD Macro F1 | Recall Yes | SD Recall Yes | Prevalence Gap | SD Prevalence Gap | Mean N |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
     # Sort by macro_f1 descending, then by comparison order, then by family order
     family_df = family_df.copy()
@@ -2107,7 +2125,7 @@ def _family_summary_lines(family_df: pd.DataFrame, title: str) -> list[str]:
     family_df = family_df.drop(columns=["_sort_key"])
     for _, row in family_df.iterrows():
         lines.append(
-            f"| {_comparison_label(str(row['comparison']))} | {str(row['family_label'])} | {int(row['field_count'])} | {float(row['cohen_kappa_mean']):.3f} | {float(row['macro_f1_mean']):.3f} | {float(row['recall_yes_mean']):.3f} | {float(row['prevalence_gap_yes_mean']):.3f} | {float(row['n_mean']):.1f} |"
+            f"| {_comparison_label(str(row['comparison']))} | {str(row['family_label'])} | {int(row['field_count'])} | {float(row['cohen_kappa_mean']):.3f} | {float(row['cohen_kappa_std']):.3f} | {float(row['macro_f1_mean']):.3f} | {float(row['macro_f1_std']):.3f} | {float(row['recall_yes_mean']):.3f} | {float(row['recall_yes_std']):.3f} | {float(row['prevalence_gap_yes_mean']):.3f} | {float(row['prevalence_gap_yes_std']):.3f} | {float(row['n_mean']):.1f} |"
         )
     lines.append("")
     return lines
@@ -2120,30 +2138,43 @@ def _questionnaire_interpretation_lines(family_df: pd.DataFrame) -> list[str]:
         lines.extend(["- Questionnaire-based family summaries were unavailable in this run.", ""])
         return lines
     family_means = (
-        llm_family_df.groupby("family", as_index=False)[["cohen_kappa_mean", "macro_f1_mean", "recall_yes_mean", "prevalence_gap_yes_mean"]]
-        .mean(numeric_only=True)
+        llm_family_df.groupby("family", as_index=False)
+        .agg(
+            cohen_kappa_mean=("cohen_kappa_mean", "mean"),
+            cohen_kappa_std=("cohen_kappa_mean", "std"),
+            macro_f1_mean=("macro_f1_mean", "mean"),
+            macro_f1_std=("macro_f1_mean", "std"),
+            recall_yes_mean=("recall_yes_mean", "mean"),
+            recall_yes_std=("recall_yes_mean", "std"),
+            prevalence_gap_yes_mean=("prevalence_gap_yes_mean", "mean"),
+            prevalence_gap_yes_std=("prevalence_gap_yes_mean", "std"),
+        )
         .sort_values("family", key=lambda s: s.map(_family_sort_key))
     )
     m8 = family_means[family_means["family"] == "m8"]
     m9 = family_means[family_means["family"] == "m9"]
     if not m8.empty and not m9.empty:
         m8_kappa = float(m8.iloc[0]["cohen_kappa_mean"])
+        m8_kappa_std = float(m8.iloc[0]["cohen_kappa_std"])
         m9_kappa = float(m9.iloc[0]["cohen_kappa_mean"])
+        m9_kappa_std = float(m9.iloc[0]["cohen_kappa_std"])
         m8_recall = float(m8.iloc[0]["recall_yes_mean"])
+        m8_recall_std = float(m8.iloc[0]["recall_yes_std"])
         m9_recall = float(m9.iloc[0]["recall_yes_mean"])
+        m9_recall_std = float(m9.iloc[0]["recall_yes_std"])
         kappa_relation = (
-            f"NDE-C shows stronger agreement than NDE-MCQ (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
+            f"NDE-C shows stronger agreement than NDE-MCQ (mean family kappa {m8_kappa:.3f} ± {m8_kappa_std:.3f} vs {m9_kappa:.3f} ± {m9_kappa_std:.3f})"
             if m8_kappa > m9_kappa
-            else f"NDE-MCQ shows stronger agreement than NDE-C (mean family kappa {m9_kappa:.3f} vs {m8_kappa:.3f})"
+            else f"NDE-MCQ shows stronger agreement than NDE-C (mean family kappa {m9_kappa:.3f} ± {m9_kappa_std:.3f} vs {m8_kappa:.3f} ± {m8_kappa_std:.3f})"
             if m9_kappa > m8_kappa
-            else f"NDE-C and NDE-MCQ show matched agreement at the family level (mean family kappa {m8_kappa:.3f} vs {m9_kappa:.3f})"
+            else f"NDE-C and NDE-MCQ show matched agreement at the family level (mean family kappa {m8_kappa:.3f} ± {m8_kappa_std:.3f} vs {m9_kappa:.3f} ± {m9_kappa_std:.3f})"
         )
         recall_relation = (
-            f"Positive-class recovery is weaker for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
+            f"Positive-class recovery is weaker for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} ± {m9_recall_std:.3f} vs {m8_recall:.3f} ± {m8_recall_std:.3f})"
             if (not pd.isna(m8_recall) and not pd.isna(m9_recall) and m8_recall > m9_recall)
-            else f"Positive-class recovery is stronger for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} vs {m8_recall:.3f})"
+            else f"Positive-class recovery is stronger for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} ± {m9_recall_std:.3f} vs {m8_recall:.3f} ± {m8_recall_std:.3f})"
             if (not pd.isna(m8_recall) and not pd.isna(m9_recall) and m9_recall > m8_recall)
-            else f"Positive-class recovery is matched or unavailable across NDE-C and NDE-MCQ (mean recall for `yes`: {m8_recall:.3f} vs {m9_recall:.3f})"
+            else f"Positive-class recovery is matched or unavailable across NDE-C and NDE-MCQ (mean recall for `yes`: {m8_recall:.3f} ± {m8_recall_std:.3f} vs {m9_recall:.3f} ± {m9_recall_std:.3f})"
         )
         if m8_kappa > m9_kappa:
             interpretation_tail = "- This pattern is consistent with the prompt design: the system marks `yes` only when the construct is explicitly verbalized in the narrative, so lower NDE-MCQ alignment is compatible with weaker narrative explicitness rather than a pure model-quality failure."

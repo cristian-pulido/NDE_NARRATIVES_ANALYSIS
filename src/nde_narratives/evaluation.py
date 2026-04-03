@@ -1158,8 +1158,11 @@ def _comparison_summary(metrics_df: pd.DataFrame) -> dict[str, Any]:
         comparison: {
             "fields": int(len(group)),
             "accuracy_mean": float(group["accuracy"].mean()),
+            "accuracy_std": float(group["accuracy"].std(ddof=1)),
             "cohen_kappa_mean": float(group["cohen_kappa"].mean()),
+            "cohen_kappa_std": float(group["cohen_kappa"].std(ddof=1)),
             "macro_f1_mean": float(group["macro_f1"].mean()),
+            "macro_f1_std": float(group["macro_f1"].std(ddof=1)),
         }
         for comparison, group in metrics_df.groupby("comparison")
     }
