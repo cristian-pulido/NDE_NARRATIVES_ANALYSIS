@@ -1,8 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 import tomllib
 
 from .constants import PARTICIPANT_CODE_HEADER, PLACEHOLDER_PREFIX, PROJECT_ROOT
@@ -93,7 +93,10 @@ class StudyConfig:
         return mapping
 
     def visible_to_internal_annotation_columns(self) -> dict[str, str]:
-        return {visible: internal for internal, visible in self.internal_to_visible_annotation_columns().items()}
+        return {
+            visible: internal
+            for internal, visible in self.internal_to_visible_annotation_columns().items()
+        }
 
     def questionnaire_column_map(self) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -429,7 +432,9 @@ def _resolve_path(raw_path: str, base_dir: Path) -> Path:
     return (base_dir / path).resolve()
 
 
-def _path_with_default(paths: dict[str, Any], key: str, base_dir: Path, default_base: Path) -> Path:
+def _path_with_default(
+    paths: dict[str, Any], key: str, base_dir: Path, default_base: Path
+) -> Path:
     raw_value = paths.get(key)
     if raw_value:
         return _resolve_path(str(raw_value), base_dir)
@@ -483,24 +488,54 @@ def load_paths_config(path: str | Path | None = None) -> PathsConfig:
     paths = raw["paths"]
 
     data_dir_raw = paths.get("data_dir")
-    default_base = _resolve_path(str(data_dir_raw), base_dir) if data_dir_raw else base_dir
+    default_base = (
+        _resolve_path(str(data_dir_raw), base_dir) if data_dir_raw else base_dir
+    )
 
     survey_csv = _resolve_path(paths["survey_csv"], base_dir)
-    annotation_output_dir = _path_with_default(paths, "annotation_output_dir", base_dir, default_base)
+    annotation_output_dir = _path_with_default(
+        paths, "annotation_output_dir", base_dir, default_base
+    )
     llm_batch_dir = _path_with_default(paths, "llm_batch_dir", base_dir, default_base)
-    evaluation_output_dir = _path_with_default(paths, "evaluation_output_dir", base_dir, default_base)
-    preprocessing_output_dir = _path_with_default(paths, "preprocessing_output_dir", base_dir, default_base)
-    human_annotations_dir = _path_with_default(paths, "human_annotations_dir", base_dir, default_base)
-    llm_results_dir = _path_with_default(paths, "llm_results_dir", base_dir, default_base)
-    sampled_private_workbook = _path_with_default(paths, "sampled_private_workbook", base_dir, default_base)
-    human_annotation_workbook = _path_with_default(paths, "human_annotation_workbook", base_dir, default_base)
-    llm_predictions_path = _path_with_default(paths, "llm_predictions_path", base_dir, default_base)
-    prompt_variants_dir = _path_with_default(paths, "prompt_variants_dir", base_dir, default_base)
-    benchmark_raw_dir = _path_with_default(paths, "benchmark_raw_dir", base_dir, default_base)
-    benchmark_processed_dir = _path_with_default(paths, "benchmark_processed_dir", base_dir, default_base)
-    benchmark_runs_dir = _path_with_default(paths, "benchmark_runs_dir", base_dir, default_base)
-    benchmark_reports_dir = _path_with_default(paths, "benchmark_reports_dir", base_dir, default_base)
-    benchmark_prompt_variants_dir = _path_with_default(paths, "benchmark_prompt_variants_dir", base_dir, default_base)
+    evaluation_output_dir = _path_with_default(
+        paths, "evaluation_output_dir", base_dir, default_base
+    )
+    preprocessing_output_dir = _path_with_default(
+        paths, "preprocessing_output_dir", base_dir, default_base
+    )
+    human_annotations_dir = _path_with_default(
+        paths, "human_annotations_dir", base_dir, default_base
+    )
+    llm_results_dir = _path_with_default(
+        paths, "llm_results_dir", base_dir, default_base
+    )
+    sampled_private_workbook = _path_with_default(
+        paths, "sampled_private_workbook", base_dir, default_base
+    )
+    human_annotation_workbook = _path_with_default(
+        paths, "human_annotation_workbook", base_dir, default_base
+    )
+    llm_predictions_path = _path_with_default(
+        paths, "llm_predictions_path", base_dir, default_base
+    )
+    prompt_variants_dir = _path_with_default(
+        paths, "prompt_variants_dir", base_dir, default_base
+    )
+    benchmark_raw_dir = _path_with_default(
+        paths, "benchmark_raw_dir", base_dir, default_base
+    )
+    benchmark_processed_dir = _path_with_default(
+        paths, "benchmark_processed_dir", base_dir, default_base
+    )
+    benchmark_runs_dir = _path_with_default(
+        paths, "benchmark_runs_dir", base_dir, default_base
+    )
+    benchmark_reports_dir = _path_with_default(
+        paths, "benchmark_reports_dir", base_dir, default_base
+    )
+    benchmark_prompt_variants_dir = _path_with_default(
+        paths, "benchmark_prompt_variants_dir", base_dir, default_base
+    )
 
     return PathsConfig(
         path=resolved,
@@ -539,13 +574,17 @@ def _coerce_bool(value: object, default: bool) -> bool:
 def _coerce_int(value: object, default: int) -> int:
     if value is None:
         return default
-    return int(value)
+    if isinstance(value, (bool, int, float, str)):
+        return int(cast(bool | int | float | str, value))
+    raise ValueError(f"Expected int-compatible value, got {type(value).__name__}")
 
 
 def _coerce_float(value: object, default: float) -> float:
     if value is None:
         return default
-    return float(value)
+    if isinstance(value, (bool, int, float, str)):
+        return float(cast(bool | int | float | str, value))
+    raise ValueError(f"Expected float-compatible value, got {type(value).__name__}")
 
 
 def load_llm_config(path: str | Path | None = None) -> LLMConfig:
@@ -567,7 +606,11 @@ def load_llm_config(path: str | Path | None = None) -> LLMConfig:
         provider=_coerce_str(llm_raw.get("provider"), "ollama"),
         base_url=_coerce_str(llm_raw.get("base_url"), "http://localhost:11434"),
         aws_region=_coerce_str(llm_raw.get("aws_region"), "us-east-1"),
-        aws_profile=(str(llm_raw["aws_profile"]) if llm_raw.get("aws_profile") is not None else None),
+        aws_profile=(
+            str(llm_raw["aws_profile"])
+            if llm_raw.get("aws_profile") is not None
+            else None
+        ),
         timeout_seconds=_coerce_int(llm_raw.get("timeout_seconds"), 120),
         max_attempts=_coerce_int(llm_raw.get("max_attempts"), 2),
         temperature=_coerce_float(llm_raw.get("temperature"), 0.0),
@@ -589,7 +632,9 @@ def load_llm_config(path: str | Path | None = None) -> LLMConfig:
         experiment_id = experiment.get("experiment_id")
         model = experiment.get("model")
         if not experiment_id:
-            raise ValueError(f"Missing llm.experiments[{index}].experiment_id in {resolved}")
+            raise ValueError(
+                f"Missing llm.experiments[{index}].experiment_id in {resolved}"
+            )
         if not model:
             raise ValueError(f"Missing llm.experiments[{index}].model in {resolved}")
         temperature_raw = experiment.get("temperature")
@@ -598,10 +643,24 @@ def load_llm_config(path: str | Path | None = None) -> LLMConfig:
                 experiment_id=str(experiment_id),
                 enabled=_coerce_bool(experiment.get("enabled"), True),
                 model=str(model),
-                prompt_variant=(str(experiment["prompt_variant"]) if experiment.get("prompt_variant") is not None else None),
-                run_id=(str(experiment["run_id"]) if experiment.get("run_id") is not None else None),
-                model_variant=(str(experiment["model_variant"]) if experiment.get("model_variant") is not None else None),
-                temperature=(float(temperature_raw) if temperature_raw is not None else None),
+                prompt_variant=(
+                    str(experiment["prompt_variant"])
+                    if experiment.get("prompt_variant") is not None
+                    else None
+                ),
+                run_id=(
+                    str(experiment["run_id"])
+                    if experiment.get("run_id") is not None
+                    else None
+                ),
+                model_variant=(
+                    str(experiment["model_variant"])
+                    if experiment.get("model_variant") is not None
+                    else None
+                ),
+                temperature=(
+                    float(temperature_raw) if temperature_raw is not None else None
+                ),
             )
         )
     return LLMConfig(path=resolved, runtime=runtime, experiments=experiments)
@@ -625,19 +684,39 @@ def load_preprocessing_config(path: str | Path | None = None) -> PreprocessingCo
     config = PreprocessingConfig(
         path=resolved,
         provider=_coerce_str(preprocessing_raw.get("provider"), "ollama"),
-        base_url=_coerce_str(preprocessing_raw.get("base_url"), "http://localhost:11434"),
+        base_url=_coerce_str(
+            preprocessing_raw.get("base_url"), "http://localhost:11434"
+        ),
         aws_region=_coerce_str(preprocessing_raw.get("aws_region"), "us-east-1"),
-        aws_profile=(str(preprocessing_raw["aws_profile"]) if preprocessing_raw.get("aws_profile") is not None else None),
+        aws_profile=(
+            str(preprocessing_raw["aws_profile"])
+            if preprocessing_raw.get("aws_profile") is not None
+            else None
+        ),
         timeout_seconds=_coerce_int(preprocessing_raw.get("timeout_seconds"), 120),
         max_attempts=_coerce_int(preprocessing_raw.get("max_attempts"), 2),
         temperature=_coerce_float(preprocessing_raw.get("temperature"), 0.0),
         max_tokens=_coerce_int(preprocessing_raw.get("max_tokens"), 1024),
-        top_p=(float(preprocessing_raw["top_p"]) if preprocessing_raw.get("top_p") is not None else None),
-        top_k=(int(preprocessing_raw["top_k"]) if preprocessing_raw.get("top_k") is not None else None),
+        top_p=(
+            float(preprocessing_raw["top_p"])
+            if preprocessing_raw.get("top_p") is not None
+            else None
+        ),
+        top_k=(
+            int(preprocessing_raw["top_k"])
+            if preprocessing_raw.get("top_k") is not None
+            else None
+        ),
         stop_sequences=stop_sequences,
-        model=(str(preprocessing_raw["model"]) if preprocessing_raw.get("model") is not None else None),
+        model=(
+            str(preprocessing_raw["model"])
+            if preprocessing_raw.get("model") is not None
+            else None
+        ),
         prompt_version=_coerce_str(preprocessing_raw.get("prompt_version"), "v1"),
-        dynamic_context_enabled=_coerce_bool(preprocessing_raw.get("dynamic_context_enabled"), True),
+        dynamic_context_enabled=_coerce_bool(
+            preprocessing_raw.get("dynamic_context_enabled"), True
+        ),
         num_ctx_min=_coerce_int(preprocessing_raw.get("num_ctx_min"), 4096),
         num_ctx_max=_coerce_int(preprocessing_raw.get("num_ctx_max"), 16384),
         chars_per_token=_coerce_float(preprocessing_raw.get("chars_per_token"), 4.0),
@@ -649,7 +728,9 @@ def load_preprocessing_config(path: str | Path | None = None) -> PreprocessingCo
     if config.num_ctx_min < 1:
         raise ValueError(f"preprocessing.num_ctx_min must be >= 1 in {resolved}")
     if config.num_ctx_max < config.num_ctx_min:
-        raise ValueError(f"preprocessing.num_ctx_max must be >= preprocessing.num_ctx_min in {resolved}")
+        raise ValueError(
+            f"preprocessing.num_ctx_max must be >= preprocessing.num_ctx_min in {resolved}"
+        )
     if config.chars_per_token <= 0:
         raise ValueError(f"preprocessing.chars_per_token must be > 0 in {resolved}")
     return config
@@ -675,17 +756,35 @@ def load_translate_config(path: str | Path | None = None) -> TranslateConfig:
         provider=_coerce_str(translate_raw.get("provider"), "ollama"),
         base_url=_coerce_str(translate_raw.get("base_url"), "http://localhost:11434"),
         aws_region=_coerce_str(translate_raw.get("aws_region"), "us-east-1"),
-        aws_profile=(str(translate_raw["aws_profile"]) if translate_raw.get("aws_profile") is not None else None),
+        aws_profile=(
+            str(translate_raw["aws_profile"])
+            if translate_raw.get("aws_profile") is not None
+            else None
+        ),
         timeout_seconds=_coerce_int(translate_raw.get("timeout_seconds"), 120),
         max_attempts=_coerce_int(translate_raw.get("max_attempts"), 2),
         temperature=_coerce_float(translate_raw.get("temperature"), 0.0),
         max_tokens=_coerce_int(translate_raw.get("max_tokens"), 1024),
-        top_p=(float(translate_raw["top_p"]) if translate_raw.get("top_p") is not None else None),
-        top_k=(int(translate_raw["top_k"]) if translate_raw.get("top_k") is not None else None),
+        top_p=(
+            float(translate_raw["top_p"])
+            if translate_raw.get("top_p") is not None
+            else None
+        ),
+        top_k=(
+            int(translate_raw["top_k"])
+            if translate_raw.get("top_k") is not None
+            else None
+        ),
         stop_sequences=stop_sequences,
-        model=(str(translate_raw["model"]) if translate_raw.get("model") is not None else None),
+        model=(
+            str(translate_raw["model"])
+            if translate_raw.get("model") is not None
+            else None
+        ),
         prompt_version=_coerce_str(translate_raw.get("prompt_version"), "v1"),
-        dynamic_context_enabled=_coerce_bool(translate_raw.get("dynamic_context_enabled"), True),
+        dynamic_context_enabled=_coerce_bool(
+            translate_raw.get("dynamic_context_enabled"), True
+        ),
         num_ctx_min=_coerce_int(translate_raw.get("num_ctx_min"), 4096),
         num_ctx_max=_coerce_int(translate_raw.get("num_ctx_max"), 16384),
         chars_per_token=_coerce_float(translate_raw.get("chars_per_token"), 4.0),
@@ -697,7 +796,9 @@ def load_translate_config(path: str | Path | None = None) -> TranslateConfig:
     if config.num_ctx_min < 1:
         raise ValueError(f"translate.num_ctx_min must be >= 1 in {resolved}")
     if config.num_ctx_max < config.num_ctx_min:
-        raise ValueError(f"translate.num_ctx_max must be >= translate.num_ctx_min in {resolved}")
+        raise ValueError(
+            f"translate.num_ctx_max must be >= translate.num_ctx_min in {resolved}"
+        )
     if config.chars_per_token <= 0:
         raise ValueError(f"translate.chars_per_token must be > 0 in {resolved}")
     return config
@@ -722,7 +823,9 @@ def load_benchmark_config(path: str | Path | None = None) -> BenchmarkConfig:
         raise ValueError(f"benchmark.runtime.max_attempts must be >= 1 in {resolved}")
 
     dataset = BenchmarkDatasetConfig(
-        dataset_name=_coerce_str(dataset_raw.get("dataset_name"), "amazon_reviews_multi"),
+        dataset_name=_coerce_str(
+            dataset_raw.get("dataset_name"), "amazon_reviews_multi"
+        ),
         dataset_config=_coerce_str(dataset_raw.get("dataset_config"), "en"),
         split=_coerce_str(dataset_raw.get("split"), "train"),
         text_column=_coerce_str(dataset_raw.get("text_column"), "review_body"),
@@ -739,16 +842,28 @@ def load_benchmark_config(path: str | Path | None = None) -> BenchmarkConfig:
         for item in datasets_raw:
             dataset_item = dict(item)
             parsed = BenchmarkDatasetConfig(
-                dataset_name=_coerce_str(dataset_item.get("dataset_name"), dataset.dataset_name),
-                dataset_config=_coerce_str(dataset_item.get("dataset_config"), dataset.dataset_config),
+                dataset_name=_coerce_str(
+                    dataset_item.get("dataset_name"), dataset.dataset_name
+                ),
+                dataset_config=_coerce_str(
+                    dataset_item.get("dataset_config"), dataset.dataset_config
+                ),
                 split=_coerce_str(dataset_item.get("split"), dataset.split),
-                text_column=_coerce_str(dataset_item.get("text_column"), dataset.text_column),
-                label_column=_coerce_str(dataset_item.get("label_column"), dataset.label_column),
+                text_column=_coerce_str(
+                    dataset_item.get("text_column"), dataset.text_column
+                ),
+                label_column=_coerce_str(
+                    dataset_item.get("label_column"), dataset.label_column
+                ),
                 max_rows=_coerce_int(dataset_item.get("max_rows"), dataset.max_rows),
-                random_state=_coerce_int(dataset_item.get("random_state"), dataset.random_state),
+                random_state=_coerce_int(
+                    dataset_item.get("random_state"), dataset.random_state
+                ),
             )
             if parsed.max_rows < 1:
-                raise ValueError(f"benchmark.datasets.max_rows must be >= 1 in {resolved}")
+                raise ValueError(
+                    f"benchmark.datasets.max_rows must be >= 1 in {resolved}"
+                )
             datasets.append(parsed)
     else:
         datasets = [dataset]
@@ -758,31 +873,56 @@ def load_benchmark_config(path: str | Path | None = None) -> BenchmarkConfig:
         experiment_items = list(llm_raw.get("experiments", []))
 
     experiments: list[BenchmarkExperimentConfig] = []
-    seen_artifact_ids: set[str] = set()
+    seen_execution_keys: set[tuple[str, float]] = set()
     for index, item in enumerate(experiment_items, start=1):
         experiment = dict(item)
         experiment_id = experiment.get("experiment_id")
         model = experiment.get("model")
         if not experiment_id:
-            raise ValueError(f"Missing benchmark.experiments[{index}].experiment_id in {resolved}")
+            raise ValueError(
+                f"Missing benchmark.experiments[{index}].experiment_id in {resolved}"
+            )
         if not model:
-            raise ValueError(f"Missing benchmark.experiments[{index}].model in {resolved}")
+            raise ValueError(
+                f"Missing benchmark.experiments[{index}].model in {resolved}"
+            )
         temperature_raw = experiment.get("temperature")
-        run_id = (str(experiment["run_id"]) if experiment.get("run_id") is not None else None)
-        artifact_id = f"{experiment_id}__{run_id}" if run_id else str(experiment_id)
-        if artifact_id in seen_artifact_ids:
+        temperature_value = _coerce_float(temperature_raw, runtime.temperature)
+        run_id = (
+            str(experiment["run_id"]) if experiment.get("run_id") is not None else None
+        )
+        execution_key = (str(model).strip(), temperature_value)
+        if execution_key in seen_execution_keys:
             continue
-        seen_artifact_ids.add(artifact_id)
+        seen_execution_keys.add(execution_key)
         experiments.append(
             BenchmarkExperimentConfig(
                 experiment_id=str(experiment_id),
                 enabled=_coerce_bool(experiment.get("enabled"), True),
                 model=str(model),
-                prompt_variant=(str(experiment["prompt_variant"]) if experiment.get("prompt_variant") is not None else None),
+                prompt_variant=(
+                    str(experiment["prompt_variant"])
+                    if experiment.get("prompt_variant") is not None
+                    else None
+                ),
                 run_id=run_id,
-                model_variant=(str(experiment["model_variant"]) if experiment.get("model_variant") is not None else None),
-                temperature=(float(temperature_raw) if temperature_raw is not None else None),
+                model_variant=(
+                    str(experiment["model_variant"])
+                    if experiment.get("model_variant") is not None
+                    else None
+                ),
+                temperature=(
+                    _coerce_float(temperature_raw, runtime.temperature)
+                    if temperature_raw is not None
+                    else None
+                ),
             )
         )
 
-    return BenchmarkConfig(path=resolved, runtime=runtime, dataset=dataset, datasets=datasets, experiments=experiments)
+    return BenchmarkConfig(
+        path=resolved,
+        runtime=runtime,
+        dataset=dataset,
+        datasets=datasets,
+        experiments=experiments,
+    )

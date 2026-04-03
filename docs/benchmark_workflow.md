@@ -56,7 +56,7 @@ model_variant = "qwen2.5:7b"
 temperature = 0.0
 ```
 
-If `[[benchmark.experiments]]` is omitted, benchmark execution reuses `[[llm.experiments]]` automatically and keeps unique artifact ids.
+If `[[benchmark.experiments]]` is omitted, benchmark execution reuses `[[llm.experiments]]` automatically and de-duplicates by effective `(model, temperature)` so equivalent runs are not repeated.
 
 If `[[benchmark.datasets]]` is present, `nde benchmark-all` runs every dataset in that list and generates one comparative report automatically.
 
