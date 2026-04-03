@@ -16,9 +16,14 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnnotationBbox, DrawingArea
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Patch, Rectangle
 
-from .config import BenchmarkConfig, BenchmarkExperimentConfig, BenchmarkRuntimeConfig, PathsConfig
+from .config import (
+    BenchmarkConfig,
+    BenchmarkExperimentConfig,
+    BenchmarkRuntimeConfig,
+    PathsConfig,
+)
 from .constants import PROJECT_ROOT
 from .llm.ollama import OllamaProvider
 from .llm.types import LLMRequest
@@ -93,7 +98,9 @@ def _ensure_dir(path: Path) -> Path:
     return path
 
 
-def _normalize_dataset_display_name(dataset_name: object, *, input_path: object | None = None) -> str:
+def _normalize_dataset_display_name(
+    dataset_name: object, *, input_path: object | None = None
+) -> str:
     raw_name = str(dataset_name or "").strip()
     normalized = raw_name.lower()
     if raw_name and normalized not in {"n/a", "none", "nan", "user_provided_csv"}:
@@ -195,11 +202,97 @@ def _presentation_model_family_name(identifier: object) -> str:
     return _presentation_model_name(raw)
 
 
+def _benchmark_model_marker_map() -> dict[str, str]:
+    """Stable marker mapping aligned with the principal NDE figure."""
+    return {
+        "deepseek-r1_32": "X",
+        "deepseek_r1_32": "X",
+        "gemma3_27": "s",
+        "llama31_8": ">",
+        "ministral3_14": "P",
+        "nemotron_3_nano": "<",
+        "nemotron-3-nano": "<",
+        "qwen35_27": "D",
+        "qwen35_35": "o",
+        "qwen35_9": "v",
+        "qwen3_32": "^",
+        "qwen3_32b": "^",
+    }
+
+
+def _extract_nde_tone_region(nde_metrics: pd.DataFrame) -> dict[str, float] | None:
+    if nde_metrics.empty:
+        return None
+
+    frame = nde_metrics.copy()
+    frame.columns = [str(col) for col in frame.columns]
+
+    x_col = (
+        "cohen_kappa"
+        if "cohen_kappa" in frame.columns
+        else "cohen_kappa_mean"
+        if "cohen_kappa_mean" in frame.columns
+        else None
+    )
+    y_col = (
+        "macro_f1"
+        if "macro_f1" in frame.columns
+        else "macro_f1_mean"
+        if "macro_f1_mean" in frame.columns
+        else None
+    )
+    if x_col is None or y_col is None:
+        return None
+
+    has_field = "field" in frame.columns
+    has_family = "family" in frame.columns
+    tone_mask = pd.Series(False, index=frame.index)
+    if has_field:
+        tone_mask = tone_mask | frame["field"].astype(str).str.contains(
+            "_tone", case=False, na=False
+        )
+    if has_family:
+        tone_mask = tone_mask | frame["family"].astype(str).str.lower().eq("tone")
+    tone_df = frame[tone_mask].copy()
+    if tone_df.empty:
+        return None
+
+    if "comparison" in tone_df.columns:
+        comparison = tone_df["comparison"].astype(str)
+        direct_mask = comparison.str.startswith(
+            "questionnaire_vs_llm:"
+        ) | comparison.eq("questionnaire_vs_vader")
+        if direct_mask.any():
+            tone_df = tone_df[direct_mask].copy()
+
+    tone_df[x_col] = pd.to_numeric(tone_df[x_col], errors="coerce")
+    tone_df[y_col] = pd.to_numeric(tone_df[y_col], errors="coerce")
+    tone_df = tone_df.dropna(subset=[x_col, y_col])
+    if tone_df.empty:
+        return None
+
+    x_min = float(tone_df[x_col].min())
+    x_max = float(tone_df[x_col].max())
+    y_min = float(tone_df[y_col].min())
+    y_max = float(tone_df[y_col].max())
+
+    x_pad = max(0.008, (x_max - x_min) * 0.10)
+    y_pad = max(0.008, (y_max - y_min) * 0.10)
+    return {
+        "kappa_min": max(0.0, x_min - x_pad),
+        "kappa_max": min(1.0, x_max + x_pad),
+        "macro_f1_min": max(0.0, y_min - y_pad),
+        "macro_f1_max": min(1.0, y_max + y_pad),
+        "n_points": float(len(tone_df)),
+    }
+
+
 def _plot_benchmark_scatter(
     metrics_df: pd.DataFrame,
     *,
     figure_path: Path,
     per_label_df: pd.DataFrame | None = None,
+    tone_region: dict[str, float] | None = None,
     dpi: int = 300,
 ) -> Path | None:
     if metrics_df.empty:
@@ -208,7 +301,12 @@ def _plot_benchmark_scatter(
     plot_df = metrics_df.copy()
     excluded_model_bases = {"qwen35_08"}
     if "artifact_id" in plot_df.columns:
-        plot_df = plot_df[~plot_df["artifact_id"].astype(str).map(_model_base_id).isin(excluded_model_bases)].copy()
+        plot_df = plot_df[
+            ~plot_df["artifact_id"]
+            .astype(str)
+            .map(_model_base_id)
+            .isin(excluded_model_bases)
+        ].copy()
     plot_df["macro_f1"] = pd.to_numeric(plot_df["macro_f1"], errors="coerce")
     plot_df["cohen_kappa"] = pd.to_numeric(plot_df["cohen_kappa"], errors="coerce")
     plot_df = plot_df.dropna(subset=["macro_f1", "cohen_kappa"])
@@ -216,7 +314,9 @@ def _plot_benchmark_scatter(
         return None
 
     plot_df["dataset_display"] = [
-        _normalize_dataset_display_name(row.get("dataset_name"), input_path=row.get("input_path"))
+        _normalize_dataset_display_name(
+            row.get("dataset_name"), input_path=row.get("input_path")
+        )
         for _, row in plot_df.iterrows()
     ]
     plot_df["model_family"] = [
@@ -231,20 +331,29 @@ def _plot_benchmark_scatter(
     family_rank_df = (
         plot_df.groupby("model_family", as_index=False)["macro_f1"]
         .mean(numeric_only=True)
-        .sort_values(["macro_f1", "model_family"], ascending=[False, True], na_position="last")
+        .sort_values(
+            ["macro_f1", "model_family"], ascending=[False, True], na_position="last"
+        )
     )
     families = family_rank_df["model_family"].astype(str).tolist()
     model_rank_df = (
-        plot_df[plot_df["source"].astype(str).str.lower() == "llm"].copy()
+        plot_df[plot_df["source"].astype(str).str.lower() == "llm"]
+        .copy()
         .assign(model_base=lambda df: df["artifact_id"].astype(str).map(_model_base_id))
         .groupby("model_base", as_index=False)["macro_f1"]
         .mean(numeric_only=True)
-        .sort_values(["macro_f1", "model_base"], ascending=[False, True], na_position="last")
+        .sort_values(
+            ["macro_f1", "model_base"], ascending=[False, True], na_position="last"
+        )
     )
     models = model_rank_df["model_base"].astype(str).tolist()
     datasets = sorted(plot_df["dataset_display"].astype(str).unique().tolist())
-    family_labels = {family: _presentation_model_family_name(family) for family in families}
-    dataset_labels = {dataset: _presentation_dataset_name(dataset) for dataset in datasets}
+    family_labels = {
+        family: _presentation_model_family_name(family) for family in families
+    }
+    dataset_labels = {
+        dataset: _presentation_dataset_name(dataset) for dataset in datasets
+    }
 
     label_order = ("positive", "neutral", "negative")
     label_colors = {
@@ -254,8 +363,10 @@ def _plot_benchmark_scatter(
     }
 
     dataset_cmap = plt.get_cmap("Set2")
-    dataset_colors = {dataset: dataset_cmap(index % 8) for index, dataset in enumerate(datasets)}
-    marker_cycle = ["P", "o", "<", "X", ">", "D", "s", "v", "^", "h", "8", "p"]
+    dataset_colors = {
+        dataset: dataset_cmap(index % 8) for index, dataset in enumerate(datasets)
+    }
+    marker_cycle = ["h", "8", "p", "d"]
     preferred_model_order = [
         "deepseek-r1_32",
         "gemma3_27",
@@ -267,10 +378,45 @@ def _plot_benchmark_scatter(
         "qwen35_9",
         "qwen3_32",
     ]
-    ordered_models = [model for model in preferred_model_order if model in models] + [model for model in models if model not in preferred_model_order]
-    model_markers = {model: marker_cycle[index % len(marker_cycle)] for index, model in enumerate(ordered_models)}
+    ordered_models = [model for model in preferred_model_order if model in models] + [
+        model for model in models if model not in preferred_model_order
+    ]
+    marker_map = _benchmark_model_marker_map()
+    model_markers = {
+        model: marker_map.get(model, marker_cycle[index % len(marker_cycle)])
+        for index, model in enumerate(ordered_models)
+    }
 
     fig, ax = plt.subplots(figsize=(11.5, 7.4))
+
+    tone_region_handle = None
+    if tone_region is not None:
+        x0 = float(tone_region.get("kappa_min", 0.0))
+        x1 = float(tone_region.get("kappa_max", 0.0))
+        y0 = float(tone_region.get("macro_f1_min", 0.0))
+        y1 = float(tone_region.get("macro_f1_max", 0.0))
+        if x1 > x0 and y1 > y0:
+            ax.add_patch(
+                Rectangle(
+                    (x0, y0),
+                    x1 - x0,
+                    y1 - y0,
+                    facecolor="#4C78A8",
+                    edgecolor="#4C78A8",
+                    linewidth=1.0,
+                    linestyle="--",
+                    hatch="///",
+                    alpha=0.18,
+                    zorder=1,
+                )
+            )
+            tone_region_handle = Patch(
+                facecolor="#4C78A8",
+                edgecolor="#4C78A8",
+                alpha=0.18,
+                label="NDE tone region",
+            )
+
     for _, row in plot_df.iterrows():
         family = str(row["model_family"])
         artifact_id = str(row.get("artifact_id", ""))
@@ -279,7 +425,9 @@ def _plot_benchmark_scatter(
         x_value = float(row["cohen_kappa"])
         y_value = float(row["macro_f1"])
         source_name = str(row.get("source", "")).strip().lower()
-        marker_value = "*" if source_name == "vader" else model_markers.get(model_base, "o")
+        marker_value = (
+            "*" if source_name == "vader" else model_markers.get(model_base, "o")
+        )
         ax.scatter(
             x_value,
             y_value,
@@ -294,10 +442,19 @@ def _plot_benchmark_scatter(
 
         if per_label_df is not None and not per_label_df.empty:
             label_subset = per_label_df[
-                (per_label_df["artifact_id"].astype(str) == str(row.get("artifact_id", "")))
+                (
+                    per_label_df["artifact_id"].astype(str)
+                    == str(row.get("artifact_id", ""))
+                )
                 & (per_label_df["source"].astype(str) == str(row.get("source", "")))
-                & (per_label_df["dataset_name"].astype(str) == str(row.get("dataset_name", "")))
-                & (per_label_df["dataset_config"].astype(str) == str(row.get("dataset_config", "")))
+                & (
+                    per_label_df["dataset_name"].astype(str)
+                    == str(row.get("dataset_name", ""))
+                )
+                & (
+                    per_label_df["dataset_config"].astype(str)
+                    == str(row.get("dataset_config", ""))
+                )
             ].copy()
             if not label_subset.empty:
                 label_subset["label"] = label_subset["label"].astype(str).str.lower()
@@ -310,7 +467,9 @@ def _plot_benchmark_scatter(
                     bar_width = 2.8
                     bar_gap = 1.3
                     bar_max_height = 10.0
-                    glyph_width = len(label_order) * bar_width + (len(label_order) - 1) * bar_gap
+                    glyph_width = (
+                        len(label_order) * bar_width + (len(label_order) - 1) * bar_gap
+                    )
                     glyph = DrawingArea(glyph_width, bar_max_height + 1.0, 0, 0)
                     for idx, label in enumerate(label_order):
                         if label not in f1_by_label:
@@ -399,15 +558,28 @@ def _plot_benchmark_scatter(
         )
         for label in label_order
     ]
-    legend_section = lambda text: Line2D([0], [0], linestyle="None", marker="", label=text)
-    combined_handles = [
+    legend_section = lambda text: Line2D(
+        [0], [0], linestyle="None", marker="", label=text
+    )
+    combined_handles: list[Any] = [
         legend_section("Dataset"),
         *dataset_handles,
         legend_section(f"Models ({len(ordered_models) + 1})"),
         *model_handles_with_baseline,
-        legend_section("Mini-bar encoding"),
-        *label_handles,
     ]
+    if tone_region_handle is not None:
+        combined_handles.extend(
+            [
+                legend_section("NDE comparison"),
+                tone_region_handle,
+            ]
+        )
+    combined_handles.extend(
+        [
+            legend_section("Mini-bar encoding"),
+            *label_handles,
+        ]
+    )
     ax.legend(
         handles=combined_handles,
         loc="lower right",
@@ -445,7 +617,9 @@ def _plot_benchmark_scatter(
     return figure_path
 
 
-def _dataset_to_frame(dataset: Any, *, text_column: str, label_column: str) -> pd.DataFrame:
+def _dataset_to_frame(
+    dataset: Any, *, text_column: str, label_column: str
+) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for row in dataset:
         text = str(row.get(text_column, "")).strip()
@@ -468,7 +642,9 @@ def _dataset_to_frame(dataset: Any, *, text_column: str, label_column: str) -> p
     return pd.DataFrame(rows, columns=["text", "gold_label", "star_rating"])
 
 
-def _dataset_to_frame_imdb(dataset: Any, *, text_column: str, label_column: str) -> pd.DataFrame:
+def _dataset_to_frame_imdb(
+    dataset: Any, *, text_column: str, label_column: str
+) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for row in dataset:
         text = str(row.get(text_column, "")).strip()
@@ -501,7 +677,9 @@ def download_and_prepare_amazon_benchmark(
 ) -> tuple[pd.DataFrame, BenchmarkArtifactPaths, dict[str, Any]]:
     try:
         from datasets import load_dataset
-    except ImportError as exc:  # pragma: no cover - exercised by CLI users without dependency
+    except (
+        ImportError
+    ) as exc:  # pragma: no cover - exercised by CLI users without dependency
         raise RuntimeError(
             "Missing optional dependency 'datasets'. Install dependencies with: pip install -e .[dev]"
         ) from exc
@@ -523,8 +701,14 @@ def download_and_prepare_amazon_benchmark(
     used_label_column = dataset_cfg.label_column
 
     try:
-        dataset = _load(dataset_cfg.dataset_name, dataset_cfg.dataset_config, dataset_cfg.split)
-        frame = _dataset_to_frame(dataset, text_column=dataset_cfg.text_column, label_column=dataset_cfg.label_column)
+        dataset = _load(
+            dataset_cfg.dataset_name, dataset_cfg.dataset_config, dataset_cfg.split
+        )
+        frame = _dataset_to_frame(
+            dataset,
+            text_column=dataset_cfg.text_column,
+            label_column=dataset_cfg.label_column,
+        )
     except Exception as exc:
         message = str(exc).lower()
         fallback_candidates = [
@@ -535,10 +719,20 @@ def download_and_prepare_amazon_benchmark(
             raise
         frame = pd.DataFrame()
         last_error = exc
-        for candidate_name, candidate_config, candidate_split, candidate_text_column, candidate_label_column in fallback_candidates:
+        for (
+            candidate_name,
+            candidate_config,
+            candidate_split,
+            candidate_text_column,
+            candidate_label_column,
+        ) in fallback_candidates:
             try:
                 dataset = _load(candidate_name, candidate_config, candidate_split)
-                candidate_frame = _dataset_to_frame(dataset, text_column=candidate_text_column, label_column=candidate_label_column)
+                candidate_frame = _dataset_to_frame(
+                    dataset,
+                    text_column=candidate_text_column,
+                    label_column=candidate_label_column,
+                )
                 if candidate_frame.empty:
                     continue
                 frame = candidate_frame
@@ -558,21 +752,39 @@ def download_and_prepare_amazon_benchmark(
             ) from last_error
 
     if frame.empty:
-        raise ValueError("No valid Amazon benchmark rows were extracted from the selected dataset configuration.")
+        raise ValueError(
+            "No valid Amazon benchmark rows were extracted from the selected dataset configuration."
+        )
 
     sampled = (
-        frame.sample(n=min(effective_max_rows, len(frame)), random_state=dataset_cfg.random_state, replace=False)
+        frame.sample(
+            n=min(effective_max_rows, len(frame)),
+            random_state=dataset_cfg.random_state,
+            replace=False,
+        )
         .reset_index(drop=True)
         .copy()
     )
-    sampled.insert(0, "record_id", [f"amazon_{index + 1:07d}" for index in range(len(sampled))])
+    sampled.insert(
+        0, "record_id", [f"amazon_{index + 1:07d}" for index in range(len(sampled))]
+    )
     sampled.insert(1, "split", used_split)
     sampled.insert(2, "source_dataset", used_dataset_name)
     sampled.insert(3, "source_config", used_dataset_config)
 
-    raw_dir = _ensure_dir(Path(output_raw_dir or paths.benchmark_raw_dir or (paths.evaluation_output_dir / "benchmark_raw")))
+    raw_dir = _ensure_dir(
+        Path(
+            output_raw_dir
+            or paths.benchmark_raw_dir
+            or (paths.evaluation_output_dir / "benchmark_raw")
+        )
+    )
     processed_dir = _ensure_dir(
-        Path(output_processed_dir or paths.benchmark_processed_dir or (paths.evaluation_output_dir / "benchmark_processed"))
+        Path(
+            output_processed_dir
+            or paths.benchmark_processed_dir
+            or (paths.evaluation_output_dir / "benchmark_processed")
+        )
     )
 
     raw_file = raw_dir / "amazon_reviews_multi_raw.jsonl"
@@ -588,16 +800,29 @@ def download_and_prepare_amazon_benchmark(
         "split": used_split,
         "text_column": used_text_column,
         "label_column": used_label_column,
-        "label_mapping_description": _infer_label_mapping_description(sampled["star_rating"]),
+        "label_mapping_description": _infer_label_mapping_description(
+            sampled["star_rating"]
+        ),
         "rows_total_after_cleaning": int(len(frame)),
         "rows_written": int(len(sampled)),
-        "class_distribution": {label: int(count) for label, count in sampled["gold_label"].value_counts().to_dict().items()},
+        "class_distribution": {
+            label: int(count)
+            for label, count in sampled["gold_label"].value_counts().to_dict().items()
+        },
         "generated_at": _now_utc_iso(),
         "raw_file": str(raw_file),
         "processed_file": str(processed_file),
     }
     manifest_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    return sampled, BenchmarkArtifactPaths(raw_file=raw_file, processed_file=processed_file, manifest_file=manifest_file), summary
+    return (
+        sampled,
+        BenchmarkArtifactPaths(
+            raw_file=raw_file,
+            processed_file=processed_file,
+            manifest_file=manifest_file,
+        ),
+        summary,
+    )
 
 
 def download_and_prepare_imdb_benchmark(
@@ -610,7 +835,9 @@ def download_and_prepare_imdb_benchmark(
 ) -> tuple[pd.DataFrame, BenchmarkArtifactPaths, dict[str, Any]]:
     try:
         from datasets import load_dataset
-    except ImportError as exc:  # pragma: no cover - exercised by CLI users without dependency
+    except (
+        ImportError
+    ) as exc:  # pragma: no cover - exercised by CLI users without dependency
         raise RuntimeError(
             "Missing optional dependency 'datasets'. Install dependencies with: pip install -e .[dev]"
         ) from exc
@@ -631,24 +858,48 @@ def download_and_prepare_imdb_benchmark(
     used_text_column = dataset_cfg.text_column
     used_label_column = dataset_cfg.label_column
 
-    dataset = _load(dataset_cfg.dataset_name, dataset_cfg.dataset_config, dataset_cfg.split)
-    frame = _dataset_to_frame_imdb(dataset, text_column=dataset_cfg.text_column, label_column=dataset_cfg.label_column)
+    dataset = _load(
+        dataset_cfg.dataset_name, dataset_cfg.dataset_config, dataset_cfg.split
+    )
+    frame = _dataset_to_frame_imdb(
+        dataset,
+        text_column=dataset_cfg.text_column,
+        label_column=dataset_cfg.label_column,
+    )
     if frame.empty:
-        raise ValueError("No valid IMDB benchmark rows were extracted from the selected dataset configuration.")
+        raise ValueError(
+            "No valid IMDB benchmark rows were extracted from the selected dataset configuration."
+        )
 
     sampled = (
-        frame.sample(n=min(effective_max_rows, len(frame)), random_state=dataset_cfg.random_state, replace=False)
+        frame.sample(
+            n=min(effective_max_rows, len(frame)),
+            random_state=dataset_cfg.random_state,
+            replace=False,
+        )
         .reset_index(drop=True)
         .copy()
     )
-    sampled.insert(0, "record_id", [f"imdb_{index + 1:07d}" for index in range(len(sampled))])
+    sampled.insert(
+        0, "record_id", [f"imdb_{index + 1:07d}" for index in range(len(sampled))]
+    )
     sampled.insert(1, "split", used_split)
     sampled.insert(2, "source_dataset", used_dataset_name)
     sampled.insert(3, "source_config", used_dataset_config)
 
-    raw_dir = _ensure_dir(Path(output_raw_dir or paths.benchmark_raw_dir or (paths.evaluation_output_dir / "benchmark_raw")))
+    raw_dir = _ensure_dir(
+        Path(
+            output_raw_dir
+            or paths.benchmark_raw_dir
+            or (paths.evaluation_output_dir / "benchmark_raw")
+        )
+    )
     processed_dir = _ensure_dir(
-        Path(output_processed_dir or paths.benchmark_processed_dir or (paths.evaluation_output_dir / "benchmark_processed"))
+        Path(
+            output_processed_dir
+            or paths.benchmark_processed_dir
+            or (paths.evaluation_output_dir / "benchmark_processed")
+        )
     )
 
     raw_file = raw_dir / "imdb_raw.jsonl"
@@ -667,13 +918,24 @@ def download_and_prepare_imdb_benchmark(
         "label_mapping_description": "Binary class-id mapping used: 0 negative, 1 positive",
         "rows_total_after_cleaning": int(len(frame)),
         "rows_written": int(len(sampled)),
-        "class_distribution": {label: int(count) for label, count in sampled["gold_label"].value_counts().to_dict().items()},
+        "class_distribution": {
+            label: int(count)
+            for label, count in sampled["gold_label"].value_counts().to_dict().items()
+        },
         "generated_at": _now_utc_iso(),
         "raw_file": str(raw_file),
         "processed_file": str(processed_file),
     }
     manifest_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    return sampled, BenchmarkArtifactPaths(raw_file=raw_file, processed_file=processed_file, manifest_file=manifest_file), summary
+    return (
+        sampled,
+        BenchmarkArtifactPaths(
+            raw_file=raw_file,
+            processed_file=processed_file,
+            manifest_file=manifest_file,
+        ),
+        summary,
+    )
 
 
 def download_and_prepare_benchmark_dataset(
@@ -706,11 +968,16 @@ def _default_prompt_path(project_root: Path) -> Path:
     return project_root / "prompts" / "benchmark" / DEFAULT_BENCHMARK_PROMPT
 
 
-def resolve_benchmark_prompt_path(paths: PathsConfig, prompt_variant: str | None = None) -> Path:
+def resolve_benchmark_prompt_path(
+    paths: PathsConfig, prompt_variant: str | None = None
+) -> Path:
     project_root = PROJECT_ROOT
     default_prompt = _default_prompt_path(project_root)
     if prompt_variant:
-        variants_root = Path(paths.benchmark_prompt_variants_dir or (paths.data_dir or paths.path.parent) / "benchmark" / "prompt_variants")
+        variants_root = Path(
+            paths.benchmark_prompt_variants_dir
+            or (paths.data_dir or paths.path.parent) / "benchmark" / "prompt_variants"
+        )
         candidate = variants_root / prompt_variant / DEFAULT_BENCHMARK_PROMPT
         if candidate.exists():
             return candidate
@@ -737,7 +1004,9 @@ def _parse_llm_label(raw_text: str, *, labels: tuple[str, ...]) -> str:
     for label in labels:
         if label in lowered:
             return label
-    raise ValueError(f"Could not parse benchmark label from model response: {normalized[:120]}")
+    raise ValueError(
+        f"Could not parse benchmark label from model response: {normalized[:120]}"
+    )
 
 
 def _label_guidance_line(label: str) -> str:
@@ -767,14 +1036,17 @@ def _build_prompt(template: str, text: str, *, labels: tuple[str, ...]) -> str:
         dynamic_header = (
             "Task context: classify writing tone (not inferred event severity).\n"
             f"Allowed labels: {labels_csv}.\n"
-            f"Return strict JSON with this schema: {{\"label\": \"{labels_schema}\"}}\n\n"
+            f'Return strict JSON with this schema: {{"label": "{labels_schema}"}}\n\n'
         )
         prompt = dynamic_header + prompt
     return prompt
 
 
 def _infer_active_labels(frame: pd.DataFrame) -> tuple[str, ...]:
-    labels_in_data = {str(value).strip().lower() for value in frame.get("gold_label", pd.Series(dtype=str)).dropna().tolist()}
+    labels_in_data = {
+        str(value).strip().lower()
+        for value in frame.get("gold_label", pd.Series(dtype=str)).dropna().tolist()
+    }
     ordered = [label for label in LABEL_PRIORITY if label in labels_in_data]
     extras = sorted(label for label in labels_in_data if label not in LABEL_PRIORITY)
     labels = tuple(ordered + extras)
@@ -809,22 +1081,35 @@ def _infer_label_mapping_description(values: pd.Series) -> str:
     return "Text labels mapped directly when matching negative/neutral/positive"
 
 
-def _cohen_kappa(y_true: list[str], y_pred: list[str], labels: tuple[str, ...] = BENCHMARK_LABELS) -> float:
+def _cohen_kappa(
+    y_true: list[str], y_pred: list[str], labels: tuple[str, ...] = BENCHMARK_LABELS
+) -> float:
     n = len(y_true)
     if n == 0:
         return 0.0
-    p0 = sum(1 for expected, predicted in zip(y_true, y_pred, strict=True) if expected == predicted) / n
+    p0 = (
+        sum(
+            1
+            for expected, predicted in zip(y_true, y_pred, strict=True)
+            if expected == predicted
+        )
+        / n
+    )
     expected_counts = {label: 0 for label in labels}
     predicted_counts = {label: 0 for label in labels}
     for label in y_true:
         expected_counts[label] = expected_counts.get(label, 0) + 1
     for label in y_pred:
         predicted_counts[label] = predicted_counts.get(label, 0) + 1
-    pe = sum((expected_counts[label] / n) * (predicted_counts[label] / n) for label in labels)
+    pe = sum(
+        (expected_counts[label] / n) * (predicted_counts[label] / n) for label in labels
+    )
     return _safe_div((p0 - pe), (1.0 - pe)) if pe < 1.0 else 0.0
 
 
-def compute_metrics(y_true: list[str], y_pred: list[str], labels: tuple[str, ...] = BENCHMARK_LABELS) -> dict[str, Any]:
+def compute_metrics(
+    y_true: list[str], y_pred: list[str], labels: tuple[str, ...] = BENCHMARK_LABELS
+) -> dict[str, Any]:
     if len(y_true) != len(y_pred):
         raise ValueError("y_true and y_pred must have the same length")
     n = len(y_true)
@@ -839,9 +1124,21 @@ def compute_metrics(y_true: list[str], y_pred: list[str], labels: tuple[str, ...
     per_label: dict[str, dict[str, float]] = {}
     f1_scores: list[float] = []
     for label in labels:
-        tp = sum(1 for expected, predicted in zip(y_true, y_pred, strict=True) if expected == label and predicted == label)
-        fp = sum(1 for expected, predicted in zip(y_true, y_pred, strict=True) if expected != label and predicted == label)
-        fn = sum(1 for expected, predicted in zip(y_true, y_pred, strict=True) if expected == label and predicted != label)
+        tp = sum(
+            1
+            for expected, predicted in zip(y_true, y_pred, strict=True)
+            if expected == label and predicted == label
+        )
+        fp = sum(
+            1
+            for expected, predicted in zip(y_true, y_pred, strict=True)
+            if expected != label and predicted == label
+        )
+        fn = sum(
+            1
+            for expected, predicted in zip(y_true, y_pred, strict=True)
+            if expected == label and predicted != label
+        )
         precision = _safe_div(tp, tp + fp)
         recall = _safe_div(tp, tp + fn)
         f1 = _safe_div(2 * precision * recall, precision + recall)
@@ -861,14 +1158,25 @@ def compute_metrics(y_true: list[str], y_pred: list[str], labels: tuple[str, ...
                     "gold_label": expected,
                     "predicted_label": predicted,
                     "count": int(
-                        sum(1 for y_t, y_p in zip(y_true, y_pred, strict=True) if y_t == expected and y_p == predicted)
+                        sum(
+                            1
+                            for y_t, y_p in zip(y_true, y_pred, strict=True)
+                            if y_t == expected and y_p == predicted
+                        )
                     ),
                 }
             )
 
     return {
         "n": n,
-        "accuracy": _safe_div(sum(1 for expected, predicted in zip(y_true, y_pred, strict=True) if expected == predicted), n),
+        "accuracy": _safe_div(
+            sum(
+                1
+                for expected, predicted in zip(y_true, y_pred, strict=True)
+                if expected == predicted
+            ),
+            n,
+        ),
         "macro_f1": _safe_div(sum(f1_scores), len(labels)),
         "cohen_kappa": _cohen_kappa(y_true, y_pred, labels=labels),
         "per_label": per_label,
@@ -880,7 +1188,11 @@ def _build_provider(runtime: BenchmarkRuntimeConfig) -> OllamaProvider:
     provider_name = runtime.provider.lower().strip()
     if provider_name != "ollama":
         raise ValueError(f"Unsupported benchmark runtime provider: {runtime.provider}")
-    return OllamaProvider(base_url=runtime.base_url, timeout_seconds=runtime.timeout_seconds, temperature=runtime.temperature)
+    return OllamaProvider(
+        base_url=runtime.base_url,
+        timeout_seconds=runtime.timeout_seconds,
+        temperature=runtime.temperature,
+    )
 
 
 def _vader_predictions(frame: pd.DataFrame, *, labels: tuple[str, ...]) -> pd.DataFrame:
@@ -896,8 +1208,26 @@ def _vader_predictions(frame: pd.DataFrame, *, labels: tuple[str, ...]) -> pd.Da
 
         def compound_score(text: str) -> float:
             tokens = set(re.findall(r"[a-zA-Z]+", text.lower()))
-            pos_words = {"good", "great", "excellent", "amazing", "love", "perfect", "helpful", "fantastic"}
-            neg_words = {"bad", "poor", "terrible", "awful", "hate", "refund", "disappointing", "waste"}
+            pos_words = {
+                "good",
+                "great",
+                "excellent",
+                "amazing",
+                "love",
+                "perfect",
+                "helpful",
+                "fantastic",
+            }
+            neg_words = {
+                "bad",
+                "poor",
+                "terrible",
+                "awful",
+                "hate",
+                "refund",
+                "disappointing",
+                "waste",
+            }
             pos_hits = len(tokens.intersection(pos_words))
             neg_hits = len(tokens.intersection(neg_words))
             if pos_hits == neg_hits:
@@ -925,7 +1255,10 @@ def _vader_predictions(frame: pd.DataFrame, *, labels: tuple[str, ...]) -> pd.Da
                 "model": "vader",
             }
         )
-    return pd.DataFrame(rows, columns=["record_id", "gold_label", "predicted_label", "compound", "model"])
+    return pd.DataFrame(
+        rows,
+        columns=["record_id", "gold_label", "predicted_label", "compound", "model"],
+    )
 
 
 def _run_llm_predictions(
@@ -941,7 +1274,9 @@ def _run_llm_predictions(
     provider = _build_provider(runtime)
     model_name = str(experiment.model or "")
     if not model_name:
-        raise ValueError(f"Benchmark experiment {experiment.experiment_id} has no model configured")
+        raise ValueError(
+            f"Benchmark experiment {experiment.experiment_id} has no model configured"
+        )
 
     existing_rows: list[dict[str, Any]] = []
     if existing_df is not None and not existing_df.empty:
@@ -983,7 +1318,9 @@ def _run_llm_predictions(
                 "model": str(experiment.model_variant or model_name),
                 "experiment_id": experiment.experiment_id,
                 "run_id": experiment.run_id,
-                "artifact_id": f"{experiment.experiment_id}__{experiment.run_id}" if experiment.run_id else experiment.experiment_id,
+                "artifact_id": f"{experiment.experiment_id}__{experiment.run_id}"
+                if experiment.run_id
+                else experiment.experiment_id,
             }
         )
         n_new += 1
@@ -1014,9 +1351,15 @@ def run_benchmark_pipeline(
     dataset_metadata: dict[str, Any]
     if dataset_path is not None:
         frame = pd.read_csv(dataset_path)
-        missing = [column for column in ("record_id", "text", "gold_label") if column not in frame.columns]
+        missing = [
+            column
+            for column in ("record_id", "text", "gold_label")
+            if column not in frame.columns
+        ]
         if missing:
-            raise ValueError(f"Benchmark dataset is missing required columns: {missing}")
+            raise ValueError(
+                f"Benchmark dataset is missing required columns: {missing}"
+            )
         local_dataset_name = _resolve_local_dataset_name(benchmark, Path(dataset_path))
         dataset_metadata = {
             "source_kind": "local_csv",
@@ -1029,7 +1372,9 @@ def run_benchmark_pipeline(
             "input_path": str(Path(dataset_path).resolve()),
         }
     else:
-        frame, _, download_summary = download_and_prepare_amazon_benchmark(paths, benchmark, max_rows=max_rows)
+        frame, _, download_summary = download_and_prepare_amazon_benchmark(
+            paths, benchmark, max_rows=max_rows
+        )
         dataset_metadata = {
             "source_kind": "downloaded",
             "dataset_name": download_summary.get("dataset_name"),
@@ -1037,13 +1382,23 @@ def run_benchmark_pipeline(
             "split": download_summary.get("split"),
             "text_column": download_summary.get("text_column"),
             "label_column": download_summary.get("label_column"),
-            "label_mapping_description": download_summary.get("label_mapping_description"),
+            "label_mapping_description": download_summary.get(
+                "label_mapping_description"
+            ),
         }
 
     active_labels = _infer_active_labels(frame)
 
-    run_root = _ensure_dir(Path(run_output_dir or paths.benchmark_runs_dir or (paths.evaluation_output_dir / "benchmark_runs")))
-    artifact_name = str(artifact_prefix or "amazon_baseline").strip() or "amazon_baseline"
+    run_root = _ensure_dir(
+        Path(
+            run_output_dir
+            or paths.benchmark_runs_dir
+            or (paths.evaluation_output_dir / "benchmark_runs")
+        )
+    )
+    artifact_name = (
+        str(artifact_prefix or "amazon_baseline").strip() or "amazon_baseline"
+    )
     if resume:
         artifact_dir = run_root / artifact_name
     else:
@@ -1071,7 +1426,11 @@ def run_benchmark_pipeline(
     confusion_rows: list[dict[str, Any]] = []
     per_label_rows: list[dict[str, Any]] = []
 
-    vader_metrics = compute_metrics(vader_df["gold_label"].tolist(), vader_df["predicted_label"].tolist(), labels=active_labels)
+    vader_metrics = compute_metrics(
+        vader_df["gold_label"].tolist(),
+        vader_df["predicted_label"].tolist(),
+        labels=active_labels,
+    )
     model_metrics_rows.append(
         {
             "source": "vader",
@@ -1085,12 +1444,20 @@ def run_benchmark_pipeline(
     for row in vader_metrics.get("confusion", []):
         confusion_rows.append({"source": "vader", "artifact_id": "vader", **row})
     for label, details in dict(vader_metrics.get("per_label", {})).items():
-        per_label_rows.append({"source": "vader", "artifact_id": "vader", "label": label, **details})
+        per_label_rows.append(
+            {"source": "vader", "artifact_id": "vader", "label": label, **details}
+        )
 
-    enabled_experiments = [experiment for experiment in benchmark.experiments if experiment.enabled]
+    enabled_experiments = [
+        experiment for experiment in benchmark.experiments if experiment.enabled
+    ]
     llm_progress: list[dict[str, Any]] = []
     for experiment in enabled_experiments:
-        artifact_id = f"{experiment.experiment_id}__{experiment.run_id}" if experiment.run_id else experiment.experiment_id
+        artifact_id = (
+            f"{experiment.experiment_id}__{experiment.run_id}"
+            if experiment.run_id
+            else experiment.experiment_id
+        )
         prediction_path = predictions_dir / f"{artifact_id}_predictions.csv"
         existing_df: pd.DataFrame | None = None
         if resume and prediction_path.exists() and not from_scratch:
@@ -1105,7 +1472,11 @@ def run_benchmark_pipeline(
             existing_df=existing_df,
             labels=active_labels,
         )
-        artifact_id = str(prediction_df["artifact_id"].iloc[0]) if not prediction_df.empty else experiment.experiment_id
+        artifact_id = (
+            str(prediction_df["artifact_id"].iloc[0])
+            if not prediction_df.empty
+            else experiment.experiment_id
+        )
         if not prediction_df.empty:
             prediction_df.to_csv(prediction_path, index=False)
 
@@ -1138,7 +1509,9 @@ def run_benchmark_pipeline(
         for row in metrics.get("confusion", []):
             confusion_rows.append({"source": "llm", "artifact_id": artifact_id, **row})
         for label, details in dict(metrics.get("per_label", {})).items():
-            per_label_rows.append({"source": "llm", "artifact_id": artifact_id, "label": label, **details})
+            per_label_rows.append(
+                {"source": "llm", "artifact_id": artifact_id, "label": label, **details}
+            )
 
     metrics_df = pd.DataFrame(model_metrics_rows)
     confusion_df = pd.DataFrame(confusion_rows)
@@ -1193,16 +1566,22 @@ def write_benchmark_report(
     nde_metrics_path: Path | None = None,
     comparison_run_summaries: list[Path] | None = None,
 ) -> Path:
-    def _load_summary_with_metrics(path: Path, *, role: str) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
+    def _load_summary_with_metrics(
+        path: Path, *, role: str
+    ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
         loaded_summary = json.loads(Path(path).read_text(encoding="utf-8"))
         loaded_metrics = pd.read_csv(Path(loaded_summary["artifacts"]["metrics_file"]))
-        loaded_per_label = pd.read_csv(Path(loaded_summary["artifacts"]["per_label_file"]))
+        loaded_per_label = pd.read_csv(
+            Path(loaded_summary["artifacts"]["per_label_file"])
+        )
         input_path = loaded_summary.get("dataset", {}).get("input_path")
         dataset_name = _normalize_dataset_display_name(
             loaded_summary.get("dataset", {}).get("dataset_name", "n/a"),
             input_path=input_path,
         )
-        dataset_config = str(loaded_summary.get("dataset", {}).get("dataset_config", ""))
+        dataset_config = str(
+            loaded_summary.get("dataset", {}).get("dataset_config", "")
+        )
         loaded_metrics = loaded_metrics.copy()
         loaded_per_label = loaded_per_label.copy()
         loaded_metrics["dataset_name"] = dataset_name
@@ -1224,26 +1603,57 @@ def write_benchmark_report(
             return "mixed"
         return "limited"
 
-    summary, primary_metrics_df, primary_per_label_df = _load_summary_with_metrics(Path(run_summary_path), role="primary")
+    summary, primary_metrics_df, primary_per_label_df = _load_summary_with_metrics(
+        Path(run_summary_path), role="primary"
+    )
     metrics_df = primary_metrics_df.copy()
     per_label_df = primary_per_label_df.copy()
     if comparison_run_summaries:
         for comparison_summary_path in comparison_run_summaries:
-            _, comparison_metrics_df, comparison_per_label_df = _load_summary_with_metrics(
-                Path(comparison_summary_path),
-                role="comparison",
+            _, comparison_metrics_df, comparison_per_label_df = (
+                _load_summary_with_metrics(
+                    Path(comparison_summary_path),
+                    role="comparison",
+                )
             )
-            metrics_df = pd.concat([metrics_df, comparison_metrics_df], ignore_index=True)
-            per_label_df = pd.concat([per_label_df, comparison_per_label_df], ignore_index=True)
+            metrics_df = pd.concat(
+                [metrics_df, comparison_metrics_df], ignore_index=True
+            )
+            per_label_df = pd.concat(
+                [per_label_df, comparison_per_label_df], ignore_index=True
+            )
 
     excluded_model_bases = {"qwen35_08"}
-    metrics_df = metrics_df[~metrics_df["artifact_id"].astype(str).map(_model_base_id).isin(excluded_model_bases)].copy()
-    per_label_df = per_label_df[~per_label_df["artifact_id"].astype(str).map(_model_base_id).isin(excluded_model_bases)].copy()
+    metrics_df = metrics_df[
+        ~metrics_df["artifact_id"]
+        .astype(str)
+        .map(_model_base_id)
+        .isin(excluded_model_bases)
+    ].copy()
+    per_label_df = per_label_df[
+        ~per_label_df["artifact_id"]
+        .astype(str)
+        .map(_model_base_id)
+        .isin(excluded_model_bases)
+    ].copy()
+
+    tone_region: dict[str, float] | None = None
+    if nde_metrics_path is not None and Path(nde_metrics_path).exists():
+        try:
+            nde_region_df = pd.read_csv(nde_metrics_path)
+            tone_region = _extract_nde_tone_region(nde_region_df)
+        except Exception:
+            tone_region = None
 
     report_dir = _ensure_dir(output_dir)
     report_path = report_dir / "benchmark_report.md"
     figure_path = report_dir / "figures" / "benchmark_macro_f1_vs_kappa.png"
-    written_figure_path = _plot_benchmark_scatter(metrics_df, figure_path=figure_path, per_label_df=per_label_df)
+    written_figure_path = _plot_benchmark_scatter(
+        metrics_df,
+        figure_path=figure_path,
+        per_label_df=per_label_df,
+        tone_region=tone_region,
+    )
 
     source_dataset_display = _normalize_dataset_display_name(
         summary.get("dataset", {}).get("dataset_name", "n/a"),
@@ -1253,7 +1663,9 @@ def write_benchmark_report(
     source_datasets = sorted(
         {
             f"{name}:{cfg}" if str(cfg).strip() else str(name)
-            for name, cfg in zip(metrics_df["dataset_name"], metrics_df["dataset_config"], strict=False)
+            for name, cfg in zip(
+                metrics_df["dataset_name"], metrics_df["dataset_config"], strict=False
+            )
         }
     )
 
@@ -1296,20 +1708,38 @@ def write_benchmark_report(
                 "",
                 "## Visual Summary",
                 "Scatter plot with cohen_kappa (x) and macro_f1 (y), aligned to the principal analysis figure.",
-                "Marker color encodes dataset, marker shape encodes model family, and compact mini bars next to each point encode per-label F1 (positive, neutral, negative).",
-                f"![Benchmark macro_f1 vs cohen_kappa]({written_figure_path.relative_to(report_dir).as_posix()})",
+                "Marker color encodes dataset, marker shape encodes model identity (aligned with the principal figure), and compact mini bars next to each point encode per-label F1 (positive, neutral, negative).",
             ]
+        )
+        if tone_region is not None:
+            lines.append(
+                "Shaded region marks the NDE tone result envelope when NDE metrics are provided."
+            )
+        lines.append(
+            f"![Benchmark macro_f1 vs cohen_kappa]({written_figure_path.relative_to(report_dir).as_posix()})"
         )
 
     llm_metrics_df = metrics_df[metrics_df["source"].astype(str) == "llm"].copy()
     scoped_df = llm_metrics_df if not llm_metrics_df.empty else metrics_df
-    top_row = scoped_df.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
-    bottom_row = scoped_df.sort_values(["macro_f1", "cohen_kappa"], ascending=True).iloc[0]
+    top_row = scoped_df.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[
+        0
+    ]
+    bottom_row = scoped_df.sort_values(
+        ["macro_f1", "cohen_kappa"], ascending=True
+    ).iloc[0]
 
-    aggregate_macro_f1 = float(scoped_df["macro_f1"].mean()) if not scoped_df.empty else 0.0
-    aggregate_kappa = float(scoped_df["cohen_kappa"].mean()) if not scoped_df.empty else 0.0
-    macro_f1_std = float(scoped_df["macro_f1"].std(ddof=0)) if not scoped_df.empty else 0.0
-    kappa_std = float(scoped_df["cohen_kappa"].std(ddof=0)) if not scoped_df.empty else 0.0
+    aggregate_macro_f1 = (
+        float(scoped_df["macro_f1"].mean()) if not scoped_df.empty else 0.0
+    )
+    aggregate_kappa = (
+        float(scoped_df["cohen_kappa"].mean()) if not scoped_df.empty else 0.0
+    )
+    macro_f1_std = (
+        float(scoped_df["macro_f1"].std(ddof=0)) if not scoped_df.empty else 0.0
+    )
+    kappa_std = (
+        float(scoped_df["cohen_kappa"].std(ddof=0)) if not scoped_df.empty else 0.0
+    )
     quality_band = _quality_band(aggregate_macro_f1, aggregate_kappa)
 
     top_macro_f1 = float(top_row.get("macro_f1", 0.0))
@@ -1345,14 +1775,24 @@ def write_benchmark_report(
 
     vader_rows = metrics_df[metrics_df["source"].astype(str) == "vader"].copy()
     if not llm_metrics_df.empty and not vader_rows.empty:
-        best_vader = vader_rows.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
+        best_vader = vader_rows.sort_values(
+            ["macro_f1", "cohen_kappa"], ascending=False
+        ).iloc[0]
         delta_macro_f1 = top_macro_f1 - float(best_vader.get("macro_f1", 0.0))
-        interpretation_lines.append(f"- Best LLM vs best VADER macro_f1 delta: {delta_macro_f1:+.4f}.")
+        interpretation_lines.append(
+            f"- Best LLM vs best VADER macro_f1 delta: {delta_macro_f1:+.4f}."
+        )
 
     if metrics_df["dataset_name"].nunique() > 1:
-        interpretation_lines.append("- Multi-dataset comparison enabled in this report:")
-        for dataset_name, dataset_subset in metrics_df.groupby("dataset_name", dropna=False):
-            dataset_best = dataset_subset.sort_values(["macro_f1", "cohen_kappa"], ascending=False).iloc[0]
+        interpretation_lines.append(
+            "- Multi-dataset comparison enabled in this report:"
+        )
+        for dataset_name, dataset_subset in metrics_df.groupby(
+            "dataset_name", dropna=False
+        ):
+            dataset_best = dataset_subset.sort_values(
+                ["macro_f1", "cohen_kappa"], ascending=False
+            ).iloc[0]
             interpretation_lines.append(
                 (
                     f"  - {dataset_name}: best={dataset_best.get('artifact_id', 'n/a')} "
@@ -1363,10 +1803,15 @@ def write_benchmark_report(
 
     if nde_metrics_path is not None and Path(nde_metrics_path).exists():
         nde_metrics = pd.read_csv(nde_metrics_path)
-        nde_scope = nde_metrics[nde_metrics["field"].astype(str).str.contains("_tone", na=False)].copy()
+        nde_scope = nde_metrics[
+            nde_metrics["field"].astype(str).str.contains("_tone", na=False)
+        ].copy()
         if not nde_scope.empty and not metrics_df.empty:
             nde_by_comparison = (
-                nde_scope.groupby("comparison", dropna=False)["macro_f1"].mean().sort_values(ascending=False).reset_index()
+                nde_scope.groupby("comparison", dropna=False)["macro_f1"]
+                .mean()
+                .sort_values(ascending=False)
+                .reset_index()
             )
             nde_best = nde_by_comparison.iloc[0]
             benchmark_best = metrics_df.sort_values("macro_f1", ascending=False).iloc[0]
@@ -1391,7 +1836,9 @@ def write_benchmark_report(
                 ]
             )
         else:
-            interpretation_lines.append("- NDE metrics file was provided, but no comparable tone rows were found.")
+            interpretation_lines.append(
+                "- NDE metrics file was provided, but no comparable tone rows were found."
+            )
 
     lines.extend(
         [

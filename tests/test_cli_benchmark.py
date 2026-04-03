@@ -14,7 +14,9 @@ def _load_json(stdout: str) -> dict:
     return json.loads(stdout)
 
 
-def test_benchmark_run_with_local_dataset_generates_metrics_artifacts(tmp_path: Path) -> None:
+def test_benchmark_run_with_local_dataset_generates_metrics_artifacts(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     benchmark_csv = FIXTURES / "benchmark_fixture.csv"
@@ -101,8 +103,14 @@ def test_benchmark_report_sections_follow_required_order(tmp_path: Path) -> None
     ]
     positions = [report_text.index(section) for section in section_order]
     assert positions == sorted(positions)
-    assert "![Benchmark macro_f1 vs cohen_kappa](figures/benchmark_macro_f1_vs_kappa.png)" in report_text
-    assert "Marker color encodes dataset, marker shape encodes model family, and compact mini bars" in report_text
+    assert (
+        "![Benchmark macro_f1 vs cohen_kappa](figures/benchmark_macro_f1_vs_kappa.png)"
+        in report_text
+    )
+    assert (
+        "Marker color encodes dataset, marker shape encodes model identity (aligned with the principal figure), and compact mini bars"
+        in report_text
+    )
     assert "- Dataset: benchmark_fixture" in report_text
 
 
@@ -230,7 +238,14 @@ def test_compute_metrics_returns_expected_keys() -> None:
     y_pred = ["positive", "negative", "positive", "neutral"]
     metrics = compute_metrics(y_true, y_pred)
 
-    assert set(metrics.keys()) >= {"n", "accuracy", "macro_f1", "cohen_kappa", "per_label", "confusion"}
+    assert set(metrics.keys()) >= {
+        "n",
+        "accuracy",
+        "macro_f1",
+        "cohen_kappa",
+        "per_label",
+        "confusion",
+    }
     assert metrics["n"] == 4
     assert len(metrics["confusion"]) == 9
 
