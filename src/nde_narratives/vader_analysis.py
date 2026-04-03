@@ -8,7 +8,10 @@ import matplotlib
 matplotlib.use("Agg")
 import pandas as pd
 from matplotlib import pyplot as plt
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+except ModuleNotFoundError:  # pragma: no cover - exercised in CLI/runtime environments without vader package
+    SentimentIntensityAnalyzer = None  # type: ignore[assignment]
 
 from .config import PathsConfig, StudyConfig
 from .io_utils import read_tabular_file
@@ -94,6 +97,10 @@ def build_vader_scores(
     limit: int | None = None,
     include_text: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if SentimentIntensityAnalyzer is None:
+        raise ModuleNotFoundError(
+            "No module named 'vaderSentiment'. Install it to run sentiment-sensitivity or evaluate without --skip-vader."
+        )
     analyzer = SentimentIntensityAnalyzer()
     prepared = _prepare_source_rows(
         source_df,

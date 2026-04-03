@@ -877,6 +877,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to an existing VADER scores file. If omitted and the default file is missing, evaluate generates it automatically.",
     )
     auxiliary_group.add_argument(
+        "--skip-vader",
+        action="store_true",
+        help="Skip VADER loading/scoring and omit all VADER-based comparisons from evaluation outputs.",
+    )
+    auxiliary_group.add_argument(
         "--output-dir",
         metavar="PATH",
         default=None,
@@ -895,6 +900,79 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also save evaluation figures as PDF alongside the default PNG files for article-ready vector export.",
     )
     evaluate.set_defaults(handler=cmd_evaluate)
+
+    compare_outputs = subparsers.add_parser(
+        "compare-evaluation-outputs",
+        formatter_class=NDEHelpFormatter,
+        help="Compare multiple evaluation output folders and generate an appendix-style report package.",
+        description=dedent(
+            """\
+            Compare evaluation outputs across preprocessing conditions (for example,
+            baseline run vs translate+run) and generate:
+            coverage tables, global summaries, fair-intersection deltas, figures,
+            and a manuscript-ready Markdown report.
+
+            Conditions can be provided in two ways:
+            1) Repeat --condition NAME=PATH
+            2) Provide --config JSON
+
+            If --config is provided, it takes precedence over repeated --condition flags.
+            """
+        ),
+        epilog=_examples_block(
+            "nde compare-evaluation-outputs --condition baseline=/data/nde/evaluation_outputs --condition translate_run=/data/nde/evaluation_outputs_translate_run",
+            "nde compare-evaluation-outputs --config /data/nde/compare_conditions.json",
+            "nde compare-evaluation-outputs --config /data/nde/compare_conditions.json --output-dir /data/nde/Results/preprocessing_effect_comparison",
+        ),
+    )
+    _add_config_arguments(compare_outputs)
+    inputs_group = compare_outputs.add_argument_group("Condition Inputs")
+    inputs_group.add_argument(
+        "--condition",
+        metavar="NAME=PATH",
+        action="append",
+        default=None,
+        help="Condition declaration in NAME=PATH format. Repeat for each condition.",
+    )
+    inputs_group.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help="JSON config with a 'conditions' array. Takes precedence over repeated --condition flags.",
+    )
+    analysis_group = compare_outputs.add_argument_group("Analysis Parameters")
+    analysis_group.add_argument(
+        "--baseline",
+        metavar="NAME",
+        default=None,
+        help="Condition name used as baseline for delta calculations.",
+    )
+    analysis_group.add_argument(
+        "--focus-scope",
+        metavar="SCOPE",
+        default=None,
+        help="Comparison scope to analyze (for example questionnaire_vs_llm, human_reference_vs_llm).",
+    )
+    analysis_group.add_argument(
+        "--metric",
+        metavar="COLUMN",
+        default=None,
+        help="Metric column from evaluation_metrics.csv to use for field-level deltas.",
+    )
+    analysis_group.add_argument(
+        "--title",
+        metavar="TEXT",
+        default=None,
+        help="Title used in the generated Markdown report.",
+    )
+    output_group = compare_outputs.add_argument_group("Output")
+    output_group.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Directory where comparison CSVs, figures, and report should be written.",
+    )
+    compare_outputs.set_defaults(handler=cmd_compare_evaluation_outputs)
 
     return parser
 
@@ -1293,11 +1371,68 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         prompt_variants=list(args.prompt_variant) if args.prompt_variant else None,
         sampled_private_workbook=Path(args.sampled_private_workbook).resolve() if args.sampled_private_workbook else None,
         vader_scores_path=Path(args.vader_scores).resolve() if args.vader_scores else None,
+        skip_vader=bool(args.skip_vader),
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
         figure_dpi=int(args.figure_dpi),
         export_figures_pdf=bool(args.export_figures_pdf),
     )
     print(json.dumps({"rows": len(metrics_df), "summary": summary, **written}, indent=2))
+    return 0
+
+
+def cmd_compare_evaluation_outputs(args: argparse.Namespace) -> int:
+    from .compare_evaluation_outputs import (
+        compare_evaluation_outputs,
+        load_conditions_from_config,
+        parse_condition_argument,
+    )
+
+    paths = load_paths_config(args.paths_config)
+
+    config_payload: dict[str, Any] = {}
+    if args.config:
+        config_path = Path(args.config).resolve()
+        conditions, config_payload = load_conditions_from_config(config_path)
+    else:
+        raw_conditions = list(args.condition or [])
+        if len(raw_conditions) < 2:
+            raise ValueError(
+                "Provide at least two conditions via repeated --condition NAME=PATH "
+                "or provide --config with at least two condition entries."
+            )
+        conditions = [parse_condition_argument(value) for value in raw_conditions]
+
+    output_dir = (
+        Path(args.output_dir).resolve()
+        if args.output_dir
+        else Path(paths.evaluation_output_dir).resolve() / "preprocessing_effect_comparison"
+    )
+
+    baseline = args.baseline if args.baseline is not None else config_payload.get("baseline")
+    title = args.title if args.title is not None else config_payload.get("title", "Preprocessing Effect Comparison Report")
+    focus_scope = (
+        args.focus_scope
+        if args.focus_scope is not None
+        else config_payload.get("focus_scope", "questionnaire_vs_llm")
+    )
+    metric = args.metric if args.metric is not None else config_payload.get("metric", "macro_f1")
+
+    written = compare_evaluation_outputs(
+        conditions=conditions,
+        output_dir=output_dir,
+        baseline=baseline,
+        title=title,
+        focus_scope=focus_scope,
+        metric=metric,
+    )
+
+    payload = {
+        "conditions_source": "config" if args.config else "flags",
+        "conditions": [{"name": spec.name, "path": str(spec.path)} for spec in conditions],
+        "output_dir": str(output_dir),
+        **written,
+    }
+    print(json.dumps(payload, indent=2))
     return 0
 
 

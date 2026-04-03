@@ -197,6 +197,43 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert "questionnaire_family_tradeoff_map.png" in questionnaire_report_text
 
 
+def test_evaluate_can_skip_vader(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    build_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    assert build_result.returncode == 0, build_result.stderr
+
+    source_workbook = tmp_path / "annotation_outputs" / "nde_annotation_sample.xlsx"
+    mapping_workbook = tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    human_root = tmp_path / "human_annotations"
+    llm_root = tmp_path / "llm_outputs"
+
+    populate_human_annotation_workbook(source_workbook, mapping_workbook, study_config)
+    _prepare_human_artifact(source_workbook, human_root, "ann_a")
+    _prepare_human_artifact(source_workbook, human_root, "ann_b")
+    _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-alpha")
+
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--skip-vader",
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "evaluation_metrics.csv")
+    summary = json.loads((tmp_path / "evaluation_outputs" / "evaluation_summary.json").read_text(encoding="utf-8"))
+
+    assert "human_reference_vs_vader" not in set(metrics["comparison"])
+    assert "questionnaire_vs_vader" not in set(metrics["comparison"])
+    assert not any(str(value).startswith("vader_vs_llm:") for value in set(metrics["comparison"]))
+    assert summary["vader"]["enabled"] is False
+
+
 def test_evaluate_can_export_pdf_figures(tmp_path: Path) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
