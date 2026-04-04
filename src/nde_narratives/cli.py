@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import json
@@ -58,7 +58,7 @@ def _colorize_help(text: str) -> str:
     for line in text.splitlines():
         stripped = line.strip()
         if line.startswith("usage:"):
-            lines.append(_style("usage:", ANSI_BOLD, ANSI_CYAN) + line[len("usage:"):])
+            lines.append(_style("usage:", ANSI_BOLD, ANSI_CYAN) + line[len("usage:") :])
             continue
         if stripped == "Use 'nde <command> --help' for command-specific help.":
             lines.append(_style(line, ANSI_DIM))
@@ -83,7 +83,7 @@ def _colorize_help(text: str) -> str:
                 continue
         if line.startswith("  -"):
             indent = line[: len(line) - len(line.lstrip())]
-            content = line[len(indent):]
+            content = line[len(indent) :]
             parts = re.split(r"\s{2,}", content, maxsplit=1)
             option_text = parts[0]
             rest = f"  {parts[1]}" if len(parts) == 2 else ""
@@ -631,7 +631,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_config_arguments(benchmark_download)
-    benchmark_download.add_argument("--max-rows", metavar="N", type=int, default=None, help="Override benchmark.dataset.max_rows.")
+    benchmark_download.add_argument(
+        "--max-rows",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Override benchmark.dataset.max_rows.",
+    )
     benchmark_download.add_argument(
         "--raw-dir",
         metavar="PATH",
@@ -669,7 +675,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Existing normalized benchmark dataset CSV. If omitted, benchmark-run triggers download+normalize first.",
     )
-    benchmark_run.add_argument("--max-rows", metavar="N", type=int, default=None, help="Override benchmark.dataset.max_rows.")
+    benchmark_run.add_argument(
+        "--max-rows",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Override benchmark.dataset.max_rows.",
+    )
     benchmark_run.add_argument(
         "--prompt-variant",
         metavar="ID",
@@ -748,7 +760,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_config_arguments(benchmark_all)
-    benchmark_all.add_argument("--max-rows", metavar="N", type=int, default=None, help="Override benchmark.dataset.max_rows.")
+    benchmark_all.add_argument(
+        "--max-rows",
+        metavar="N",
+        type=int,
+        default=None,
+        help="Override benchmark.dataset.max_rows.",
+    )
     benchmark_all.add_argument(
         "--prompt-variant",
         metavar="ID",
@@ -1011,15 +1029,23 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
 
     placeholders = study.placeholder_questionnaire_columns()
     if placeholders:
-        raise ValueError(f"Replace questionnaire column placeholders before validation: {placeholders}")
+        raise ValueError(
+            f"Replace questionnaire column placeholders before validation: {placeholders}"
+        )
 
     if not paths.survey_csv.exists():
         raise FileNotFoundError(f"Survey source not found: {paths.survey_csv}")
 
     survey_df = read_tabular_file(paths.survey_csv, nrows=5)
-    missing_columns = [column for column in study.required_source_columns() if column not in survey_df.columns]
+    missing_columns = [
+        column
+        for column in study.required_source_columns()
+        if column not in survey_df.columns
+    ]
     if missing_columns:
-        raise ValueError(f"Survey source is missing required columns: {missing_columns}")
+        raise ValueError(
+            f"Survey source is missing required columns: {missing_columns}"
+        )
 
     created_dirs = _ensure_output_locations(paths)
 
@@ -1030,7 +1056,9 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
         "required_columns_checked": len(study.required_source_columns()),
         "created_output_directories": created_dirs,
         "llm_runtime": llm_config.runtime.to_dict(),
-        "llm_experiments": [experiment.to_dict() for experiment in llm_config.experiments],
+        "llm_experiments": [
+            experiment.to_dict() for experiment in llm_config.experiments
+        ],
         "translate_runtime": translate_config.to_dict(),
     }
     print("Configuration valid.")
@@ -1041,7 +1069,11 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
 def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
-    required_columns = [study.id_column, study.stratify_column, *study.text_columns().values()]
+    required_columns = [
+        study.id_column,
+        study.stratify_column,
+        *study.text_columns().values(),
+    ]
     source_candidates = [
         paths.preprocessing_output_dir / "cleaned_dataset.csv",
         paths.preprocessing_output_dir / "translated_dataset.csv",
@@ -1063,11 +1095,13 @@ def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
         source_path = resolve_survey_source_path(paths, None)
         source_df = read_tabular_file(source_path)
 
-    annotation_df, mapping_df, column_map_df, sampled_private_df, summary = create_annotation_frames(
-        source_df=source_df,
-        study=study,
-        n_total=args.n_total,
-        random_state=args.random_state,
+    annotation_df, mapping_df, column_map_df, sampled_private_df, summary = (
+        create_annotation_frames(
+            source_df=source_df,
+            study=study,
+            n_total=args.n_total,
+            random_state=args.random_state,
+        )
     )
     written = write_annotation_outputs(
         annotation_df=annotation_df,
@@ -1195,13 +1229,22 @@ def cmd_sentiment_sensitivity(args: argparse.Namespace) -> int:
 
 
 def _latest_benchmark_run_summary(paths_config) -> Path:
-    runs_dir = Path(paths_config.benchmark_runs_dir or (paths_config.evaluation_output_dir / "benchmark_runs"))
+    runs_dir = Path(
+        paths_config.benchmark_runs_dir
+        or (paths_config.evaluation_output_dir / "benchmark_runs")
+    )
     if not runs_dir.exists():
         raise FileNotFoundError(f"Benchmark runs directory not found: {runs_dir}")
-    candidates = [candidate / "run_summary.json" for candidate in runs_dir.iterdir() if candidate.is_dir()]
+    candidates = [
+        candidate / "run_summary.json"
+        for candidate in runs_dir.iterdir()
+        if candidate.is_dir()
+    ]
     existing = [candidate for candidate in candidates if candidate.exists()]
     if not existing:
-        raise FileNotFoundError(f"No benchmark run_summary.json found under: {runs_dir}")
+        raise FileNotFoundError(
+            f"No benchmark run_summary.json found under: {runs_dir}"
+        )
     return max(existing, key=lambda path: path.stat().st_mtime)
 
 
@@ -1216,7 +1259,9 @@ def cmd_benchmark_download(args: argparse.Namespace) -> int:
         benchmark=benchmark,
         max_rows=args.max_rows,
         output_raw_dir=Path(args.raw_dir).resolve() if args.raw_dir else None,
-        output_processed_dir=Path(args.processed_dir).resolve() if args.processed_dir else None,
+        output_processed_dir=Path(args.processed_dir).resolve()
+        if args.processed_dir
+        else None,
     )
     print(
         json.dumps(
@@ -1257,13 +1302,36 @@ def cmd_benchmark_report(args: argparse.Namespace) -> int:
     from .benchmark import write_benchmark_report
 
     paths = load_paths_config(args.paths_config)
-    run_summary = Path(args.run_summary).resolve() if args.run_summary else _latest_benchmark_run_summary(paths)
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else Path(paths.benchmark_reports_dir)
+    run_summary = (
+        Path(args.run_summary).resolve()
+        if args.run_summary
+        else _latest_benchmark_run_summary(paths)
+    )
+    output_dir = (
+        Path(args.output_dir).resolve()
+        if args.output_dir
+        else Path(
+            paths.benchmark_reports_dir
+            or (paths.evaluation_output_dir / "benchmark_reports")
+        ).resolve()
+    )
+    configured_nde_metrics = (
+        Path(paths.evaluation_output_dir) / "evaluation_metrics.csv"
+    )
+    nde_metrics_path = (
+        Path(args.nde_metrics).resolve()
+        if args.nde_metrics
+        else configured_nde_metrics
+        if configured_nde_metrics.exists()
+        else None
+    )
     report_path = write_benchmark_report(
         run_summary,
         output_dir=output_dir,
-        nde_metrics_path=Path(args.nde_metrics).resolve() if args.nde_metrics else None,
-        comparison_run_summaries=[Path(path).resolve() for path in args.compare_run_summary]
+        nde_metrics_path=nde_metrics_path,
+        comparison_run_summaries=[
+            Path(path).resolve() for path in args.compare_run_summary
+        ]
         if args.compare_run_summary
         else None,
     )
@@ -1276,15 +1344,23 @@ def cmd_benchmark_report(args: argparse.Namespace) -> int:
 
 
 def cmd_benchmark_all(args: argparse.Namespace) -> int:
-    from .benchmark import download_and_prepare_benchmark_dataset, run_benchmark_pipeline, write_benchmark_report
+    from .benchmark import (
+        download_and_prepare_benchmark_dataset,
+        run_benchmark_pipeline,
+        write_benchmark_report,
+    )
 
     paths = load_paths_config(args.paths_config)
     benchmark = load_benchmark_config(args.paths_config)
-    configured_datasets = benchmark.datasets if benchmark.datasets else [benchmark.dataset]
+    configured_datasets = (
+        benchmark.datasets if benchmark.datasets else [benchmark.dataset]
+    )
     run_root_base = (
         Path(args.run_output_dir).resolve()
         if args.run_output_dir
-        else Path(paths.benchmark_runs_dir or (paths.evaluation_output_dir / "benchmark_runs")).resolve()
+        else Path(
+            paths.benchmark_runs_dir or (paths.evaluation_output_dir / "benchmark_runs")
+        ).resolve()
     )
 
     per_dataset_rows: list[dict[str, object]] = []
@@ -1292,14 +1368,19 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
 
     for dataset_cfg in configured_datasets:
         dataset_benchmark = replace(benchmark, dataset=dataset_cfg)
-        dataset_slug = re.sub(r"[^a-z0-9]+", "_", dataset_cfg.dataset_name.lower()).strip("_") or "dataset"
+        dataset_slug = (
+            re.sub(r"[^a-z0-9]+", "_", dataset_cfg.dataset_name.lower()).strip("_")
+            or "dataset"
+        )
 
         dataset_df, written, download_summary = download_and_prepare_benchmark_dataset(
             paths=paths,
             benchmark=dataset_benchmark,
             max_rows=args.max_rows,
             output_raw_dir=Path(args.raw_dir).resolve() if args.raw_dir else None,
-            output_processed_dir=Path(args.processed_dir).resolve() if args.processed_dir else None,
+            output_processed_dir=Path(args.processed_dir).resolve()
+            if args.processed_dir
+            else None,
         )
         run_summary = run_benchmark_pipeline(
             paths=paths,
@@ -1329,15 +1410,39 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
         )
 
     if not summary_paths:
-        raise ValueError("No benchmark datasets configured. Define [benchmark.dataset] or [[benchmark.datasets]].")
+        raise ValueError(
+            "No benchmark datasets configured. Define [benchmark.dataset] or [[benchmark.datasets]]."
+        )
 
+    configured_nde_metrics = (
+        Path(paths.evaluation_output_dir) / "evaluation_metrics.csv"
+    )
+    nde_metrics_path = (
+        Path(args.nde_metrics).resolve()
+        if args.nde_metrics
+        else configured_nde_metrics
+        if configured_nde_metrics.exists()
+        else None
+    )
     report_path = write_benchmark_report(
         summary_paths[0],
-        output_dir=Path(args.report_output_dir).resolve() if args.report_output_dir else Path(paths.benchmark_reports_dir),
-        nde_metrics_path=Path(args.nde_metrics).resolve() if args.nde_metrics else None,
+        output_dir=Path(args.report_output_dir).resolve()
+        if args.report_output_dir
+        else Path(
+            paths.benchmark_reports_dir
+            or (paths.evaluation_output_dir / "benchmark_reports")
+        ).resolve(),
+        nde_metrics_path=nde_metrics_path,
         comparison_run_summaries=summary_paths[1:] if len(summary_paths) > 1 else None,
     )
-    report_output_dir = Path(args.report_output_dir).resolve() if args.report_output_dir else Path(paths.benchmark_reports_dir)
+    report_output_dir = (
+        Path(args.report_output_dir).resolve()
+        if args.report_output_dir
+        else Path(
+            paths.benchmark_reports_dir
+            or (paths.evaluation_output_dir / "benchmark_reports")
+        ).resolve()
+    )
     figure_path = report_output_dir / "figures" / "benchmark_macro_f1_vs_kappa.png"
     response_payload = {
         "datasets": per_dataset_rows,
@@ -1362,21 +1467,35 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     metrics_df, summary, written = evaluate_outputs(
         study=study,
         paths=paths,
-        human_annotation_workbook=Path(args.human_annotation_workbook).resolve() if args.human_annotation_workbook else None,
-        human_annotations_dir=Path(args.human_annotations_dir).resolve() if args.human_annotations_dir else None,
-        llm_predictions_path=Path(args.llm_predictions).resolve() if args.llm_predictions else None,
-        llm_results_dir=Path(args.llm_results_dir).resolve() if args.llm_results_dir else None,
+        human_annotation_workbook=Path(args.human_annotation_workbook).resolve()
+        if args.human_annotation_workbook
+        else None,
+        human_annotations_dir=Path(args.human_annotations_dir).resolve()
+        if args.human_annotations_dir
+        else None,
+        llm_predictions_path=Path(args.llm_predictions).resolve()
+        if args.llm_predictions
+        else None,
+        llm_results_dir=Path(args.llm_results_dir).resolve()
+        if args.llm_results_dir
+        else None,
         annotator_ids=list(args.annotator_id) if args.annotator_id else None,
         experiment_ids=list(args.experiment_id) if args.experiment_id else None,
         prompt_variants=list(args.prompt_variant) if args.prompt_variant else None,
-        sampled_private_workbook=Path(args.sampled_private_workbook).resolve() if args.sampled_private_workbook else None,
-        vader_scores_path=Path(args.vader_scores).resolve() if args.vader_scores else None,
+        sampled_private_workbook=Path(args.sampled_private_workbook).resolve()
+        if args.sampled_private_workbook
+        else None,
+        vader_scores_path=Path(args.vader_scores).resolve()
+        if args.vader_scores
+        else None,
         skip_vader=bool(args.skip_vader),
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
         figure_dpi=int(args.figure_dpi),
         export_figures_pdf=bool(args.export_figures_pdf),
     )
-    print(json.dumps({"rows": len(metrics_df), "summary": summary, **written}, indent=2))
+    print(
+        json.dumps({"rows": len(metrics_df), "summary": summary, **written}, indent=2)
+    )
     return 0
 
 
@@ -1405,17 +1524,28 @@ def cmd_compare_evaluation_outputs(args: argparse.Namespace) -> int:
     output_dir = (
         Path(args.output_dir).resolve()
         if args.output_dir
-        else Path(paths.evaluation_output_dir).resolve() / "preprocessing_effect_comparison"
+        else Path(paths.evaluation_output_dir).resolve()
+        / "preprocessing_effect_comparison"
     )
 
-    baseline = args.baseline if args.baseline is not None else config_payload.get("baseline")
-    title = args.title if args.title is not None else config_payload.get("title", "Preprocessing Effect Comparison Report")
+    baseline = (
+        args.baseline if args.baseline is not None else config_payload.get("baseline")
+    )
+    title = (
+        args.title
+        if args.title is not None
+        else config_payload.get("title", "Preprocessing Effect Comparison Report")
+    )
     focus_scope = (
         args.focus_scope
         if args.focus_scope is not None
         else config_payload.get("focus_scope", "questionnaire_vs_llm")
     )
-    metric = args.metric if args.metric is not None else config_payload.get("metric", "macro_f1")
+    metric = (
+        args.metric
+        if args.metric is not None
+        else config_payload.get("metric", "macro_f1")
+    )
 
     written = compare_evaluation_outputs(
         conditions=conditions,
@@ -1428,7 +1558,9 @@ def cmd_compare_evaluation_outputs(args: argparse.Namespace) -> int:
 
     payload = {
         "conditions_source": "config" if args.config else "flags",
-        "conditions": [{"name": spec.name, "path": str(spec.path)} for spec in conditions],
+        "conditions": [
+            {"name": spec.name, "path": str(spec.path)} for spec in conditions
+        ],
         "output_dir": str(output_dir),
         **written,
     }
