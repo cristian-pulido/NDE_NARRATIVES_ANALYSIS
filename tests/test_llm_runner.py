@@ -518,3 +518,53 @@ def test_ollama_provider_accepts_structured_output_in_thinking() -> None:
 
     assert source_field == "thinking"
     assert '"tone": "neutral"' in raw_text
+
+def test_load_batch_source_explicit_input_path_applies_valid_sections_filter_by_default(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
+    paths = load_paths_config(paths_config)
+
+    explicit_df = pd.read_csv(survey_csv).head(3).copy()
+    explicit_df.loc[:, "TO_DROP"] = False
+    explicit_df.loc[:, "m11_quality_label"] = "Complete structured"
+    explicit_df.loc[:, "n_valid_sections_cleaned"] = [3, 2, 1]
+
+    explicit_path = tmp_path / "explicit_cleaned.csv"
+    explicit_df.to_csv(explicit_path, index=False)
+
+    filtered_df = load_batch_source(
+        study,
+        paths,
+        source="survey",
+        input_path=explicit_path,
+        all_records=False,
+    )
+
+    assert set(filtered_df[study.id_column]) == {101}
+
+
+def test_load_batch_source_explicit_input_path_can_disable_valid_sections_filter(tmp_path: Path) -> None:
+    study = load_study_config(FIXTURES / "study_test.toml")
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
+    paths = load_paths_config(paths_config)
+
+    explicit_df = pd.read_csv(survey_csv).head(3).copy()
+    explicit_df.loc[:, "TO_DROP"] = False
+    explicit_df.loc[:, "m11_quality_label"] = "Complete structured"
+    explicit_df.loc[:, "n_valid_sections_cleaned"] = [3, 2, 1]
+
+    explicit_path = tmp_path / "explicit_cleaned.csv"
+    explicit_df.to_csv(explicit_path, index=False)
+
+    unfiltered_df = load_batch_source(
+        study,
+        paths,
+        source="survey",
+        input_path=explicit_path,
+        all_records=False,
+        min_valid_sections=0,
+    )
+
+    assert set(unfiltered_df[study.id_column]) == {101, 102, 103}
