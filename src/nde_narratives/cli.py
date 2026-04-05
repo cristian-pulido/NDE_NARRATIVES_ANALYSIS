@@ -540,7 +540,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         type=int,
         default=None,
-        help="When a preprocessed dataset is auto-detected, keep only rows with at least N cleaned valid sections.",
+        help="When the input dataset includes n_valid_sections_cleaned (or n_valid_sections), keep only rows with at least N valid sections. Default is 3; set 0 to disable this filter.",
     )
     execution_group = run_llm.add_argument_group("Execution Controls")
     execution_group.add_argument(

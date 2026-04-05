@@ -363,3 +363,14 @@ Per-experiment outputs are written under:
 - `nde evaluate` no longer assumes a single completed human workbook or a single LLM predictions file.
 - `nde evaluate` will reuse a previously generated VADER score file when available, or generate sample-level VADER scores automatically for the majority-reference participant subset.
 - LLM execution is now configured locally through `[llm]` and `[[llm.experiments]]` in `paths.local.toml`, with Ollama as the first backend.
+
+### `run-llm` Valid-Section Filtering Behavior
+
+When `nde run-llm` loads a survey input that includes either `n_valid_sections_cleaned` or `n_valid_sections`, it now applies a valid-section threshold by default, even when `--input-path` is provided explicitly.
+
+- Default behavior: keep rows with at least `3` valid sections.
+- Override threshold: pass `--min-valid-sections N`.
+- Disable valid-section filtering: pass `--min-valid-sections 0`.
+- `--all-records` still bypasses study-level row filters; if you pass `--all-records` together with `--min-valid-sections N`, the valid-section threshold is applied intentionally.
+
+This ensures explicit `--input-path` runs and auto-detected preprocessed runs behave consistently.

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -110,7 +110,8 @@ def load_batch_source(
         metric_column = "n_valid_sections_cleaned" if "n_valid_sections_cleaned" in filtered.columns else "n_valid_sections"
         if metric_column in filtered.columns:
             minimum_sections = int(min_valid_sections) if min_valid_sections is not None else 3
-            filtered = filtered[filtered[metric_column] >= minimum_sections].copy()
+            if minimum_sections > 0:
+                filtered = filtered[filtered[metric_column] >= minimum_sections].copy()
 
         filtered = apply_dataset_row_filters(
             filtered,
@@ -141,6 +142,11 @@ def load_batch_source(
         else:
             raw = read_tabular_file(resolved_survey_source)
             prepared = raw.copy() if all_records else filter_source_data(raw, study)
+            if (
+                ("n_valid_sections_cleaned" in prepared.columns or "n_valid_sections" in prepared.columns)
+                and ((not all_records) or (min_valid_sections is not None))
+            ):
+                prepared = _filter_preprocessed_dataset(prepared)
             prepared = prepared.sort_values(study.id_column).reset_index(drop=True)
             df = assign_participant_codes(prepared, study)
     else:
