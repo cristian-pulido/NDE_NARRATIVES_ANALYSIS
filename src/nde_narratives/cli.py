@@ -919,6 +919,66 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate.set_defaults(handler=cmd_evaluate)
 
+    compare_human_review = subparsers.add_parser(
+        "compare-human-review",
+        formatter_class=NDEHelpFormatter,
+        help="Run alternate human-review alignment comparison against cleaned segmentation, questionnaire, and default-prompt LLM outputs.",
+        description=dedent(
+            """\
+            Parse Data/Human.md style review blocks and compute alignment against:
+            cleaned segmentation outputs, questionnaire labels, and discovered default
+            LLM artifacts (excluding RA1 prompt variants).
+            """
+        ),
+        epilog=_examples_block(
+            "nde compare-human-review --human-md /data/Human.md --cleaned-dataset /data/cleaned_dataset.csv --questionnaire-csv /data/NDE_traslated.csv --llm-results-dir /data/llm_outputs --output-dir /data/human_review_report",
+        ),
+    )
+    _add_config_arguments(compare_human_review)
+    compare_human_review.add_argument(
+        "--human-md",
+        metavar="PATH",
+        required=True,
+        help="Path to Human.md containing manual review blocks.",
+    )
+    compare_human_review.add_argument(
+        "--cleaned-dataset",
+        metavar="PATH",
+        required=True,
+        help="Path to cleaned_dataset.csv used as segmentation baseline.",
+    )
+    compare_human_review.add_argument(
+        "--questionnaire-csv",
+        metavar="PATH",
+        required=True,
+        help="Path to questionnaire CSV (for example NDE_traslated.csv).",
+    )
+    compare_human_review.add_argument(
+        "--llm-results-dir",
+        metavar="PATH",
+        required=True,
+        help="Directory containing per-model LLM artifacts (manifest + predictions.jsonl).",
+    )
+    compare_human_review.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        required=True,
+        help="Directory to write report tables, summary, and figures.",
+    )
+    compare_human_review.add_argument(
+        "--figure-dpi",
+        metavar="N",
+        type=int,
+        default=300,
+        help="Resolution for PNG figure export.",
+    )
+    compare_human_review.add_argument(
+        "--export-figures-pdf",
+        action="store_true",
+        help="Also export PDF copies of figures for manuscript usage.",
+    )
+    compare_human_review.set_defaults(handler=cmd_compare_human_review)
+
     compare_outputs = subparsers.add_parser(
         "compare-evaluation-outputs",
         formatter_class=NDEHelpFormatter,
@@ -1490,6 +1550,28 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         else None,
         skip_vader=bool(args.skip_vader),
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        figure_dpi=int(args.figure_dpi),
+        export_figures_pdf=bool(args.export_figures_pdf),
+    )
+    print(
+        json.dumps({"rows": len(metrics_df), "summary": summary, **written}, indent=2)
+    )
+    return 0
+
+
+def cmd_compare_human_review(args: argparse.Namespace) -> int:
+    from .human_review_compare import run_human_review_comparison
+
+    study = load_study_config(args.study_config)
+    paths = load_paths_config(args.paths_config)
+    metrics_df, summary, written = run_human_review_comparison(
+        study=study,
+        paths=paths,
+        human_md=Path(args.human_md).resolve(),
+        cleaned_dataset=Path(args.cleaned_dataset).resolve(),
+        questionnaire_csv=Path(args.questionnaire_csv).resolve(),
+        llm_results_dir=Path(args.llm_results_dir).resolve(),
+        output_dir=Path(args.output_dir).resolve(),
         figure_dpi=int(args.figure_dpi),
         export_figures_pdf=bool(args.export_figures_pdf),
     )

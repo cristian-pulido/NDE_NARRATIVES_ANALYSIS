@@ -280,6 +280,12 @@ Run evaluation against the majority-vote human reference, questionnaire-derived 
 
     nde evaluate
 
+Run the alternate human-review protocol from `Human.md` against cleaned segmentation, questionnaire labels, and default-prompt LLM outputs (excluding RA1 artifacts):
+
+    nde compare-human-review --human-md /path/Human.md --cleaned-dataset /path/cleaned_dataset.csv --questionnaire-csv /path/NDE_traslated.csv --llm-results-dir /path/llm_outputs_translate_v0_segment_run --output-dir /path/human_review_report --export-figures-pdf
+
+Note: for unit-classification segmentation metrics, use a cleaned dataset in the same language as the questionnaire text (for example `preprocessing_outputs_from_translated_v0/cleaned_dataset.csv` when using `NDE_traslated.csv`).
+
 Useful evaluation options:
 
 - `--human-annotations-dir`: evaluate all discovered human workbooks in a folder.
