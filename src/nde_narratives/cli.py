@@ -1052,6 +1052,79 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compare_outputs.set_defaults(handler=cmd_compare_evaluation_outputs)
 
+    evaluate_uncertainty = subparsers.add_parser(
+        "evaluate-uncertainty",
+        formatter_class=NDEHelpFormatter,
+        help="Compute bootstrap uncertainty intervals from evaluation outputs.",
+        description=dedent(
+            """\
+            Estimate uncertainty for average Cohen kappa and Macro F1 with bootstrap
+            resampling across evaluation metric rows. The command reads one
+            evaluation_outputs folder and writes uncertainty tables, figures, and a
+            Markdown report.
+
+            If --input-dir is omitted, the command uses paths.evaluation_output_dir.
+            If --output-dir is omitted, outputs are written to <input-dir>/uncertainty.
+            """
+        ),
+        epilog=_examples_block(
+            "nde evaluate-uncertainty",
+            "nde evaluate-uncertainty --input-dir /data/nde/evaluation_outputs",
+            "nde evaluate-uncertainty --input-dir /data/nde/evaluation_outputs --bootstrap-samples 10000 --confidence-level 0.95",
+        ),
+    )
+    _add_config_arguments(evaluate_uncertainty)
+    input_group = evaluate_uncertainty.add_argument_group("Input")
+    input_group.add_argument(
+        "--input-dir",
+        metavar="PATH",
+        default=None,
+        help="Evaluation outputs directory containing evaluation_metrics.csv.",
+    )
+    output_group = evaluate_uncertainty.add_argument_group("Output")
+    output_group.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Directory where uncertainty tables, figures, and report are written.",
+    )
+    bootstrap_group = evaluate_uncertainty.add_argument_group("Bootstrap Parameters")
+    bootstrap_group.add_argument(
+        "--bootstrap-samples",
+        metavar="N",
+        type=int,
+        default=5000,
+        help="Number of bootstrap replicates used for confidence intervals.",
+    )
+    bootstrap_group.add_argument(
+        "--confidence-level",
+        metavar="P",
+        type=float,
+        default=0.95,
+        help="Confidence level in (0, 1), for example 0.95 for 95% CIs.",
+    )
+    bootstrap_group.add_argument(
+        "--random-seed",
+        metavar="N",
+        type=int,
+        default=42,
+        help="Random seed for reproducible bootstrap resampling.",
+    )
+    figure_group = evaluate_uncertainty.add_argument_group("Figure Export")
+    figure_group.add_argument(
+        "--figure-dpi",
+        metavar="N",
+        type=int,
+        default=300,
+        help="Resolution for uncertainty figures in raster formats.",
+    )
+    figure_group.add_argument(
+        "--export-figures-pdf",
+        action="store_true",
+        help="Also save uncertainty figures as PDF.",
+    )
+    evaluate_uncertainty.set_defaults(handler=cmd_evaluate_uncertainty)
+
     return parser
 
 
@@ -1647,6 +1720,28 @@ def cmd_compare_evaluation_outputs(args: argparse.Namespace) -> int:
         **written,
     }
     print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_evaluate_uncertainty(args: argparse.Namespace) -> int:
+    from .uncertainty import run_uncertainty_analysis
+
+    paths = load_paths_config(args.paths_config)
+    input_dir = (
+        Path(args.input_dir).resolve()
+        if args.input_dir
+        else Path(paths.evaluation_output_dir).resolve()
+    )
+    written = run_uncertainty_analysis(
+        input_dir=input_dir,
+        output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
+        n_bootstrap=int(args.bootstrap_samples),
+        confidence_level=float(args.confidence_level),
+        random_seed=int(args.random_seed),
+        figure_dpi=int(args.figure_dpi),
+        export_figures_pdf=bool(args.export_figures_pdf),
+    )
+    print(json.dumps(written, indent=2))
     return 0
 
 
