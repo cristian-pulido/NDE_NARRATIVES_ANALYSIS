@@ -317,6 +317,19 @@ Useful comparison options:
 - `--title "Custom comparison title"`: override report title.
 - `--output-dir PATH`: write comparison tables, figures, and markdown report to a custom destination.
 
+Compute bootstrap uncertainty intervals for evaluation outputs (with emphasis on questionnaire vs LLM metrics), writing a dedicated `uncertainty/` package with CSV tables, figures, and Markdown report:
+
+    nde evaluate-uncertainty
+
+Useful uncertainty options:
+
+- `--input-dir PATH`: source evaluation outputs directory (must contain `evaluation_metrics.csv`).
+- `--output-dir PATH`: destination directory for uncertainty artifacts; default is `<input-dir>/uncertainty`.
+- `--bootstrap-samples N`: bootstrap replicates (default `5000`).
+- `--confidence-level P`: interval confidence level in `(0, 1)` (default `0.95`).
+- `--random-seed N`: deterministic seed for reproducible intervals.
+- `--export-figures-pdf`: also export PDF copies of uncertainty figures.
+
 ## Typical Workflow
 
 ### Multiple annotators and multiple experiments
