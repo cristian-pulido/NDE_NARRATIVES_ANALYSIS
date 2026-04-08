@@ -623,6 +623,9 @@ def _plot_family_metrics_combined(
     }
 
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 5.2), sharey=False)
+    axis_label_fontsize = 13
+    tick_label_fontsize = 12
+    legend_fontsize = 12
 
     llm_ci = (
         raw_df[raw_df["comparison"] == "human_vs_llm"]
@@ -698,7 +701,12 @@ def _plot_family_metrics_combined(
                 else:
                     y_errors.append(0.0)
         ax.set_xticks([source_positions[label] for label in source_order])
-        ax.set_xticklabels(source_order, rotation=0, ha="center")
+        ax.set_xticklabels(
+            source_order,
+            rotation=0,
+            ha="center",
+            fontsize=tick_label_fontsize,
+        )
         if source_positions:
             x_min = min(source_positions.values()) - 0.35
             x_max = max(source_positions.values()) + 0.35
@@ -708,7 +716,8 @@ def _plot_family_metrics_combined(
             y_max = max(v + e for v, e in zip(y_values, y_errors, strict=False))
             margin = max(0.03, 0.08 * (y_max - y_min if y_max > y_min else 1.0))
             ax.set_ylim(max(0.0, y_min - margin), min(1.0, y_max + margin))
-        ax.set_ylabel(panel_title)
+        ax.set_ylabel(panel_title, fontsize=axis_label_fontsize)
+        ax.tick_params(axis="y", labelsize=tick_label_fontsize)
         ax.grid(axis="y", linestyle="--", alpha=0.4, zorder=0)
     axes[0].set_xlabel("")
     axes[1].set_xlabel("")
@@ -752,7 +761,7 @@ def _plot_family_metrics_combined(
         labels=combined_labels,
         loc="upper center",
         frameon=False,
-        fontsize=10,
+        fontsize=legend_fontsize,
         ncol=3,
         borderaxespad=0.3,
         handletextpad=0.5,
