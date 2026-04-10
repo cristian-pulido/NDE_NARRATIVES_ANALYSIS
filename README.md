@@ -6,6 +6,7 @@ Structured workflow for Near-Death Experience (NDE) narratives, including prepro
 
 - [What This Repository Is](#what-this-repository-is)
 - [Choose Your Path](#choose-your-path)
+- [Video Summary](#video-summary)
 - [Installation](#installation)
 - [Minimal Configuration](#minimal-configuration)
 - [Core Commands](#core-commands)
@@ -45,6 +46,16 @@ If you only want quick interactive testing without local setup, use the public l
 - https://huggingface.co/spaces/cpulido/NDE-NARRATIVES-ANALYSIS
 
 Note: the Space is intentionally lightweight and not a replacement for this full local pipeline.
+
+## Video Summary
+
+Short overview of article-aligned findings and the narrative-vs-questionnaire framing:
+
+<p align="center">
+  <video src="Stories_vs_Surveys.mp4" controls width="760"></video>
+</p>
+
+Fallback direct link: [`Stories_vs_Surveys.mp4`](Stories_vs_Surveys.mp4)
 
 ## Installation
 
@@ -153,10 +164,11 @@ nde local-demo
 
 Supports:
 
-- Three Sections (required)
-- Single Narrative (auto-segment)
-- Table-first outputs (summary, dimensions, segmented text)
-- Optional valence alignment check
+- Guided mode (three sections) and complex mode (single narrative auto-segmentation)
+- Stage-based pipeline view (input -> segmentation -> module analysis -> interpretation)
+- Module tabs for tone estimation, structured features, and alignment layer
+- Optional valence alignment check against overall experience-weighted tone
+- Embedded local video summary when `Stories_vs_Surveys.mp4` is present
 
 Remote SSH access pattern:
 

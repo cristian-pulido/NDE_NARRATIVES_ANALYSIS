@@ -11,6 +11,7 @@ The local demo is designed for rapid exploration and sanity checks:
 - test prompts and models with custom text
 - inspect structured outputs in tables
 - compare optional user-provided valence against detected overall experience tone
+- make each pipeline stage explicit for educational/article-aligned interpretation
 
 It is not a replacement for the full experiment + evaluation workflow.
 
@@ -47,6 +48,26 @@ Optional host/port override:
 nde local-demo --host 0.0.0.0 --port 7860
 ```
 
+## Stage-Based Interface
+
+The local demo is organized as a transparent workflow:
+
+1. **Stage 1 - Input**
+   - guided mode: user provides the three sections
+   - complex mode: user provides one narrative for model-assisted segmentation
+
+2. **Stage 2 - Segmentation**
+   - shows the exact section texts used for downstream analysis
+   - highlights whether segmentation came from user input or model-assisted split
+
+3. **Stage 3 - Module Analysis**
+   - **Tone Estimation**: per-section tone + overall experience-weighted tone
+   - **Structured Features**: context type, perceptual/experiential features, reflective aftereffects, evidence
+   - **Alignment Layer**: optional valence match/mismatch vs overall tone
+
+4. **Stage 4 - Interpretation**
+   - concise summary of recoverable signals, ambiguous parts, and limits
+
 ## Input Modes
 
 ### Three Sections (Required)
@@ -82,6 +103,10 @@ The demo uses human-readable tables by default:
    - optional check only when valence is provided by the user
    - compares provided valence with model-detected overall experience tone
    - returns evidence snippets used for the comparison
+
+## Video Summary
+
+If `Stories_vs_Surveys.mp4` exists at repository root, the local demo embeds it in the page under a "Results Overview" section.
 
 ## Optional Valence Behavior
 
