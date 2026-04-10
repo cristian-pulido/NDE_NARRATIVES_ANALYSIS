@@ -65,6 +65,17 @@ def test_run_llm_help_includes_selection_and_examples() -> None:
     assert "nde run-llm --all-experiments" in result.stdout
 
 
+def test_local_demo_help_includes_ui_options_and_examples() -> None:
+    result = run_cli("local-demo", "--help")
+
+    assert result.returncode == 0, result.stderr
+    assert "Start a local Gradio interface" in result.stdout
+    assert "--host HOST" in result.stdout
+    assert "--port PORT" in result.stdout
+    assert "--share" in result.stdout
+    assert "nde local-demo --port 7870" in result.stdout
+
+
 def test_evaluate_help_explains_discovery_and_vader_behavior() -> None:
     result = run_cli("evaluate", "--help")
 

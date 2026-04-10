@@ -25,7 +25,7 @@ The translated dataset preserves the original section source column names (same 
 
 ## Preprocessing Artifact Contract
 
-[`nde preprocess`](src/nde_narratives/cli.py:202) writes a dedicated preprocessing artifact directory under `preprocessing_output_dir`.
+[`nde preprocess`](../src/nde_narratives/cli.py:202) writes a dedicated preprocessing artifact directory under `preprocessing_output_dir`.
 
 Typical files:
 
@@ -44,7 +44,7 @@ The preprocessing stage is resumable:
 - rows with `success` are not rerun
 - rows with `failed` are retried until `max_attempts`
 - rows with `exhausted` are left untouched unless `--retry-exhausted` is passed
-- [`nde preprocess --from-scratch`](src/nde_narratives/cli.py:247) clears the existing preprocessing artifacts in the target output directory before rebuilding
+- [`nde preprocess --from-scratch`](../src/nde_narratives/cli.py:247) clears the existing preprocessing artifacts in the target output directory before rebuilding
 
 By default, preprocessing accepts rows with at least one meaningful narrative section, even if the original source does not have all three sections populated. The stricter `3 valid sections` requirement is intended for downstream analysis, not for admission into preprocessing.
 
@@ -69,12 +69,12 @@ This makes it explicit how many rows already had 3 usable sections before prepro
 
 The preprocessing prompts are intentionally separate from downstream analysis prompts:
 
-- [`prompts/preprocessing/`](prompts/preprocessing/)
-- [`prompts/analysis/`](prompts/analysis/)
+- [`prompts/preprocessing/`](../prompts/preprocessing/)
+- [`prompts/analysis/`](../prompts/analysis/)
 
 Prompt repository policy:
 
-- default downstream prompts must exist only in [`prompts/analysis/`](prompts/analysis/)
+- default downstream prompts must exist only in [`prompts/analysis/`](../prompts/analysis/)
 - duplicate default prompt files under `prompts/*.md` at repository root are not supported
 - variant prompts are loaded from `prompt_variants_dir/<variant>/` when configured
 
@@ -273,7 +273,7 @@ The effective comparison key written into metrics is `artifact_id`, which is `ex
 Source selection behavior for `nde sentiment-sensitivity`:
 
 - if `--input-path` is provided, that file is used
-- otherwise, if [`preprocessing_outputs/cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:23) exists, VADER uses the cleaned dataset
+- otherwise, if [`preprocessing_outputs/cleaned_dataset.csv`](../src/nde_narratives/preprocessing.py:23) exists, VADER uses the cleaned dataset
 - otherwise, if `preprocessing_outputs/translated_dataset.csv` exists, VADER uses the translated dataset
 - otherwise, VADER falls back to the configured survey source
 
