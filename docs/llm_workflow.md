@@ -236,6 +236,17 @@ source = "sampled-private"
 
 Then run the same command with `--limit`.
 
+### Optional pre-check with local interactive demo
+
+Before launching full experiment runs, you can quickly sanity-check model behavior with the local interactive UI:
+
+```bash
+pip install -e .[ui]
+nde local-demo
+```
+
+The local demo is table-first and useful for validating extraction behavior on custom text. For detailed usage and remote SSH guidance, see [`docs/local_demo.md`](local_demo.md).
+
 ## 6. Understand the Output
 
 Each experiment is written under:

@@ -556,6 +556,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_llm.set_defaults(handler=cmd_run_llm)
 
+    local_demo = subparsers.add_parser(
+        "local-demo",
+        formatter_class=NDEHelpFormatter,
+        help="Launch a local interactive web UI for small narrative trials.",
+        description=dedent(
+            """\
+            Start a local Gradio interface for quick interactive testing without running
+            full experiment batches. The interface supports either direct three-section
+            input or single-narrative auto-segmentation before analysis.
+            """
+        ),
+        epilog=_examples_block(
+            "nde local-demo",
+            "nde local-demo --port 7870",
+            "nde local-demo --host 0.0.0.0 --port 7860",
+        ),
+    )
+    _add_config_arguments(local_demo)
+    local_demo.add_argument(
+        "--host",
+        metavar="HOST",
+        default="127.0.0.1",
+        help="Host interface for the local web server.",
+    )
+    local_demo.add_argument(
+        "--port",
+        metavar="PORT",
+        type=int,
+        default=7860,
+        help="Port for the local web server.",
+    )
+    local_demo.add_argument(
+        "--share",
+        action="store_true",
+        help="Enable Gradio public sharing link (optional, disabled by default).",
+    )
+    local_demo.set_defaults(handler=cmd_local_demo)
+
     sentiment = subparsers.add_parser(
         "sentiment-sensitivity",
         formatter_class=NDEHelpFormatter,
@@ -1339,6 +1377,19 @@ def cmd_run_llm(args: argparse.Namespace) -> int:
         progress_callback=_make_progress_callback("run-llm"),
     )
     print(json.dumps(summary, indent=2))
+    return 0
+
+
+def cmd_local_demo(args: argparse.Namespace) -> int:
+    from .local_demo import launch_local_demo
+
+    launch_local_demo(
+        study_config_path=str(Path(args.study_config).resolve()),
+        paths_config_path=str(Path(args.paths_config).resolve()),
+        host=str(args.host),
+        port=int(args.port),
+        share=bool(args.share),
+    )
     return 0
 
 

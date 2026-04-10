@@ -48,6 +48,75 @@ Then edit `config/paths.local.toml` and replace the questionnaire column placeho
 
 After the virtual environment is active, the examples in this repository use `nde ...`. If the `nde` command is not available in your shell, use `python -m nde_narratives.cli ...` on Windows or `python3 -m nde_narratives.cli ...` on Linux/macOS.
 
+## Quick Start
+
+Choose one of these two tracks depending on your goal.
+
+### Track A: Replicate experiments end to end
+
+1. Configure `config/paths.local.toml` (`data_dir`, `survey_csv`, `[preprocessing]`, `[llm]`, and `[[llm.experiments]]`).
+2. Validate your configuration:
+
+   ```bash
+   nde validate-config
+   ```
+
+3. (Optional) Translate source narratives to English:
+
+   ```bash
+   nde translate
+   ```
+
+4. Run one-time cleaning/resegmentation:
+
+   ```bash
+   nde preprocess
+   ```
+
+5. Run a smoke test before full runs:
+
+   ```bash
+   nde run-llm --experiment-id smoke_qwen08 --limit 2
+   ```
+
+6. Run full experiments:
+
+   ```bash
+   nde run-llm --all-experiments
+   ```
+
+7. Evaluate against human annotations and questionnaire references:
+
+   ```bash
+   nde evaluate
+   ```
+
+### Track B: Run quick local interactive tests
+
+1. Install UI extras:
+
+   ```bash
+   pip install -e .[ui]
+   ```
+
+2. Launch local demo:
+
+   ```bash
+   nde local-demo
+   ```
+
+3. Use one of the two input modes:
+   - **Three Sections (Required)**
+   - **Single Narrative (Auto-segment)**
+
+4. Review table-based outputs:
+   - Section-Level Summary
+   - Extracted Dimensions
+   - Segmented Narrative
+   - Valence Alignment (only compares when optional valence is provided)
+
+See full local demo usage guide in [`docs/local_demo.md`](docs/local_demo.md).
+
 ## Minimal Config
 
 In most cases you only need:
@@ -207,7 +276,7 @@ Useful preprocessing options:
 
 - `--all-records`: bypass study-level row filters.
 - `--retry-exhausted`: retry rows previously marked exhausted.
-- `--from-scratch`: borrar el ledger previo y recomenzar la corrida desde cero en la carpeta de salida elegida.
+- `--from-scratch`: reset previous preprocessing ledger state and rerun from zero in the selected output directory.
 - `--generate-validation-sample`: write a human-review workbook after preprocessing.
 - `--validation-n-total`: size of the optional validation sample.
 
@@ -258,6 +327,54 @@ If you want to keep only fully usable cleaned narratives, add:
     nde run-llm --experiment-id qwen25_baseline --min-valid-sections 3
 
 Use `--all-experiments` to execute every enabled `[[llm.experiments]]` entry in `paths.local.toml`. The command preserves successful rows, retries pending or failed rows up to `max_attempts`, and returns a no-op message when the artifact is already complete for that configuration.
+
+### Local Interactive Demo (Ollama)
+
+For quick local trials (without running full batch experiments), you can launch a local web UI that supports:
+
+- **Three Sections (Required):** direct `context`, `experience`, and `aftereffects` input.
+- **Single Narrative (Auto-segment):** one full text input, auto-segmented first, then analyzed by section.
+
+Install UI dependencies:
+
+```bash
+pip install -e .[ui]
+```
+
+Run the local demo:
+
+```bash
+nde local-demo
+```
+
+Optional server controls:
+
+```bash
+nde local-demo --host 0.0.0.0 --port 7860
+```
+
+Outputs shown in the local demo are table-first and human-readable:
+
+- **Section-Level Summary**: tone, context type, and evidence by narrative part.
+- **Extracted Dimensions**: extracted categorical dimensions and values.
+- **Segmented Narrative**: text actually used for section-level analysis.
+- **Valence Alignment**: optional comparison between user-provided valence and the model-detected overall experience tone.
+
+Remote server usage (SSH): if you run `nde local-demo` on a remote machine, use SSH port forwarding to open it in your local browser:
+
+```bash
+ssh -L 7860:127.0.0.1:7860 <user>@<server>
+```
+
+Then open `http://127.0.0.1:7860` locally.
+
+Important note about `--share`: a public Gradio link is usually not useful with local Ollama because the app backend still depends on `localhost:11434` on the server host.
+
+Important disclaimer shown in the UI:
+
+- This tool is for research and educational use only; it is not a medical or psychological diagnostic system.
+- Do not submit personally identifying or highly sensitive information.
+- Model outputs may be inaccurate, incomplete, or biased and require human review.
 
 The expected prompt separation is now:
 
