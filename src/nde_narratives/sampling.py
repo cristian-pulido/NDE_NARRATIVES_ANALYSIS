@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 from typing import Any
@@ -18,7 +18,15 @@ def is_meaningful_text(value: object) -> bool:
     normalized = str(value).strip()
     if not normalized:
         return False
-    return normalized.lower() not in {"n/a", "na", "none", "nothing", "see above", "-", "--"}
+    return normalized.lower() not in {
+        "n/a",
+        "na",
+        "none",
+        "nothing",
+        "see above",
+        "-",
+        "--",
+    }
 
 
 def apply_dataset_row_filters(
@@ -33,8 +41,17 @@ def apply_dataset_row_filters(
     out = df.copy()
 
     quality_column = study.dataset.get("quality_label_column")
-    effective_quality_values = quality_values if quality_values is not None else study.dataset.get("quality_values_to_use")
-    if apply_quality_filter and quality_column and effective_quality_values and str(quality_column) in out.columns:
+    effective_quality_values = (
+        quality_values
+        if quality_values is not None
+        else study.dataset.get("quality_values_to_use")
+    )
+    if (
+        apply_quality_filter
+        and quality_column
+        and effective_quality_values
+        and str(quality_column) in out.columns
+    ):
         out = out[out[str(quality_column)].isin(effective_quality_values)].copy()
 
     to_drop_column = study.dataset.get("to_drop_column")
@@ -63,7 +80,9 @@ def filter_source_data(df: pd.DataFrame, study: StudyConfig) -> pd.DataFrame:
     for source_column in study.text_columns().values():
         out[f"__valid_{source_column}"] = out[source_column].apply(is_meaningful_text)
 
-    valid_columns = [f"__valid_{source_column}" for source_column in study.text_columns().values()]
+    valid_columns = [
+        f"__valid_{source_column}" for source_column in study.text_columns().values()
+    ]
     require_all = bool(study.dataset.get("require_all_texts", True))
     if require_all:
         out = out[out[valid_columns].all(axis=1)].copy()
@@ -112,8 +131,28 @@ def proportional_stratified_sample(
     return sampled
 
 
+def _stable_id_token(real_id: object) -> str:
+    if pd.isna(real_id):
+        return ""
+
+    if isinstance(real_id, (int, np.integer)):
+        return str(int(real_id))
+    if isinstance(real_id, (float, np.floating)):
+        numeric = float(real_id)
+        if numeric.is_integer():
+            return str(int(numeric))
+        return str(real_id).strip()
+
+    text = str(real_id).strip()
+    if text.endswith(".0"):
+        candidate = text[:-2]
+        if candidate and candidate.lstrip("-").isdigit():
+            return candidate
+    return text
+
+
 def make_participant_code(real_id: object, prefix: str, digits: int, salt: str) -> str:
-    token = f"{salt}|{real_id}"
+    token = f"{salt}|{_stable_id_token(real_id)}"
     digest = hashlib.sha1(token.encode("utf-8")).hexdigest().upper()
     stable_width = max(1, min(int(digits), len(digest)))
     return f"{prefix}_{digest[:stable_width]}"
@@ -135,13 +174,20 @@ def assign_participant_codes(df: pd.DataFrame, study: StudyConfig) -> pd.DataFra
 
     while True:
         codes = [
-            make_participant_code(real_id=row[study.id_column], prefix=prefix, digits=stable_width, salt=salt)
+            make_participant_code(
+                real_id=row[study.id_column],
+                prefix=prefix,
+                digits=stable_width,
+                salt=salt,
+            )
             for _, row in out.iterrows()
         ]
         if len(set(codes)) == len(codes):
             break
         if stable_width >= SHA1_HEX_LENGTH:
-            raise ValueError("Could not assign unique participant_code values after expanding the stable hash width.")
+            raise ValueError(
+                "Could not assign unique participant_code values after expanding the stable hash width."
+            )
         stable_width = min(stable_width + 4, SHA1_HEX_LENGTH)
 
     if "participant_code" in out.columns:
@@ -151,7 +197,13 @@ def assign_participant_codes(df: pd.DataFrame, study: StudyConfig) -> pd.DataFra
 
 
 def build_visible_column_map(study: StudyConfig) -> pd.DataFrame:
-    rows = [{"section": "", "internal_column": "participant_code", "visible_column": "Participant Code"}]
+    rows = [
+        {
+            "section": "",
+            "internal_column": "participant_code",
+            "visible_column": "Participant Code",
+        }
+    ]
 
     for section_name in study.section_order:
         section = study.sections[section_name]
@@ -226,13 +278,19 @@ def create_annotation_frames(
         random_state=int(random_state or study.sampling["random_state"]),
     )
     sampled = assign_participant_codes(sampled, study)
-    annotation_df, mapping_df, column_map_df, sampled_private_df = build_annotation_dataframes(sampled, study)
+    annotation_df, mapping_df, column_map_df, sampled_private_df = (
+        build_annotation_dataframes(sampled, study)
+    )
 
     summary = {
         "n_input": int(len(source_df)),
         "n_filtered": int(len(filtered)),
         "n_sampled": int(len(sampled_private_df)),
-        "strata_distribution_filtered": filtered[study.stratify_column].value_counts().to_dict(),
-        "strata_distribution_sampled": sampled_private_df[study.stratify_column].value_counts().to_dict(),
+        "strata_distribution_filtered": filtered[study.stratify_column]
+        .value_counts()
+        .to_dict(),
+        "strata_distribution_sampled": sampled_private_df[study.stratify_column]
+        .value_counts()
+        .to_dict(),
     }
     return annotation_df, mapping_df, column_map_df, sampled_private_df, summary
