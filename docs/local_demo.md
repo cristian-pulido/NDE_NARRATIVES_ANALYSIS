@@ -2,6 +2,8 @@
 
 This guide explains how to run the local interactive web app for quick narrative trials without launching full experiment batches.
 
+Back to docs index: [`docs/README.md`](README.md)
+
 ## Purpose
 
 The local demo is designed for rapid exploration and sanity checks:
@@ -11,6 +13,10 @@ The local demo is designed for rapid exploration and sanity checks:
 - compare optional user-provided valence against detected overall experience tone
 
 It is not a replacement for the full experiment + evaluation workflow.
+
+If you need the no-setup public preview, use the lightweight Space:
+
+- https://huggingface.co/spaces/cpulido/NDE-NARRATIVES-ANALYSIS
 
 ## Prerequisites
 

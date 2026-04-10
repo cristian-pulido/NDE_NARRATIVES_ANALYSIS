@@ -2,6 +2,18 @@
 
 This guide explains the practical LLM workflow for a user who just installed the repository and wants to run a small smoke test before launching a full experiment.
 
+## Quick Navigation
+
+- [1. Install and Prepare](#1-install-and-prepare)
+- [2. Configure Preprocessing and Analysis Models](#2-configure-preprocessing-and-analysis-models)
+- [3. Run Preprocessing First](#3-run-preprocessing-first)
+- [5. Run a Small Smoke Test](#5-run-a-small-smoke-test)
+- [7. Run the Full Experiment](#7-run-the-full-experiment)
+- [8. Evaluate the Results](#8-evaluate-the-results)
+- [11. Troubleshooting](#11-troubleshooting)
+
+Back to docs index: [`docs/README.md`](README.md)
+
 ## 1. Install and Prepare
 
 From the repository root, create and activate the virtual environment.
@@ -24,7 +36,7 @@ pip install -e .[dev]
 cp config/paths.example.toml config/paths.local.toml
 ```
 
-Then edit [`config/paths.local.toml`](config/paths.local.toml):
+Then edit [`config/paths.local.toml`](../config/paths.local.toml):
 
 - set `[paths].data_dir`
 - set `[paths].survey_csv`
@@ -39,7 +51,7 @@ After the environment is active, the commands below use `nde ...`. If your shell
 
 ## 2. Configure Preprocessing and Analysis Models
 
-The runtime configuration lives in [`config/paths.local.toml`](config/paths.local.toml), but preprocessing and analysis are intentionally separate.
+The runtime configuration lives in [`config/paths.local.toml`](../config/paths.local.toml), but preprocessing and analysis are intentionally separate.
 
 Example:
 
@@ -95,7 +107,7 @@ temperature = 0.0
 Important notes:
 
 - `nde translate` is the optional one-time translation step and does not use analysis experiments.
-- [`nde preprocess`](src/nde_narratives/cli.py:202) is the canonical one-time segmentation/validation cleaning step and does not use analysis experiments.
+- [`nde preprocess`](../src/nde_narratives/cli.py:202) is the canonical one-time segmentation/validation cleaning step and does not use analysis experiments.
 - `[preprocessing]` should describe the single model configuration used to create the cleaned dataset.
 - `source = "survey"` means the runner uses the survey CSV, not the human annotation sample.
 - If you want to run only the generated validation sample, set `source = "sampled-private"` instead. That makes `run-llm` use `sampled_private_workbook`, which is the same sample used by the human validation workflow.
@@ -107,7 +119,7 @@ Important notes:
 ### Bedrock runtime option (AWS)
 
 If you want to run analysis on AWS Bedrock instead of Ollama, create a local Bedrock config file at
-[`config/paths.bedrock.toml`](config/paths.bedrock.toml) (this file is intentionally gitignored for local paths/credentials).
+[`config/paths.bedrock.toml`](../config/paths.bedrock.toml) (this file is intentionally gitignored for local paths/credentials).
 
 Highlights of the Bedrock template:
 
@@ -115,7 +127,7 @@ Highlights of the Bedrock template:
 - `aws_region` and optional `aws_profile`
 - output directed to a parallel folder `llm_outputs_bedrock`
 - `source = "survey"` so the run uses the cleaned dataset automatically when
-  [`cleaned_dataset.csv`](src/nde_narratives/preprocessing.py:504) exists
+  [`cleaned_dataset.csv`](../src/nde_narratives/preprocessing.py:504) exists
 - five preconfigured experiments for:
   - `anthropic.claude-3-5-sonnet-20240620-v1:0`
   - `anthropic.claude-3-haiku-20240307-v1:0`
@@ -177,11 +189,11 @@ Important run summary fields:
 
 These make it explicit how many rows already had 3 usable sections before preprocessing and how many ended with 3 usable sections after preprocessing.
 
-The preprocessing prompts live under [`prompts/preprocessing/`](prompts/preprocessing/), while downstream analysis prompts live under [`prompts/analysis/`](prompts/analysis/).
+The preprocessing prompts live under [`prompts/preprocessing/`](../prompts/preprocessing/), while downstream analysis prompts live under [`prompts/analysis/`](../prompts/analysis/).
 
 Prompt policy (to avoid duplicate defaults):
 
-- repository defaults for downstream analysis must exist only in [`prompts/analysis/`](prompts/analysis/)
+- repository defaults for downstream analysis must exist only in [`prompts/analysis/`](../prompts/analysis/)
 - do not add mirrored default files under `prompts/*.md` at repository root
 - experiment-specific variants belong in `prompt_variants_dir/<variant>/`
 
@@ -203,13 +215,13 @@ Before running the full dataset, execute a tiny subset:
 nde run-llm --experiment-id smoke_qwen08 --limit 2
 ```
 
-When `llm.source = "survey"` and no explicit `--input-path` is passed, [`nde run-llm`](src/nde_narratives/cli.py:402) resolves source priority as:
+When `llm.source = "survey"` and no explicit `--input-path` is passed, [`nde run-llm`](../src/nde_narratives/cli.py:402) resolves source priority as:
 
 1. `preprocessing_output_dir/cleaned_dataset.csv`
 2. `preprocessing_output_dir/translated_dataset.csv`
 3. configured `survey_csv`
 
-In auto-detected translated/cleaned paths, downstream loading keeps rows based on post-preprocessing validity metadata when available (and still honors [`--min-valid-sections`](src/nde_narratives/cli.py:454) when provided):
+In auto-detected translated/cleaned paths, downstream loading keeps rows based on post-preprocessing validity metadata when available (and still honors [`--min-valid-sections`](../src/nde_narratives/cli.py:454) when provided):
 
 ```bash
 nde run-llm --experiment-id smoke_qwen08 --min-valid-sections 3
@@ -314,7 +326,7 @@ Evaluation still compares automated outputs only against the adjudicated human s
 
 ## 9. Prompt Variants
 
-By default, downstream analysis prompts are loaded from [`prompts/analysis/`](prompts/analysis/) via [`resolve_prompt_root()`](src/nde_narratives/prompting.py:18).
+By default, downstream analysis prompts are loaded from [`prompts/analysis/`](../prompts/analysis/) via [`resolve_prompt_root()`](../src/nde_narratives/prompting.py:18).
 
 If you define `prompt_variant = "baseline_v2"` in an experiment, the CLI first looks for:
 
@@ -328,7 +340,7 @@ That variant folder must contain:
 - `experience_prompt.md`
 - `aftereffects_prompt.md`
 
-If the variant folder does not exist, the CLI falls back to the repository default prompts in [`prompts/analysis/`](prompts/analysis/).
+If the variant folder does not exist, the CLI falls back to the repository default prompts in [`prompts/analysis/`](../prompts/analysis/).
 
 With the default path layout, `prompt_variants_dir` resolves to:
 
