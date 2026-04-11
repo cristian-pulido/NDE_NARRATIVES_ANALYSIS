@@ -43,7 +43,7 @@ Use this path when you want reproducible experiments and full evaluation.
 
 If you only want quick interactive testing without local setup, use the public lightweight Space:
 
-- https://huggingface.co/spaces/cpulido/NDE-NARRATIVES-ANALYSIS
+- [https://huggingface.co/spaces/cpulido/NDE-NARRATIVES-ANALYSIS](https://cpulido-nde-narratives-analysis.hf.space)
 
 Note: the Space is intentionally lightweight and not a replacement for this full local pipeline.
 
