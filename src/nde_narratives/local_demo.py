@@ -392,7 +392,7 @@ def launch_local_demo(
 
     fallback_models = configured_model_fallbacks(llm_config, preprocessing)
     default_base_url = str(llm_config.runtime.base_url)
-    video_path = Path(PROJECT_ROOT) / "Stories_vs_Surveys.mp4"
+    video_path = Path(PROJECT_ROOT) / "Stories_vs_Surveys.mov"
 
     def _discover_models(base_url: str) -> tuple[list[str], str]:
         try:
@@ -586,7 +586,7 @@ footer, .footer, #footer {display: none !important;}
             )
         else:
             gr.Markdown(
-                "Video not found at repository root (`Stories_vs_Surveys.mp4`)."
+                "Video not found at repository root (`Stories_vs_Surveys.mov`)."
             )
 
         gr.Markdown(DISCLAIMER_MD)

@@ -106,7 +106,7 @@ The demo uses human-readable tables by default:
 
 ## Video Summary
 
-If `Stories_vs_Surveys.mp4` exists at repository root, the local demo embeds it in the page under a "Results Overview" section.
+If `Stories_vs_Surveys.mov` exists at repository root, the local demo embeds it in the page under a "Results Overview" section.
 
 ## Optional Valence Behavior
 

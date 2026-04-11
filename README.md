@@ -52,10 +52,10 @@ Note: the Space is intentionally lightweight and not a replacement for this full
 Short overview of article-aligned findings and the narrative-vs-questionnaire framing:
 
 <p align="center">
-  <video src="Stories_vs_Surveys.mp4" controls width="760"></video>
+  <video src="Stories_vs_Surveys.mov" controls width="760"></video>
 </p>
 
-Fallback direct link: [`Stories_vs_Surveys.mp4`](Stories_vs_Surveys.mp4)
+Fallback direct link: [`Stories_vs_Surveys.mov`](Stories_vs_Surveys.mov)
 
 ## Installation
 
@@ -168,7 +168,7 @@ Supports:
 - Stage-based pipeline view (input -> segmentation -> module analysis -> interpretation)
 - Module tabs for tone estimation, structured features, and alignment layer
 - Optional valence alignment check against overall experience-weighted tone
-- Embedded local video summary when `Stories_vs_Surveys.mp4` is present
+- Embedded local video summary when `Stories_vs_Surveys.mov` is present
 
 Remote SSH access pattern:
 
