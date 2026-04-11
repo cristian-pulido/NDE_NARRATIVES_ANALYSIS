@@ -49,13 +49,11 @@ Note: the Space is intentionally lightweight and not a replacement for this full
 
 ## Video Summary
 
-Short overview of article-aligned findings and the narrative-vs-questionnaire framing:
 
-<p align="center">
-  <video src="Stories_vs_Surveys.mov" controls width="760"></video>
-</p>
 
-Fallback direct link: [`Stories_vs_Surveys.mov`](Stories_vs_Surveys.mov)
+https://github.com/user-attachments/assets/4fffaed9-7a8c-431c-a8ac-8f6bd717577f
+
+
 
 ## Installation
 
