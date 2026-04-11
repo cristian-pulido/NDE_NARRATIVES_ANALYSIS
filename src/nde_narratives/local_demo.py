@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 from .config import (
@@ -9,6 +10,7 @@ from .config import (
     load_preprocessing_config,
     load_study_config,
 )
+from .constants import PROJECT_ROOT
 from .interactive import (
     analyze_single_narrative,
     analyze_three_sections,
@@ -62,14 +64,87 @@ DISCLAIMER_MD = """
 
 
 INTRO_MD = """
-## What This Page Does
+## Why This Problem Matters
 
-This page provides a local, guided analysis of near-death narratives using your Ollama model.
+Near-death experiences can be represented in two different but complementary ways:
 
-- **Goal:** transform narrative text into structured, interpretable findings.
-- **Mode 1:** provide three parts directly (before the NDE, the core experience, and aftereffects).
-- **Mode 2:** provide one narrative, then the app segments it before analysis.
-- **Outputs:** easy-to-read tables with tone, evidence, and extracted dimensions.
+- **Narratives** (rich, temporal, contextual first-person text)
+- **Questionnaire-style labels** (standardized, structured categories)
+
+These representations do not always align perfectly. A narrative may contain local fear, confusion, or ambiguity while the overall questionnaire appraisal is later positive or meaningful.
+
+This interface is designed to make that representational mismatch visible through transparent stages instead of a black-box prediction.
+""".strip()
+
+
+RESEARCH_QUESTIONS_MD = """
+## Core Questions From the Study
+
+1. How much do narrative-derived signals align with questionnaire-style labels?
+2. Is narrative tone enough to recover self-reported valence?
+3. Are concrete experiential features easier to recover than reflective aftereffects?
+4. Is disagreement mainly model error, or a representational mismatch between formats?
+""".strip()
+
+
+WHAT_WAS_DONE_MD = """
+## What This Demo Reproduces
+
+- Section-aware analysis of **context**, **core experience**, and **aftereffects**.
+- LLM-based extraction of tone, contextual framing, and structured features.
+- Evidence-grounded outputs so you can inspect *why* a signal was detected.
+- Optional comparison between your provided valence and model-derived overall tone.
+""".strip()
+
+
+DEMO_PURPOSE_MD = """
+## Demo Purpose
+
+This is a practical demonstration of how LLMs extract structured information from narratives.
+
+Use it to compare:
+- what the model extracts from your text, and
+- what you would extract manually from the same narrative.
+""".strip()
+
+
+KEY_ELEMENTS_MD = """
+## Key Elements You Can Inspect
+
+- **Segmentation quality:** how input is split into context, experience, and aftereffects.
+- **Tone recovery:** what emotional signal appears in each section and globally.
+- **Structured signal extraction:** what perceptual features and reflective aftereffects are detected and where evidence appears.
+- **Alignment layer:** how optional valence compares against overall experience-weighted tone.
+- **Interpretation boundaries:** what appears recoverable and what remains ambiguous.
+""".strip()
+
+
+USER_GUIDE_MD = """
+## How To Use This Demo
+
+1. Choose an input path:
+   - **Guided mode**: paste each section manually.
+   - **Complex mode**: paste one full narrative and let the app re-segment it.
+2. (Optional) add a valence label if you want an explicit alignment check.
+3. Click **Run Analysis**.
+4. Review each stage and tab, then compare model output with your own reading.
+""".strip()
+
+
+STAGES_MD = """
+## Pipeline Stages
+
+1. **Input**: provide either one narrative (complex mode) or three sections (guided mode).
+2. **Segmentation**: inspect the three sections actually used for inference.
+3. **Module Analysis**: review tone, structured features, and optional valence alignment.
+4. **Interpretation**: understand recoverable signals, uncertainty, and limits versus questionnaire-style labels.
+""".strip()
+
+
+VIDEO_SUMMARY_MD = """
+## Results Overview Video
+
+This short video summarizes key findings and the narrative-versus-questionnaire perspective.
 """.strip()
 
 
@@ -127,6 +202,18 @@ def _overall_experience_tone(predictions: dict[str, dict[str, Any]]) -> str:
     return top_tone
 
 
+def _global_tone_markdown(predictions: dict[str, dict[str, Any]]) -> str:
+    tones = _tone_by_section(predictions)
+    overall = _overall_experience_tone(predictions)
+    return (
+        "### Tone Snapshot\n"
+        f"- Before the NDE: {_display_value(tones.get('context', 'unknown')) or 'Unknown'}\n"
+        f"- Core NDE Experience: {_display_value(tones.get('experience', 'unknown')) or 'Unknown'}\n"
+        f"- Aftereffects: {_display_value(tones.get('aftereffects', 'unknown')) or 'Unknown'}\n"
+        f"- Overall experience-weighted tone: {_display_value(overall) or 'Unknown'}"
+    )
+
+
 def _alignment_markdown(predictions: dict[str, dict[str, Any]], valence: str) -> str:
     normalized_valence = str(valence).strip().lower()
     if not normalized_valence:
@@ -157,6 +244,31 @@ def _alignment_markdown(predictions: dict[str, dict[str, Any]], valence: str) ->
         f"The provided valence does not match the overall experience tone "
         f"(valence={_display_value(normalized_valence)}, tone={_display_value(overall_tone)}).\n\n"
         f"Evidence used:\n{evidence_block}"
+    )
+
+
+def _interpretation_markdown(predictions: dict[str, dict[str, Any]]) -> str:
+    strong_sections: list[str] = []
+    uncertain_sections: list[str] = []
+
+    for section_name in ("context", "experience", "aftereffects"):
+        payload = _extract_section_payload(predictions, section_name)
+        evidence = payload.get("evidence_segments", [])
+        tone = str(payload.get("tone", "")).strip().lower()
+        if isinstance(evidence, list) and evidence and tone and tone != "neutral":
+            strong_sections.append(_display_section(section_name))
+        else:
+            uncertain_sections.append(_display_section(section_name))
+
+    strong_text = ", ".join(strong_sections) if strong_sections else "none"
+    uncertain_text = ", ".join(uncertain_sections) if uncertain_sections else "none"
+
+    return (
+        "### Interpretation\n"
+        f"- What seems recoverable from narrative text: {strong_text}.\n"
+        f"- What remains ambiguous or weakly expressed: {uncertain_text}.\n"
+        "- This output is an interpretation layer and is not equivalent to questionnaire ground truth.\n"
+        "- Narrative and questionnaire representations can align partially while still diverging in important details."
     )
 
 
@@ -280,6 +392,7 @@ def launch_local_demo(
 
     fallback_models = configured_model_fallbacks(llm_config, preprocessing)
     default_base_url = str(llm_config.runtime.base_url)
+    video_path = Path(PROJECT_ROOT) / "Stories_vs_Surveys.mov"
 
     def _discover_models(base_url: str) -> tuple[list[str], str]:
         try:
@@ -312,8 +425,8 @@ def launch_local_demo(
         return gr.Dropdown(choices=models, value=selected), message
 
     def toggle_mode(mode: str):
-        three_visible = mode == "Three Sections (Required)"
-        single_visible = mode == "Single Narrative (Auto-segment)"
+        three_visible = mode == "Guided Mode: Three Sections"
+        single_visible = mode == "Complex Mode: Single Narrative"
         return (
             gr.Textbox(visible=three_visible),
             gr.Textbox(visible=three_visible),
@@ -339,7 +452,7 @@ def launch_local_demo(
         effective_variant = str(prompt_variant).strip() or None
         effective_base_url = str(base_url).strip() or default_base_url
 
-        if mode == "Three Sections (Required)":
+        if mode == "Guided Mode: Three Sections":
             result = analyze_three_sections(
                 study=study,
                 paths=paths,
@@ -352,6 +465,9 @@ def launch_local_demo(
                 base_url=effective_base_url,
                 temperature=float(temperature),
             )
+            segmentation_note = (
+                "Stage 2 segmentation source: user-provided sections (guided mode)."
+            )
         else:
             result = analyze_single_narrative(
                 study=study,
@@ -363,6 +479,7 @@ def launch_local_demo(
                 base_url=effective_base_url,
                 temperature=float(temperature),
             )
+            segmentation_note = "Stage 2 segmentation source: model-assisted resegmentation (complex mode)."
 
         predictions = dict(result.get("predictions", {}))
         evidence_md = build_evidence_summary_markdown(predictions)
@@ -371,27 +488,110 @@ def launch_local_demo(
         label_rows = _labels_table_rows(predictions)
         segmentation_rows = _segmentation_table_rows(segmentation)
         alignment_md = _alignment_markdown(predictions, optional_valence)
+        global_tone_md = _global_tone_markdown(predictions)
+        interpretation_md = _interpretation_markdown(predictions)
         status = (
             f"Analysis completed with model {result.get('model')} "
             f"using endpoint {result.get('base_url')}."
         )
         return (
             status,
+            segmentation_note,
+            segmentation_rows,
+            global_tone_md,
             section_rows,
             label_rows,
-            segmentation_rows,
             alignment_md,
             evidence_md,
+            interpretation_md,
         )
 
     with gr.Blocks(
         title="NDE Local Interactive Demo",
-        css="footer, .footer, #footer {display: none !important;}",
+        theme=gr.themes.Soft(
+            primary_hue="indigo", secondary_hue="cyan", neutral_hue="slate"
+        ),
+        css="""
+footer, .footer, #footer {display: none !important;}
+.gradio-container {
+  color: #0f172a;
+  background:
+    radial-gradient(1200px 400px at 10% -10%, #d9f5ec 0%, transparent 55%),
+    radial-gradient(900px 380px at 100% 0%, #dcecff 0%, transparent 50%),
+    linear-gradient(180deg, #f8fbff 0%, #f3f7fb 100%);
+}
+#overview-video {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+#overview-video video {
+  max-height: 300px !important;
+}
+#overview-video .wrap,
+#overview-video .container,
+#overview-video .block {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.gradio-container .prose,
+.gradio-container .prose * {
+  color: #0f172a !important;
+}
+.gradio-container button[role="tab"],
+.gradio-container .tab-nav button,
+.gradio-container [role="tablist"] button {
+  background: #e5e7eb !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+}
+.gradio-container button[role="tab"][aria-selected="true"],
+.gradio-container .tab-nav button.selected,
+.gradio-container [role="tablist"] button[aria-selected="true"] {
+  background: #1e3a8a !important;
+  color: #ffffff !important;
+  border-color: #1e40af !important;
+}
+.gradio-container label,
+.gradio-container .label-wrap,
+.gradio-container .secondary-text,
+.gradio-container .svelte-1ipelgc {
+  color: #1f2937 !important;
+}
+#component-0,
+.gradio-container .block {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 12px;
+}
+""",
     ) as demo:
         gr.Markdown("# NDE Local Interactive Demo")
         gr.Markdown(INTRO_MD)
+        gr.Markdown(RESEARCH_QUESTIONS_MD)
+        gr.Markdown(WHAT_WAS_DONE_MD)
+        gr.Markdown(DEMO_PURPOSE_MD)
+        gr.Markdown(KEY_ELEMENTS_MD)
+        gr.Markdown(STAGES_MD)
+        gr.Markdown(USER_GUIDE_MD)
+
+        gr.Markdown(VIDEO_SUMMARY_MD)
+        if video_path.exists():
+            gr.Video(
+                value=str(video_path),
+                label="Stories vs Surveys Overview",
+                elem_id="overview-video",
+                height=300,
+            )
+        else:
+            gr.Markdown(
+                "Video not found at repository root (`Stories_vs_Surveys.mov`)."
+            )
+
         gr.Markdown(DISCLAIMER_MD)
 
+        gr.Markdown("## Stage 1 — Input")
         with gr.Row():
             base_url_input = gr.Textbox(label="Ollama Base URL", value=default_base_url)
             model_dropdown = gr.Dropdown(
@@ -407,11 +607,12 @@ def launch_local_demo(
         with gr.Row():
             mode_selector = gr.Radio(
                 choices=[
-                    "Three Sections (Required)",
-                    "Single Narrative (Auto-segment)",
+                    "Guided Mode: Three Sections",
+                    "Complex Mode: Single Narrative",
                 ],
-                value="Three Sections (Required)",
-                label="Input Mode",
+                value="Guided Mode: Three Sections",
+                label="Input Path",
+                info="Guided mode lets you control section boundaries; complex mode runs model-assisted resegmentation before analysis.",
             )
             prompt_variant_input = gr.Textbox(
                 label="Prompt Variant (optional)",
@@ -427,46 +628,77 @@ def launch_local_demo(
                 choices=["", "positive", "negative", "mixed", "neutral"],
                 value="",
                 label="Optional Valence",
-                info="If provided, the app checks whether overall experience tone aligns with this valence.",
+                info="Used only in Stage 3 alignment module.",
             )
 
-        context_input = gr.Textbox(label="Before the NDE (Context)", lines=6)
-        experience_input = gr.Textbox(label="Core NDE Experience", lines=6)
-        aftereffects_input = gr.Textbox(label="Aftereffects", lines=6)
+        context_input = gr.Textbox(
+            label="Before the NDE (Context)",
+            lines=6,
+            placeholder="Describe circumstances before/during the life-threatening event.",
+            info="Use this for medical context, perceived threat, and immediate setting.",
+        )
+        experience_input = gr.Textbox(
+            label="Core NDE Experience",
+            lines=6,
+            placeholder="Describe the central experience (perceptions, emotions, phenomena).",
+            info="Use this for the main experiential content.",
+        )
+        aftereffects_input = gr.Textbox(
+            label="Aftereffects",
+            lines=6,
+            placeholder="Describe lasting changes after the event.",
+            info="Use this for moral, relational, or long-term perspective changes.",
+        )
         single_input = gr.Textbox(
             label="Single Narrative",
             lines=12,
             visible=False,
             placeholder="Paste the full narrative. The app will segment it before analysis.",
+            info="Best for quick trials; review Stage 2 segmentation before interpreting results.",
         )
 
         run_button = gr.Button("Run Analysis", variant="primary")
         status_output = gr.Markdown()
-        section_table_output = gr.Dataframe(
-            headers=[
-                "Narrative Part",
-                "Detected Tone",
-                "Context Type",
-                "Supporting Evidence",
-            ],
-            datatype=["str", "str", "str", "str"],
-            label="Section-Level Summary",
-            interactive=False,
-        )
-        labels_table_output = gr.Dataframe(
-            headers=["Narrative Part", "Dimension", "Detected Value"],
-            datatype=["str", "str", "str"],
-            label="Extracted Dimensions",
-            interactive=False,
-        )
+
+        gr.Markdown("## Stage 2 — Segmentation")
+        segmentation_note_output = gr.Markdown()
         segmentation_table_output = gr.Dataframe(
             headers=["Narrative Part", "Text Used for Analysis"],
             datatype=["str", "str"],
             label="Segmented Narrative",
             interactive=False,
         )
-        alignment_output = gr.Markdown(label="Valence Alignment")
-        evidence_output = gr.Markdown(label="Evidence Details")
+
+        gr.Markdown("## Stage 3 — Module Analysis")
+        with gr.Tabs():
+            with gr.TabItem("Tone Estimation"):
+                global_tone_output = gr.Markdown()
+                section_table_output = gr.Dataframe(
+                    headers=[
+                        "Narrative Part",
+                        "Detected Tone",
+                        "Context Type",
+                        "Supporting Evidence",
+                    ],
+                    datatype=["str", "str", "str", "str"],
+                    label="Section-Level Summary",
+                    interactive=False,
+                )
+
+            with gr.TabItem("Structured Features"):
+                labels_table_output = gr.Dataframe(
+                    headers=["Narrative Part", "Dimension", "Detected Value"],
+                    datatype=["str", "str", "str"],
+                    label="Extracted Dimensions",
+                    interactive=False,
+                )
+                evidence_output = gr.Markdown(label="Evidence Details")
+
+            with gr.TabItem("Alignment with Questionnaire-style Layer"):
+                alignment_output = gr.Markdown(label="Valence Alignment")
+
+        gr.Markdown("## Stage 4 — Interpretation")
+        interpretation_output = gr.Markdown()
 
         refresh_button.click(
             fn=refresh_models,
@@ -494,11 +726,14 @@ def launch_local_demo(
             ],
             outputs=[
                 status_output,
+                segmentation_note_output,
+                segmentation_table_output,
+                global_tone_output,
                 section_table_output,
                 labels_table_output,
-                segmentation_table_output,
                 alignment_output,
                 evidence_output,
+                interpretation_output,
             ],
         )
 

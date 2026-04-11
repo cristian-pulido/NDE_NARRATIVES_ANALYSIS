@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from nde_narratives.local_demo import _alignment_markdown, _labels_table_rows
+from nde_narratives.local_demo import (
+    _alignment_markdown,
+    _global_tone_markdown,
+    _interpretation_markdown,
+    _labels_table_rows,
+)
 
 
 def _sample_predictions() -> dict[str, dict[str, dict[str, object]]]:
@@ -41,3 +46,15 @@ def test_labels_table_rows_are_present_independent_of_valence() -> None:
 def test_alignment_message_skips_when_no_valence() -> None:
     message = _alignment_markdown(_sample_predictions(), "")
     assert "no alignment check" in message.lower()
+
+
+def test_global_tone_markdown_reports_overall_weighted_tone() -> None:
+    message = _global_tone_markdown(_sample_predictions())
+    assert "overall experience-weighted tone" in message.lower()
+    assert "positive" in message.lower()
+
+
+def test_interpretation_markdown_mentions_recoverable_and_ambiguous() -> None:
+    message = _interpretation_markdown(_sample_predictions())
+    assert "recoverable" in message.lower()
+    assert "ambiguous" in message.lower()
