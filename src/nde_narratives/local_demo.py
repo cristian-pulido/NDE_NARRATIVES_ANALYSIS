@@ -509,19 +509,34 @@ def launch_local_demo(
     with gr.Blocks(
         title="NDE Local Interactive Demo",
         theme=gr.themes.Soft(
-            primary_hue="indigo", secondary_hue="cyan", neutral_hue="slate"
+            primary_hue="orange", secondary_hue="blue", neutral_hue="slate"
         ),
         css="""
 footer, .footer, #footer {display: none !important;}
 .gradio-container {
+  --body-background-fill: #f4f7fb;
+  --block-background-fill: #ffffff;
+  --block-border-color: #d6e0ea;
+  --input-background-fill: #ffffff;
+  --input-border-color: #c4d0de;
+  color-scheme: light;
   color: #0f172a;
   background:
-    radial-gradient(1200px 400px at 10% -10%, #d9f5ec 0%, transparent 55%),
-    radial-gradient(900px 380px at 100% 0%, #dcecff 0%, transparent 50%),
+    radial-gradient(1200px 400px at 10% -10%, #d7efe7 0%, transparent 55%),
+    radial-gradient(900px 380px at 100% 0%, #dbe9fb 0%, transparent 50%),
     linear-gradient(180deg, #f8fbff 0%, #f3f7fb 100%);
 }
+.hero-card,
+.note-card,
+.stage-card {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid #d6e0ea;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
 #overview-video {
-  max-width: 680px;
+  max-width: 640px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -539,42 +554,104 @@ footer, .footer, #footer {display: none !important;}
 .gradio-container .prose * {
   color: #0f172a !important;
 }
+.gradio-container .prose code {
+  background: #eaf0f7 !important;
+  color: #0f172a !important;
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+}
 .gradio-container button[role="tab"],
 .gradio-container .tab-nav button,
 .gradio-container [role="tablist"] button {
-  background: #e5e7eb !important;
+  background: #e8edf5 !important;
   color: #0f172a !important;
-  border: 1px solid #cbd5e1 !important;
+  border: 1px solid #a9b8cb !important;
 }
 .gradio-container button[role="tab"][aria-selected="true"],
 .gradio-container .tab-nav button.selected,
 .gradio-container [role="tablist"] button[aria-selected="true"] {
-  background: #1e3a8a !important;
+  background: #153e8a !important;
   color: #ffffff !important;
-  border-color: #1e40af !important;
+  border-color: #153e8a !important;
 }
 .gradio-container label,
 .gradio-container .label-wrap,
 .gradio-container .secondary-text,
 .gradio-container .svelte-1ipelgc {
-  color: #1f2937 !important;
+  color: #1e293b !important;
+}
+.gradio-container input,
+.gradio-container textarea,
+.gradio-container select,
+.gradio-container [role="combobox"] {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #c4d0de !important;
+}
+.gradio-container textarea {
+  min-height: 170px;
+}
+.gradio-container [role="listbox"] {
+  background: #ffffff !important;
+  border: 1px solid #c4d0de !important;
+}
+.gradio-container [role="option"] {
+  color: #0f172a !important;
+  background: #ffffff !important;
+}
+.gradio-container [role="option"]:hover,
+.gradio-container [role="option"][aria-selected="true"] {
+  background: #e8eff8 !important;
+  color: #0f172a !important;
 }
 #component-0,
 .gradio-container .block {
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #d6e0ea;
   border-radius: 12px;
+}
+.gradio-container button.primary {
+  background: linear-gradient(90deg, #ea580c 0%, #ef7f1a 100%) !important;
+  border: 0 !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+.gradio-container .dataframe table,
+.gradio-container .dataframe thead,
+.gradio-container .dataframe tbody,
+.gradio-container .dataframe tr,
+.gradio-container .dataframe th,
+.gradio-container .dataframe td {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #d6e0ea !important;
+}
+.gradio-container .dataframe th {
+  background: #eef3f9 !important;
+  font-weight: 700 !important;
+}
+.gradio-container .dataframe td,
+.gradio-container .dataframe td * {
+  white-space: normal !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+  line-height: 1.4 !important;
 }
 """,
     ) as demo:
-        gr.Markdown("# NDE Local Interactive Demo")
-        gr.Markdown(INTRO_MD)
-        gr.Markdown(RESEARCH_QUESTIONS_MD)
-        gr.Markdown(WHAT_WAS_DONE_MD)
-        gr.Markdown(DEMO_PURPOSE_MD)
-        gr.Markdown(KEY_ELEMENTS_MD)
-        gr.Markdown(STAGES_MD)
-        gr.Markdown(USER_GUIDE_MD)
+        with gr.Group(elem_classes="hero-card"):
+            gr.Markdown("# NDE Local Interactive Demo")
+            gr.Markdown(INTRO_MD)
+
+        with gr.Accordion("Research Context and Questions", open=False):
+            gr.Markdown(RESEARCH_QUESTIONS_MD)
+            gr.Markdown(WHAT_WAS_DONE_MD)
+            gr.Markdown(DEMO_PURPOSE_MD)
+
+        with gr.Group(elem_classes="note-card"):
+            gr.Markdown(KEY_ELEMENTS_MD)
+            gr.Markdown(STAGES_MD)
+            gr.Markdown(USER_GUIDE_MD)
 
         gr.Markdown(VIDEO_SUMMARY_MD)
         if video_path.exists():
@@ -589,116 +666,126 @@ footer, .footer, #footer {display: none !important;}
                 "Video not found at repository root (`Stories_vs_Surveys.mov`)."
             )
 
-        gr.Markdown(DISCLAIMER_MD)
+        with gr.Group(elem_classes="note-card"):
+            gr.Markdown(DISCLAIMER_MD)
 
-        gr.Markdown("## Stage 1 — Input")
-        with gr.Row():
-            base_url_input = gr.Textbox(label="Ollama Base URL", value=default_base_url)
-            model_dropdown = gr.Dropdown(
-                choices=initial_models,
-                value=initial_model,
-                label="Model",
-                allow_custom_value=True,
-            )
-            refresh_button = gr.Button("Refresh Models")
+        with gr.Group(elem_classes="stage-card"):
+            gr.Markdown("## Stage 1 — Input")
+            with gr.Row():
+                base_url_input = gr.Textbox(
+                    label="Ollama Base URL", value=default_base_url
+                )
+                model_dropdown = gr.Dropdown(
+                    choices=initial_models,
+                    value=initial_model,
+                    label="Model",
+                    allow_custom_value=True,
+                )
+                refresh_button = gr.Button("Refresh Models")
 
-        model_status = gr.Markdown(initial_model_message)
+            model_status = gr.Markdown(initial_model_message)
 
-        with gr.Row():
-            mode_selector = gr.Radio(
-                choices=[
-                    "Guided Mode: Three Sections",
-                    "Complex Mode: Single Narrative",
-                ],
-                value="Guided Mode: Three Sections",
-                label="Input Path",
-                info="Guided mode lets you control section boundaries; complex mode runs model-assisted resegmentation before analysis.",
-            )
-            prompt_variant_input = gr.Textbox(
-                label="Prompt Variant (optional)",
-                value="",
-                placeholder="Use analysis default when empty",
-            )
-            temperature_input = gr.Number(
-                label="Temperature",
-                value=float(llm_config.runtime.temperature),
-                precision=3,
-            )
-            optional_valence_input = gr.Dropdown(
-                choices=["", "positive", "negative", "mixed", "neutral"],
-                value="",
-                label="Optional Valence",
-                info="Used only in Stage 3 alignment module.",
-            )
-
-        context_input = gr.Textbox(
-            label="Before the NDE (Context)",
-            lines=6,
-            placeholder="Describe circumstances before/during the life-threatening event.",
-            info="Use this for medical context, perceived threat, and immediate setting.",
-        )
-        experience_input = gr.Textbox(
-            label="Core NDE Experience",
-            lines=6,
-            placeholder="Describe the central experience (perceptions, emotions, phenomena).",
-            info="Use this for the main experiential content.",
-        )
-        aftereffects_input = gr.Textbox(
-            label="Aftereffects",
-            lines=6,
-            placeholder="Describe lasting changes after the event.",
-            info="Use this for moral, relational, or long-term perspective changes.",
-        )
-        single_input = gr.Textbox(
-            label="Single Narrative",
-            lines=12,
-            visible=False,
-            placeholder="Paste the full narrative. The app will segment it before analysis.",
-            info="Best for quick trials; review Stage 2 segmentation before interpreting results.",
-        )
-
-        run_button = gr.Button("Run Analysis", variant="primary")
-        status_output = gr.Markdown()
-
-        gr.Markdown("## Stage 2 — Segmentation")
-        segmentation_note_output = gr.Markdown()
-        segmentation_table_output = gr.Dataframe(
-            headers=["Narrative Part", "Text Used for Analysis"],
-            datatype=["str", "str"],
-            label="Segmented Narrative",
-            interactive=False,
-        )
-
-        gr.Markdown("## Stage 3 — Module Analysis")
-        with gr.Tabs():
-            with gr.TabItem("Tone Estimation"):
-                global_tone_output = gr.Markdown()
-                section_table_output = gr.Dataframe(
-                    headers=[
-                        "Narrative Part",
-                        "Detected Tone",
-                        "Context Type",
-                        "Supporting Evidence",
+            with gr.Row():
+                mode_selector = gr.Radio(
+                    choices=[
+                        "Guided Mode: Three Sections",
+                        "Complex Mode: Single Narrative",
                     ],
-                    datatype=["str", "str", "str", "str"],
-                    label="Section-Level Summary",
-                    interactive=False,
+                    value="Guided Mode: Three Sections",
+                    label="Input Path",
+                    info="Guided mode lets you control section boundaries; complex mode runs model-assisted resegmentation before analysis.",
+                )
+                prompt_variant_input = gr.Textbox(
+                    label="Prompt Variant (optional)",
+                    value="",
+                    placeholder="Use analysis default when empty",
+                )
+                temperature_input = gr.Number(
+                    label="Temperature",
+                    value=float(llm_config.runtime.temperature),
+                    precision=3,
+                )
+                optional_valence_input = gr.Dropdown(
+                    choices=["", "positive", "negative", "mixed", "neutral"],
+                    value="",
+                    label="Optional Valence",
+                    info="Used only in Stage 3 alignment module.",
                 )
 
-            with gr.TabItem("Structured Features"):
-                labels_table_output = gr.Dataframe(
-                    headers=["Narrative Part", "Dimension", "Detected Value"],
-                    datatype=["str", "str", "str"],
-                    label="Extracted Dimensions",
-                    interactive=False,
-                )
-                evidence_output = gr.Markdown(label="Evidence Details")
+            context_input = gr.Textbox(
+                label="Before the NDE (Context)",
+                lines=6,
+                placeholder="Describe circumstances before/during the life-threatening event.",
+                info="Use this for medical context, perceived threat, and immediate setting.",
+            )
+            experience_input = gr.Textbox(
+                label="Core NDE Experience",
+                lines=6,
+                placeholder="Describe the central experience (perceptions, emotions, phenomena).",
+                info="Use this for the main experiential content.",
+            )
+            aftereffects_input = gr.Textbox(
+                label="Aftereffects",
+                lines=6,
+                placeholder="Describe lasting changes after the event.",
+                info="Use this for moral, relational, or long-term perspective changes.",
+            )
+            single_input = gr.Textbox(
+                label="Single Narrative",
+                lines=12,
+                visible=False,
+                placeholder="Paste the full narrative. The app will segment it before analysis.",
+                info="Best for quick trials; review Stage 2 segmentation before interpreting results.",
+            )
 
-            with gr.TabItem("Alignment with Questionnaire-style Layer"):
-                alignment_output = gr.Markdown(label="Valence Alignment")
+            run_button = gr.Button("Run Analysis", variant="primary")
+            status_output = gr.Markdown()
 
-        gr.Markdown("## Stage 4 — Interpretation")
-        interpretation_output = gr.Markdown()
+        with gr.Group(elem_classes="stage-card"):
+            gr.Markdown("## Stage 2 — Segmentation")
+            segmentation_note_output = gr.Markdown()
+            segmentation_table_output = gr.Dataframe(
+                headers=["Narrative Part", "Text Used for Analysis"],
+                datatype=["str", "str"],
+                label="Segmented Narrative",
+                wrap=True,
+                interactive=False,
+            )
+
+        with gr.Group(elem_classes="stage-card"):
+            gr.Markdown("## Stage 3 — Module Analysis")
+            with gr.Tabs():
+                with gr.TabItem("Tone Estimation"):
+                    global_tone_output = gr.Markdown()
+                    section_table_output = gr.Dataframe(
+                        headers=[
+                            "Narrative Part",
+                            "Detected Tone",
+                            "Context Type",
+                            "Supporting Evidence",
+                        ],
+                        datatype=["str", "str", "str", "str"],
+                        label="Section-Level Summary",
+                        wrap=True,
+                        interactive=False,
+                    )
+
+                with gr.TabItem("Structured Features"):
+                    labels_table_output = gr.Dataframe(
+                        headers=["Narrative Part", "Dimension", "Detected Value"],
+                        datatype=["str", "str", "str"],
+                        label="Extracted Dimensions",
+                        wrap=True,
+                        interactive=False,
+                    )
+                    evidence_output = gr.Markdown(label="Evidence Details")
+
+                with gr.TabItem("Alignment with Questionnaire-style Layer"):
+                    alignment_output = gr.Markdown(label="Valence Alignment")
+
+        with gr.Group(elem_classes="stage-card"):
+            gr.Markdown("## Stage 4 — Interpretation")
+            interpretation_output = gr.Markdown()
 
         refresh_button.click(
             fn=refresh_models,
