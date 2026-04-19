@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,6 @@ from .constants import PROJECT_ROOT
 from .interactive import (
     analyze_single_narrative,
     analyze_three_sections,
-    build_evidence_summary_markdown,
     configured_model_fallbacks,
     list_ollama_models,
 )
@@ -55,79 +55,64 @@ VALUE_DISPLAY_NAMES = {
 }
 
 DISCLAIMER_MD = """
-## Important Disclaimer
-
-- This tool is for research and educational use only; it is not a medical or psychological diagnostic system.
-- Do not submit personally identifying or highly sensitive information.
-- Model outputs may be inaccurate, incomplete, or biased and require human review.
+### Research Use Only
+- Not a diagnostic tool.
+- Avoid personal identifiers.
+- Outputs require human judgment.
 """.strip()
 
 
-INTRO_MD = """
-## Why This Problem Matters
-
-Near-death experiences can be represented in two different but complementary ways:
-
-- **Narratives** (rich, temporal, contextual first-person text)
-- **Questionnaire-style labels** (standardized, structured categories)
-
-These representations do not always align perfectly. A narrative may contain local fear, confusion, or ambiguity while the overall questionnaire appraisal is later positive or meaningful.
-
-This interface is designed to make that representational mismatch visible through transparent stages instead of a black-box prediction.
+HERO_SUBTITLE_MD = """
+Narratives and questionnaires don't describe the same experience.
 """.strip()
 
 
-RESEARCH_QUESTIONS_MD = """
-## Core Questions From the Study
-
-1. How much do narrative-derived signals align with questionnaire-style labels?
-2. Is narrative tone enough to recover self-reported valence?
-3. Are concrete experiential features easier to recover than reflective aftereffects?
-4. Is disagreement mainly model error, or a representational mismatch between formats?
+HERO_SUPPORT_MD = """
+This demo lets you explore that mismatch in action.
 """.strip()
 
 
-WHAT_WAS_DONE_MD = """
-## What This Demo Reproduces
-
-- Section-aware analysis of **context**, **core experience**, and **aftereffects**.
-- LLM-based extraction of tone, contextual framing, and structured features.
-- Evidence-grounded outputs so you can inspect *why* a signal was detected.
-- Optional comparison between your provided valence and model-derived overall tone.
+AUTHOR_MD = """
+**Autor original:** [Cristian Pulido](https://cristian-pulido.github.io/)
 """.strip()
 
 
-DEMO_PURPOSE_MD = """
-## Demo Purpose
-
-This is a practical demonstration of how LLMs extract structured information from narratives.
-
-Use it to compare:
-- what the model extracts from your text, and
-- what you would extract manually from the same narrative.
+CORE_INSIGHT_MD = """
+### What you are about to see
+- Narratives capture local moments (fear, confusion, ambiguity).
+- Questionnaires summarize global meaning (often positive or transformative).
+- These differences are not errors.
+- They reflect different representations of the same experience.
 """.strip()
 
 
-KEY_ELEMENTS_MD = """
-## Key Elements You Can Inspect
-
-- **Segmentation quality:** how input is split into context, experience, and aftereffects.
-- **Tone recovery:** what emotional signal appears in each section and globally.
-- **Structured signal extraction:** what perceptual features and reflective aftereffects are detected and where evidence appears.
-- **Alignment layer:** how optional valence compares against overall experience-weighted tone.
-- **Interpretation boundaries:** what appears recoverable and what remains ambiguous.
+TRY_IT_MD = """
+### Try it yourself
+- Write or paste a narrative.
+- Run the analysis.
+- Compare what the model extracts, what you would extract, and what a questionnaire would capture.
 """.strip()
 
 
-USER_GUIDE_MD = """
-## How To Use This Demo
+SIMPLIFIED_FLOW_MD = """
+### Quick flow
+1. Add your text.
+2. Run analysis.
+3. Compare interpretations.
+""".strip()
 
-1. Choose an input path:
-   - **Guided mode**: paste each section manually.
-   - **Complex mode**: paste one full narrative and let the app re-segment it.
-2. (Optional) add a valence label if you want an explicit alignment check.
-3. Click **Run Analysis**.
-4. Review each stage and tab, then compare model output with your own reading.
+
+LEARN_MORE_MD = """
+### Learn more
+- The pipeline segments text into context, core experience, and aftereffects.
+- It extracts tone, structured features, and supporting snippets.
+- Alignment checks compare narrative signals with a questionnaire-style valence.
+""".strip()
+
+
+TOOLTIP_MD = """
+ℹ️ Use **Guided Input** if you already have three sections.
+Use **Full Narrative** if you want automatic segmentation.
 """.strip()
 
 
@@ -142,9 +127,7 @@ STAGES_MD = """
 
 
 VIDEO_SUMMARY_MD = """
-## Results Overview Video
-
-This short video summarizes key findings and the narrative-versus-questionnaire perspective.
+See how this works (2 min video)
 """.strip()
 
 
@@ -269,6 +252,215 @@ def _interpretation_markdown(predictions: dict[str, dict[str, Any]]) -> str:
         f"- What remains ambiguous or weakly expressed: {uncertain_text}.\n"
         "- This output is an interpretation layer and is not equivalent to questionnaire ground truth.\n"
         "- Narrative and questionnaire representations can align partially while still diverging in important details."
+    )
+
+
+def _post_result_insight_markdown(
+    predictions: dict[str, dict[str, Any]], optional_valence: str
+) -> str:
+    tones = _tone_by_section(predictions)
+    experience_tone = tones.get("experience", "") or "unknown"
+    distinct_tones = {tone for tone in tones.values() if tone}
+    has_local_variation = len(distinct_tones) > 1
+
+    normalized_valence = str(optional_valence).strip().lower()
+    has_valence = bool(normalized_valence)
+    valence_mismatch = has_valence and normalized_valence != experience_tone
+
+    if valence_mismatch and has_local_variation:
+        return (
+            "### Study Insight (This Run)\n"
+            "Notice how local section tone is mixed, and it does not align with the selected questionnaire-style valence. "
+            "This mismatch is the core finding of the study."
+        )
+
+    if valence_mismatch:
+        return (
+            "### Study Insight (This Run)\n"
+            "The selected questionnaire-style valence does not match the core narrative tone. "
+            "Different representations of the same experience can diverge."
+        )
+
+    if has_local_variation:
+        return (
+            "### Study Insight (This Run)\n"
+            "Notice how tone and features shift across sections. "
+            "Local narrative moments can differ from the global meaning a questionnaire captures."
+        )
+
+    return (
+        "### Study Insight (This Run)\n"
+        "This run looks more aligned across sections and overall meaning. "
+        "The key point remains: alignment is possible, but not guaranteed."
+    )
+
+
+def _stepper_html(active_step: int) -> str:
+    steps = [
+        (1, "Input", "✍️"),
+        (2, "Segmentation", "✂️"),
+        (3, "Extraction", "🧩"),
+        (4, "Interpretation", "🧠"),
+    ]
+    parts: list[str] = ["<div class='pipeline-stepper'>"]
+    for index, label, icon in steps:
+        state_class = "step-pending"
+        if active_step > index:
+            state_class = "step-complete"
+        elif active_step == index:
+            state_class = "step-active"
+        parts.append(
+            "<div class='pipeline-step {state}'>"
+            "<span class='step-icon'>{icon}</span>"
+            "<span class='step-label'>{label}</span>"
+            "</div>".format(state=state_class, icon=icon, label=escape(label))
+        )
+        if index < len(steps):
+            parts.append("<div class='pipeline-connector'></div>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _tone_badge_html(value: str) -> str:
+    normalized = str(value).strip().lower() or "unknown"
+    css_class = {
+        "positive": "badge-positive",
+        "negative": "badge-negative",
+        "mixed": "badge-mixed",
+        "neutral": "badge-mixed",
+        "unknown": "badge-unknown",
+    }.get(normalized, "badge-unknown")
+    return f"<span class='tone-badge {css_class}'>{escape(_display_value(normalized) or 'Unknown')}</span>"
+
+
+def _tone_cards_html(predictions: dict[str, dict[str, Any]]) -> str:
+    tones = _tone_by_section(predictions)
+    cards = ["<div class='tone-grid'>"]
+    for section_name in ("context", "experience", "aftereffects"):
+        section_payload = _extract_section_payload(predictions, section_name)
+        evidence = section_payload.get("evidence_segments", [])
+        evidence_items: list[str] = []
+        if isinstance(evidence, list):
+            for segment in evidence[:3]:
+                text = str(segment).strip()
+                if text:
+                    evidence_items.append(
+                        f"<li class='evidence-item'>{escape(text)}</li>"
+                    )
+        evidence_html = (
+            f"<ul class='evidence-list'>{''.join(evidence_items)}</ul>"
+            if evidence_items
+            else "<div class='inline-note'>No explicit evidence returned for this section.</div>"
+        )
+        cards.append(
+            "<div class='result-card'>"
+            f"<div class='result-title'>{escape(_display_section(section_name))}</div>"
+            f"{_tone_badge_html(tones.get(section_name, 'unknown'))}"
+            "<div class='evidence-title'>Why the model says this</div>"
+            f"{evidence_html}"
+            "</div>"
+        )
+    cards.append("</div>")
+    return "".join(cards)
+
+
+def _structured_features_html(predictions: dict[str, dict[str, Any]]) -> str:
+    sections_html: list[str] = ["<div class='feature-sections'>"]
+    has_features = False
+    for section_name in ("context", "experience", "aftereffects"):
+        payload = _extract_section_payload(predictions, section_name)
+        chips: list[str] = []
+        if section_name == "context":
+            raw_context_nature = str(payload.get("death_context_nature", "")).strip()
+            if raw_context_nature:
+                chips.append(
+                    "<span class='feature-chip'>Context: {value}</span>".format(
+                        value=escape(
+                            CONTEXT_NATURE_LABELS.get(
+                                raw_context_nature, raw_context_nature
+                            )
+                        )
+                    )
+                )
+
+        for key, value in payload.items():
+            if key in {"tone", "evidence_segments", "death_context_nature"}:
+                continue
+            has_features = True
+            raw_value = str(value).strip().lower()
+            display_value = escape(_display_value(str(value)) or str(value))
+            if raw_value == "yes":
+                display_value = (
+                    f"<span class='feature-value-yes'>{display_value}</span>"
+                )
+            chips.append(
+                "<span class='feature-chip'><strong>{label}:</strong> {value}</span>".format(
+                    label=escape(_display_label(str(key))),
+                    value=display_value,
+                )
+            )
+
+        if not chips:
+            chips.append(
+                "<span class='feature-chip feature-empty'>No strong features detected.</span>"
+            )
+
+        sections_html.append(
+            "<div class='result-card'>"
+            f"<div class='result-title'>{escape(_display_section(section_name))}</div>"
+            f"<div class='chip-wrap'>{''.join(chips)}</div>"
+            "</div>"
+        )
+    sections_html.append("</div>")
+
+    if not has_features:
+        sections_html.append(
+            "<div class='inline-note'>Only tone and evidence were detected for this narrative.</div>"
+        )
+    return "".join(sections_html)
+
+
+def _segmentation_html(segmentation: dict[str, Any], note: str) -> str:
+    cards = ["<div class='segment-grid'>"]
+    for section_name in ("context", "experience", "aftereffects"):
+        text = str(segmentation.get(section_name, "")).strip() or "No text provided."
+        cards.append(
+            "<div class='result-card'>"
+            f"<div class='result-title'>{escape(_display_section(section_name))}</div>"
+            f"<div class='segment-text'>{escape(text)}</div>"
+            "</div>"
+        )
+    cards.append("</div>")
+    cards.append(f"<div class='inline-note'>{escape(note)}</div>")
+    return "".join(cards)
+
+
+def _alignment_html(predictions: dict[str, dict[str, Any]], valence: str) -> str:
+    normalized_valence = str(valence).strip().lower()
+    experience_payload = _extract_section_payload(predictions, "experience")
+    experience_tone = (
+        str(experience_payload.get("tone", "")).strip().lower() or "unknown"
+    )
+
+    if not normalized_valence:
+        return (
+            "<div class='result-card'>"
+            "<div class='result-title'>Your Valence vs Core NDE Experience</div>"
+            "<div class='inline-note'>No user valence selected. Add one in Input to compare.</div>"
+            "</div>"
+        )
+
+    is_match = experience_tone == normalized_valence
+    match_text = "Aligned" if is_match else "Mismatch"
+    match_class = "badge-positive" if is_match else "badge-negative"
+    return (
+        "<div class='alignment-grid'>"
+        "<div class='result-card'><div class='result-title'>Your Valence</div>"
+        f"{_tone_badge_html(normalized_valence)}</div>"
+        "<div class='result-card'><div class='result-title'>Core NDE Experience (LLM)</div>"
+        f"{_tone_badge_html(experience_tone)}</div>"
+        "</div>"
+        f"<div class='alignment-status'><span class='tone-badge {match_class}'>{match_text}</span></div>"
     )
 
 
@@ -424,17 +616,7 @@ def launch_local_demo(
         selected = models[0] if models else None
         return gr.Dropdown(choices=models, value=selected), message
 
-    def toggle_mode(mode: str):
-        three_visible = mode == "Guided Mode: Three Sections"
-        single_visible = mode == "Complex Mode: Single Narrative"
-        return (
-            gr.Textbox(visible=three_visible),
-            gr.Textbox(visible=three_visible),
-            gr.Textbox(visible=three_visible),
-            gr.Textbox(visible=single_visible),
-        )
-
-    def run_analysis(
+    def _compute_results(
         mode: str,
         base_url: str,
         model: str,
@@ -482,13 +664,14 @@ def launch_local_demo(
             segmentation_note = "Stage 2 segmentation source: model-assisted resegmentation (complex mode)."
 
         predictions = dict(result.get("predictions", {}))
-        evidence_md = build_evidence_summary_markdown(predictions)
         segmentation = dict(result.get("segmentation", {}))
-        section_rows = _section_table_rows(predictions)
-        label_rows = _labels_table_rows(predictions)
-        segmentation_rows = _segmentation_table_rows(segmentation)
-        alignment_md = _alignment_markdown(predictions, optional_valence)
-        global_tone_md = _global_tone_markdown(predictions)
+        segmentation_html = _segmentation_html(segmentation, segmentation_note)
+        tone_html = _tone_cards_html(predictions)
+        features_html = _structured_features_html(predictions)
+        alignment_html = _alignment_html(predictions, optional_valence)
+        post_result_insight_md = _post_result_insight_markdown(
+            predictions, optional_valence
+        )
         interpretation_md = _interpretation_markdown(predictions)
         status = (
             f"Analysis completed with model {result.get('model')} "
@@ -496,13 +679,12 @@ def launch_local_demo(
         )
         return (
             status,
-            segmentation_note,
-            segmentation_rows,
-            global_tone_md,
-            section_rows,
-            label_rows,
-            alignment_md,
-            evidence_md,
+            _stepper_html(4),
+            segmentation_html,
+            tone_html,
+            features_html,
+            alignment_html,
+            post_result_insight_md,
             interpretation_md,
         )
 
@@ -514,293 +696,476 @@ def launch_local_demo(
         css="""
 footer, .footer, #footer {display: none !important;}
 .gradio-container {
-  --body-background-fill: #f4f7fb;
-  --block-background-fill: #ffffff;
-  --block-border-color: #d6e0ea;
-  --input-background-fill: #ffffff;
-  --input-border-color: #c4d0de;
-  color-scheme: light;
-  color: #0f172a;
+  --body-background-fill: #071227;
+  --block-background-fill: rgba(11, 28, 58, 0.75);
+  --block-border-color: rgba(146, 168, 201, 0.18);
+  --input-background-fill: #0d2347;
+  --input-border-color: rgba(168, 188, 220, 0.3);
+  color-scheme: dark;
+  color: #edf2ff;
   background:
-    radial-gradient(1200px 400px at 10% -10%, #d7efe7 0%, transparent 55%),
-    radial-gradient(900px 380px at 100% 0%, #dbe9fb 0%, transparent 50%),
-    linear-gradient(180deg, #f8fbff 0%, #f3f7fb 100%);
+    radial-gradient(1000px 420px at 12% -6%, rgba(255, 153, 61, 0.2) 0%, transparent 58%),
+    radial-gradient(880px 360px at 90% -12%, rgba(110, 145, 255, 0.25) 0%, transparent 52%),
+    linear-gradient(180deg, #061024 0%, #081a36 45%, #071227 100%);
 }
-.hero-card,
-.note-card,
-.stage-card {
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid #d6e0ea;
+.hero-card, .stage-card, .note-card {
+  background: rgba(10, 27, 56, 0.78);
+  border: 1px solid rgba(146, 168, 201, 0.2);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 16px 40px rgba(3, 10, 24, 0.35);
+  backdrop-filter: blur(6px);
+}
+.hero-title {
+  font-size: 2.2rem;
+  margin: 0;
+  line-height: 1.1;
+  color: #ffffff;
+}
+.hero-subtitle {
+  margin: 0.4rem 0 0.8rem;
+  color: #b7c9ec;
+  font-size: 1.02rem;
+}
+.hero-support {
+  margin: 0.15rem 0 0.9rem;
+  color: #d4e3ff;
+  font-size: 0.98rem;
+}
+.cta-btn {
+  display: inline-block;
+  margin-top: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff8c36 0%, #ff6f2a 100%);
+  color: #fff !important;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.cta-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(255, 111, 42, 0.35);
+}
+.pipeline-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(136, 158, 190, 0.38);
+  font-size: 0.86rem;
+}
+.step-active {
+  background: rgba(255, 140, 54, 0.22);
+  border-color: rgba(255, 140, 54, 0.55);
+}
+.step-complete {
+  background: rgba(55, 211, 153, 0.18);
+  border-color: rgba(55, 211, 153, 0.45);
+}
+.step-pending {
+  opacity: 0.72;
+}
+.pipeline-connector {
+  height: 1px;
+  width: 26px;
+  background: rgba(140, 163, 197, 0.45);
+}
+.tone-grid, .segment-grid, .alignment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+.feature-sections {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.result-card {
   border-radius: 14px;
-  padding: 14px;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(147, 170, 206, 0.24);
+  background: rgba(9, 22, 46, 0.84);
+  padding: 12px;
 }
-#overview-video {
-  max-width: 640px;
-  margin-left: auto;
-  margin-right: auto;
+.result-card-accent {
+  border-color: rgba(255, 140, 54, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 140, 54, 0.26);
 }
-#overview-video video {
-  max-height: 300px !important;
+.result-title {
+  font-size: 0.9rem;
+  color: #d4e3ff;
+  margin-bottom: 8px;
 }
-#overview-video .wrap,
-#overview-video .container,
-#overview-video .block {
-  max-width: 680px;
-  margin-left: auto;
-  margin-right: auto;
+.evidence-title {
+  margin-top: 10px;
+  margin-bottom: 4px;
+  font-size: 0.78rem;
+  color: #b8caea;
+}
+.evidence-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.evidence-item {
+  margin-bottom: 4px;
+  color: #dbe7ff;
+  line-height: 1.35;
+}
+.tone-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.84rem;
+  border: 1px solid transparent;
+  font-weight: 700;
+}
+.badge-positive { background: rgba(34, 197, 94, 0.2); color: #bbf7d0; border-color: rgba(34,197,94,0.45); }
+.badge-negative { background: rgba(239, 68, 68, 0.2); color: #fecaca; border-color: rgba(239,68,68,0.45); }
+.badge-mixed { background: rgba(250, 204, 21, 0.22); color: #fef3c7; border-color: rgba(250,204,21,0.45); }
+.badge-unknown { background: rgba(148, 163, 184, 0.22); color: #e2e8f0; border-color: rgba(148,163,184,0.45); }
+.chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.feature-chip {
+  border-radius: 10px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  background: rgba(91, 127, 186, 0.18);
+  border: 1px solid rgba(139, 165, 208, 0.4);
+  color: #deebff;
+}
+.feature-value-yes {
+  color: #86efac;
+  font-weight: 700;
+}
+.feature-empty {
+  opacity: 0.8;
+}
+.segment-text {
+  color: #d9e8ff;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+.inline-note {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: #b8caea;
+}
+.alignment-status {
+  margin-top: 10px;
 }
 .gradio-container .prose,
-.gradio-container .prose * {
-  color: #0f172a !important;
-}
-.gradio-container .prose code {
-  background: #eaf0f7 !important;
-  color: #0f172a !important;
-  border-radius: 4px;
-  padding: 0.05rem 0.3rem;
-}
-.gradio-container button[role="tab"],
-.gradio-container .tab-nav button,
-.gradio-container [role="tablist"] button {
-  background: #e8edf5 !important;
-  color: #0f172a !important;
-  border: 1px solid #a9b8cb !important;
-}
-.gradio-container button[role="tab"][aria-selected="true"],
-.gradio-container .tab-nav button.selected,
-.gradio-container [role="tablist"] button[aria-selected="true"] {
-  background: #153e8a !important;
-  color: #ffffff !important;
-  border-color: #153e8a !important;
-}
+.gradio-container .prose *,
 .gradio-container label,
-.gradio-container .label-wrap,
-.gradio-container .secondary-text,
-.gradio-container .svelte-1ipelgc {
-  color: #1e293b !important;
-}
-.gradio-container input,
+.gradio-container .block-label,
+.gradio-container .block-title,
+.gradio-container .block-info,
+.gradio-container .component-description,
 .gradio-container textarea,
+.gradio-container input,
 .gradio-container select,
-.gradio-container [role="combobox"] {
-  background: #ffffff !important;
-  color: #0f172a !important;
-  border: 1px solid #c4d0de !important;
+.gradio-container [role="tab"] {
+  color: #edf2ff !important;
 }
-.gradio-container textarea {
-  min-height: 170px;
-}
-.gradio-container [role="listbox"] {
-  background: #ffffff !important;
-  border: 1px solid #c4d0de !important;
-}
-.gradio-container [role="option"] {
-  color: #0f172a !important;
-  background: #ffffff !important;
-}
-.gradio-container [role="option"]:hover,
-.gradio-container [role="option"][aria-selected="true"] {
-  background: #e8eff8 !important;
-  color: #0f172a !important;
-}
-#component-0,
-.gradio-container .block {
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid #d6e0ea;
-  border-radius: 12px;
+.gradio-container textarea::placeholder,
+.gradio-container input::placeholder {
+  color: #a4bcdf !important;
+  opacity: 1 !important;
 }
 .gradio-container button.primary {
-  background: linear-gradient(90deg, #ea580c 0%, #ef7f1a 100%) !important;
-  border: 0 !important;
-  color: #ffffff !important;
+  background: linear-gradient(90deg, #ff8c36 0%, #ff6f2a 100%) !important;
+  border: none !important;
+  color: #fff !important;
   font-weight: 700 !important;
 }
-.gradio-container .dataframe table,
-.gradio-container .dataframe thead,
-.gradio-container .dataframe tbody,
-.gradio-container .dataframe tr,
-.gradio-container .dataframe th,
-.gradio-container .dataframe td {
-  background: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #d6e0ea !important;
+#overview-video video {
+  max-height: 320px !important;
 }
-.gradio-container .dataframe th {
-  background: #eef3f9 !important;
-  font-weight: 700 !important;
+.loading-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  color: #b7c9ec;
+  gap: 10px;
 }
-.gradio-container .dataframe td,
-.gradio-container .dataframe td * {
-  white-space: normal !important;
-  word-break: break-word !important;
-  overflow-wrap: anywhere !important;
-  line-height: 1.4 !important;
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #ff8c36;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 """,
     ) as demo:
-        with gr.Group(elem_classes="hero-card"):
-            gr.Markdown("# NDE Local Interactive Demo")
-            gr.Markdown(INTRO_MD)
+        # Loading state helpers and click wrappers
+        def _loading_placeholder_html() -> str:
+            return (
+                "<div class='result-card loading-card'>"
+                "<div class='spinner'></div>"
+                "<span>Loading results…</span>"
+                "</div>"
+            )
 
-        with gr.Accordion("Research Context and Questions", open=False):
-            gr.Markdown(RESEARCH_QUESTIONS_MD)
-            gr.Markdown(WHAT_WAS_DONE_MD)
-            gr.Markdown(DEMO_PURPOSE_MD)
+        def _loading_placeholder_markdown() -> str:
+            return "⌛ Analyzing interpretation…"
+
+        def run_guided_click(
+            base_url,
+            model,
+            temperature,
+            prompt_variant,
+            context,
+            experience,
+            aftereffects,
+            single,
+            valence,
+        ):
+            loading_stepper = _stepper_html(1)
+            loading_card = _loading_placeholder_html()
+            loading_insight = "⌛ Generating study insight…"
+            loading_interp = _loading_placeholder_markdown()
+            yield [
+                gr.update(interactive=False),
+                "⏳ Processing...",
+                loading_stepper,
+                loading_card,
+                loading_card,
+                loading_card,
+                loading_card,
+                loading_insight,
+                loading_interp,
+            ]
+            try:
+                results = _compute_results(
+                    "Guided Mode: Three Sections",
+                    base_url,
+                    model,
+                    temperature,
+                    prompt_variant,
+                    context,
+                    experience,
+                    aftereffects,
+                    single,
+                    valence,
+                )
+                yield [gr.update(interactive=True)] + list(results)
+            except Exception as e:
+                error_msg = f"❌ Error: {str(e)}"
+                yield [
+                    gr.update(interactive=True),
+                    error_msg,
+                    loading_stepper,
+                    loading_card,
+                    loading_card,
+                    loading_card,
+                    loading_card,
+                    loading_insight,
+                    loading_interp,
+                ]
+
+        def run_full_click(
+            base_url,
+            model,
+            temperature,
+            prompt_variant,
+            context,
+            experience,
+            aftereffects,
+            single,
+            valence,
+        ):
+            loading_stepper = _stepper_html(1)
+            loading_card = _loading_placeholder_html()
+            loading_insight = "⌛ Generating study insight…"
+            loading_interp = _loading_placeholder_markdown()
+            yield [
+                gr.update(interactive=False),
+                "⏳ Processing...",
+                loading_stepper,
+                loading_card,
+                loading_card,
+                loading_card,
+                loading_card,
+                loading_insight,
+                loading_interp,
+            ]
+            try:
+                results = _compute_results(
+                    "Complex Mode: Single Narrative",
+                    base_url,
+                    model,
+                    temperature,
+                    prompt_variant,
+                    context,
+                    experience,
+                    aftereffects,
+                    single,
+                    valence,
+                )
+                yield [gr.update(interactive=True)] + list(results)
+            except Exception as e:
+                error_msg = f"❌ Error: {str(e)}"
+                yield [
+                    gr.update(interactive=True),
+                    error_msg,
+                    loading_stepper,
+                    loading_card,
+                    loading_card,
+                    loading_card,
+                    loading_card,
+                    loading_insight,
+                    loading_interp,
+                ]
+
+        with gr.Group(elem_classes="hero-card"):
+            gr.HTML("<h1 class='hero-title'>From Stories to Structure</h1>")
+            gr.HTML(f"<p class='hero-subtitle'>{escape(HERO_SUBTITLE_MD)}</p>")
+            gr.HTML(f"<p class='hero-support'>{escape(HERO_SUPPORT_MD)}</p>")
+            gr.HTML("<a class='cta-btn' href='#input-workspace'>Try the Demo ↓</a>")
+            gr.Markdown(AUTHOR_MD)
 
         with gr.Group(elem_classes="note-card"):
-            gr.Markdown(KEY_ELEMENTS_MD)
-            gr.Markdown(STAGES_MD)
-            gr.Markdown(USER_GUIDE_MD)
+            gr.Markdown(CORE_INSIGHT_MD)
 
-        gr.Markdown(VIDEO_SUMMARY_MD)
-        if video_path.exists():
-            gr.Video(
-                value=str(video_path),
-                label="Stories vs Surveys Overview",
-                elem_id="overview-video",
-                height=300,
-            )
-        else:
-            gr.Markdown(
-                "Video not found at repository root (`Stories_vs_Surveys.mov`)."
-            )
+        with gr.Accordion("Learn more", open=False):
+            gr.Markdown(LEARN_MORE_MD)
+            gr.Markdown(TOOLTIP_MD)
+
+        with gr.Group(elem_classes="note-card"):
+            gr.Markdown(TRY_IT_MD)
+            gr.Markdown(SIMPLIFIED_FLOW_MD)
+
+        with gr.Group(elem_classes="note-card"):
+            gr.Markdown(f"### {VIDEO_SUMMARY_MD}")
+            if video_path.exists():
+                gr.Video(
+                    value=str(video_path),
+                    label="Stories vs Surveys Overview",
+                    elem_id="overview-video",
+                    height=300,
+                )
+            else:
+                gr.Markdown(
+                    "Video not found at repository root (`Stories_vs_Surveys.mov`)."
+                )
 
         with gr.Group(elem_classes="note-card"):
             gr.Markdown(DISCLAIMER_MD)
 
-        with gr.Group(elem_classes="stage-card"):
-            gr.Markdown("## Stage 1 — Input")
-            with gr.Row():
-                base_url_input = gr.Textbox(
-                    label="Ollama Base URL", value=default_base_url
-                )
-                model_dropdown = gr.Dropdown(
-                    choices=initial_models,
-                    value=initial_model,
-                    label="Model",
-                    allow_custom_value=True,
-                )
-                refresh_button = gr.Button("Refresh Models")
+        with gr.Group(elem_classes="stage-card", elem_id="input-workspace"):
+            gr.Markdown("## Input")
+            stepper_output = gr.HTML(_stepper_html(1))
 
-            model_status = gr.Markdown(initial_model_message)
-
-            with gr.Row():
-                mode_selector = gr.Radio(
-                    choices=[
-                        "Guided Mode: Three Sections",
-                        "Complex Mode: Single Narrative",
-                    ],
-                    value="Guided Mode: Three Sections",
-                    label="Input Path",
-                    info="Guided mode lets you control section boundaries; complex mode runs model-assisted resegmentation before analysis.",
-                )
-                prompt_variant_input = gr.Textbox(
-                    label="Prompt Variant (optional)",
-                    value="",
-                    placeholder="Use analysis default when empty",
-                )
-                temperature_input = gr.Number(
-                    label="Temperature",
-                    value=float(llm_config.runtime.temperature),
-                    precision=3,
-                )
-                optional_valence_input = gr.Dropdown(
-                    choices=["", "positive", "negative", "mixed", "neutral"],
-                    value="",
-                    label="Optional Valence",
-                    info="Used only in Stage 3 alignment module.",
-                )
-
-            context_input = gr.Textbox(
-                label="Before the NDE (Context)",
-                lines=6,
-                placeholder="Describe circumstances before/during the life-threatening event.",
-                info="Use this for medical context, perceived threat, and immediate setting.",
-            )
-            experience_input = gr.Textbox(
-                label="Core NDE Experience",
-                lines=6,
-                placeholder="Describe the central experience (perceptions, emotions, phenomena).",
-                info="Use this for the main experiential content.",
-            )
-            aftereffects_input = gr.Textbox(
-                label="Aftereffects",
-                lines=6,
-                placeholder="Describe lasting changes after the event.",
-                info="Use this for moral, relational, or long-term perspective changes.",
-            )
-            single_input = gr.Textbox(
-                label="Single Narrative",
-                lines=12,
-                visible=False,
-                placeholder="Paste the full narrative. The app will segment it before analysis.",
-                info="Best for quick trials; review Stage 2 segmentation before interpreting results.",
+            optional_valence_input = gr.Dropdown(
+                choices=["", "positive", "negative", "mixed", "neutral"],
+                value="",
+                label="Optional Valence",
             )
 
-            run_button = gr.Button("Run Analysis", variant="primary")
+            with gr.Accordion("Advanced Settings", open=False):
+                with gr.Row():
+                    base_url_input = gr.Textbox(
+                        label="Ollama Base URL", value=default_base_url
+                    )
+                    model_dropdown = gr.Dropdown(
+                        choices=initial_models,
+                        value=initial_model,
+                        label="Model",
+                        allow_custom_value=True,
+                    )
+                    refresh_button = gr.Button("Refresh Models")
+                with gr.Row():
+                    temperature_input = gr.Number(
+                        label="Temperature",
+                        value=float(llm_config.runtime.temperature),
+                        precision=3,
+                    )
+                    prompt_variant_input = gr.Textbox(
+                        label="Prompt Variant",
+                        value="",
+                        placeholder="Default prompt variant",
+                    )
+                model_status = gr.Markdown(initial_model_message)
+
+            with gr.Tabs():
+                with gr.Tab("Guided Input"):
+                    context_input = gr.Textbox(
+                        label="Before (Context)",
+                        lines=5,
+                        placeholder="Example: I was in surgery after a severe accident...",
+                    )
+                    experience_input = gr.Textbox(
+                        label="Experience",
+                        lines=5,
+                        placeholder="Example: I saw a bright light and felt calm...",
+                    )
+                    aftereffects_input = gr.Textbox(
+                        label="After (Effects)",
+                        lines=5,
+                        placeholder="Example: Since then I feel less fear of death...",
+                    )
+                    run_guided_button = gr.Button("Run Analysis", variant="primary")
+
+                with gr.Tab("Full Narrative"):
+                    single_input = gr.Textbox(
+                        label="Full Narrative",
+                        lines=13,
+                        placeholder="Paste the complete story. The app will segment it automatically.",
+                    )
+                    run_full_button = gr.Button("Run Analysis", variant="primary")
+
             status_output = gr.Markdown()
 
         with gr.Group(elem_classes="stage-card"):
-            gr.Markdown("## Stage 2 — Segmentation")
-            segmentation_note_output = gr.Markdown()
-            segmentation_table_output = gr.Dataframe(
-                headers=["Narrative Part", "Text Used for Analysis"],
-                datatype=["str", "str"],
-                label="Segmented Narrative",
-                wrap=True,
-                interactive=False,
+            gr.Markdown("## Results")
+            with gr.Tabs():
+                with gr.Tab("Segmentation"):
+                    segmentation_output = gr.HTML()
+                with gr.Tab("Tone"):
+                    global_tone_output = gr.HTML()
+                with gr.Tab("Structured Features"):
+                    features_output = gr.HTML()
+                with gr.Tab("Alignment"):
+                    alignment_output = gr.HTML()
+
+        with gr.Group(elem_classes="note-card"):
+            post_result_insight_output = gr.Markdown(
+                "### Study Insight (This Run)\nRun an analysis to see how narrative and questionnaire-style interpretations align or diverge."
             )
 
         with gr.Group(elem_classes="stage-card"):
-            gr.Markdown("## Stage 3 — Module Analysis")
-            with gr.Tabs():
-                with gr.TabItem("Tone Estimation"):
-                    global_tone_output = gr.Markdown()
-                    section_table_output = gr.Dataframe(
-                        headers=[
-                            "Narrative Part",
-                            "Detected Tone",
-                            "Context Type",
-                            "Supporting Evidence",
-                        ],
-                        datatype=["str", "str", "str", "str"],
-                        label="Section-Level Summary",
-                        wrap=True,
-                        interactive=False,
-                    )
-
-                with gr.TabItem("Structured Features"):
-                    labels_table_output = gr.Dataframe(
-                        headers=["Narrative Part", "Dimension", "Detected Value"],
-                        datatype=["str", "str", "str"],
-                        label="Extracted Dimensions",
-                        wrap=True,
-                        interactive=False,
-                    )
-                    evidence_output = gr.Markdown(label="Evidence Details")
-
-                with gr.TabItem("Alignment with Questionnaire-style Layer"):
-                    alignment_output = gr.Markdown(label="Valence Alignment")
-
-        with gr.Group(elem_classes="stage-card"):
-            gr.Markdown("## Stage 4 — Interpretation")
+            gr.Markdown("## Interpretation")
             interpretation_output = gr.Markdown()
+
+        guided_mode_state = gr.State("Guided Mode: Three Sections")
+        full_mode_state = gr.State("Complex Mode: Single Narrative")
 
         refresh_button.click(
             fn=refresh_models,
             inputs=[base_url_input],
             outputs=[model_dropdown, model_status],
         )
-        mode_selector.change(
-            fn=toggle_mode,
-            inputs=[mode_selector],
-            outputs=[context_input, experience_input, aftereffects_input, single_input],
-        )
-        run_button.click(
-            fn=run_analysis,
+
+        run_guided_button.click(
+            fn=run_guided_click,
             inputs=[
-                mode_selector,
                 base_url_input,
                 model_dropdown,
                 temperature_input,
@@ -812,14 +1177,40 @@ footer, .footer, #footer {display: none !important;}
                 optional_valence_input,
             ],
             outputs=[
+                run_guided_button,
                 status_output,
-                segmentation_note_output,
-                segmentation_table_output,
+                stepper_output,
+                segmentation_output,
                 global_tone_output,
-                section_table_output,
-                labels_table_output,
+                features_output,
                 alignment_output,
-                evidence_output,
+                post_result_insight_output,
+                interpretation_output,
+            ],
+        )
+
+        run_full_button.click(
+            fn=run_full_click,
+            inputs=[
+                base_url_input,
+                model_dropdown,
+                temperature_input,
+                prompt_variant_input,
+                context_input,
+                experience_input,
+                aftereffects_input,
+                single_input,
+                optional_valence_input,
+            ],
+            outputs=[
+                run_full_button,
+                status_output,
+                stepper_output,
+                segmentation_output,
+                global_tone_output,
+                features_output,
+                alignment_output,
+                post_result_insight_output,
                 interpretation_output,
             ],
         )
