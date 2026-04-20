@@ -6,6 +6,7 @@ Structured workflow for Near-Death Experience (NDE) narratives, including prepro
 
 - [What This Repository Is](#what-this-repository-is)
 - [Choose Your Path](#choose-your-path)
+- [Article Page](#article-page)
 - [Video Summary](#video-summary)
 - [Installation](#installation)
 - [Minimal Configuration](#minimal-configuration)
@@ -52,6 +53,12 @@ https://github.com/user-attachments/assets/f0b42697-f968-46ce-be40-7f5179521e6c
 
 
 Note: the Space is intentionally lightweight and not a replacement for this full local pipeline.
+
+## Article Page
+
+Main article page (project framing, results narrative, and links back to repository resources):
+
+- https://cristian-pulido.github.io/representational-mismatch-nde/
 
 ## Video Summary
 
