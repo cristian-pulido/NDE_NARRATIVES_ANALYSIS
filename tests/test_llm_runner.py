@@ -26,7 +26,11 @@ from tests.cli_helpers import (
 
 
 class FakeProvider:
-    def __init__(self, predictions_by_key: dict[tuple[str, str], dict[str, Any]], invalid_once: set[tuple[str, str]] | None = None) -> None:
+    def __init__(
+        self,
+        predictions_by_key: dict[tuple[str, str], dict[str, Any]],
+        invalid_once: set[tuple[str, str]] | None = None,
+    ) -> None:
         self.predictions_by_key = predictions_by_key
         self.invalid_once = invalid_once or set()
         self.calls: dict[tuple[str, str], int] = defaultdict(int)
@@ -37,7 +41,9 @@ class FakeProvider:
         self.calls[key] += 1
         self.temperatures.append(request.temperature)
         if key in self.invalid_once and self.calls[key] == 1:
-            return LLMProviderResponse(provider="fake", model=request.model, raw_text="not valid json")
+            return LLMProviderResponse(
+                provider="fake", model=request.model, raw_text="not valid json"
+            )
         return LLMProviderResponse(
             provider="fake",
             model=request.model,
@@ -46,7 +52,12 @@ class FakeProvider:
 
 
 class InterruptingProvider(FakeProvider):
-    def __init__(self, predictions_by_key: dict[tuple[str, str], dict[str, Any]], *, interrupt_on_call: int) -> None:
+    def __init__(
+        self,
+        predictions_by_key: dict[tuple[str, str], dict[str, Any]],
+        *,
+        interrupt_on_call: int,
+    ) -> None:
         super().__init__(predictions_by_key)
         self.interrupt_on_call = interrupt_on_call
         self.total_calls = 0
@@ -65,23 +76,41 @@ class FakePreprocessingProvider:
 
     def generate_structured(self, request) -> LLMProviderResponse:
         if request.section == "preprocess_validate":
-            count = self.validation_call_counts.get(str(request.participant_code), 0) + 1
+            count = (
+                self.validation_call_counts.get(str(request.participant_code), 0) + 1
+            )
             self.validation_call_counts[str(request.participant_code)] = count
             payload = {
-                "context_assessment": "invalid" if request.participant_code == self.invalid_participant and count == 1 else "valid",
+                "context_assessment": "invalid"
+                if request.participant_code == self.invalid_participant and count == 1
+                else "valid",
                 "experience_assessment": "valid",
-                "aftereffects_assessment": "invalid" if request.participant_code == self.invalid_participant and count == 1 else "valid",
-                "needs_resegmentation": "yes" if request.participant_code == self.invalid_participant and count == 1 else "no",
+                "aftereffects_assessment": "invalid"
+                if request.participant_code == self.invalid_participant and count == 1
+                else "valid",
+                "needs_resegmentation": "yes"
+                if request.participant_code == self.invalid_participant and count == 1
+                else "no",
             }
-            return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            return LLMProviderResponse(
+                provider="fake", model=request.model, raw_text=json.dumps(payload)
+            )
         if request.section == "preprocess_validate_post_resegment":
             payload = {
-                "context_assessment": "invalid" if request.participant_code == self.invalid_participant else "valid",
+                "context_assessment": "invalid"
+                if request.participant_code == self.invalid_participant
+                else "valid",
                 "experience_assessment": "valid",
-                "aftereffects_assessment": "invalid" if request.participant_code == self.invalid_participant else "valid",
-                "needs_resegmentation": "yes" if request.participant_code == self.invalid_participant else "no",
+                "aftereffects_assessment": "invalid"
+                if request.participant_code == self.invalid_participant
+                else "valid",
+                "needs_resegmentation": "yes"
+                if request.participant_code == self.invalid_participant
+                else "no",
             }
-            return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            return LLMProviderResponse(
+                provider="fake", model=request.model, raw_text=json.dumps(payload)
+            )
         payload = (
             {
                 "context": "clean context",
@@ -95,11 +124,13 @@ class FakePreprocessingProvider:
                 "aftereffects": "clean aftereffects",
             }
         )
-        return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+        return LLMProviderResponse(
+            provider="fake", model=request.model, raw_text=json.dumps(payload)
+        )
 
 
 def _llm_block(*, temperature: float = 0.2) -> str:
-    return f'''
+    return f"""
 [llm]
 provider = "ollama"
 base_url = "http://localhost:11434"
@@ -117,11 +148,15 @@ prompt_variant = "baseline"
 run_id = "run-01"
 model_variant = "mock-model"
 temperature = 0.0
-'''
+"""
 
 
-def _prediction_payloads(study, source_df: pd.DataFrame) -> dict[tuple[str, str], dict[str, Any]]:
-    fixture = pd.read_csv(FIXTURES / "llm_predictions_fixture.csv").set_index("response_id")
+def _prediction_payloads(
+    study, source_df: pd.DataFrame
+) -> dict[tuple[str, str], dict[str, Any]]:
+    fixture = pd.read_csv(FIXTURES / "llm_predictions_fixture.csv").set_index(
+        "response_id"
+    )
     payloads: dict[tuple[str, str], dict[str, Any]] = {}
     for _, row in source_df.iterrows():
         participant_code = row["participant_code"]
@@ -141,10 +176,14 @@ def _prediction_payloads(study, source_df: pd.DataFrame) -> dict[tuple[str, str]
     return payloads
 
 
-def _prepare_human_artifact(source_workbook: Path, human_root: Path, annotator_id: str) -> Path:
+def _prepare_human_artifact(
+    source_workbook: Path, human_root: Path, annotator_id: str
+) -> Path:
     target_dir = human_root / annotator_id
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = copy_completed_annotation_to_human_dir(source_workbook, target_dir / f"{annotator_id}.xlsx")
+    target = copy_completed_annotation_to_human_dir(
+        source_workbook, target_dir / f"{annotator_id}.xlsx"
+    )
     write_human_manifest(target_dir, annotator_id)
     return target
 
@@ -163,19 +202,25 @@ def test_load_llm_config_and_runtime_precedence(tmp_path: Path) -> None:
     assert llm_config.experiments[0].run_id == "run-01"
 
 
-def test_participant_codes_are_stable_across_sample_and_survey_modes(tmp_path: Path) -> None:
+def test_participant_codes_are_stable_across_sample_and_survey_modes(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     survey_csv = FIXTURES / "survey_fixture.csv"
     raw = pd.read_csv(survey_csv)
     _, _, _, sampled_private_df, _ = create_annotation_frames(raw, study)
-    sampled_codes = sampled_private_df.set_index(study.id_column)["participant_code"].to_dict()
+    sampled_codes = sampled_private_df.set_index(study.id_column)[
+        "participant_code"
+    ].to_dict()
 
     paths_config = make_paths_config(tmp_path, survey_csv)
     paths = load_paths_config(paths_config)
     filtered_df = load_batch_source(study, paths, source="survey", all_records=False)
     all_records_df = load_batch_source(study, paths, source="survey", all_records=True)
 
-    filtered_codes = filtered_df.set_index(study.id_column)["participant_code"].to_dict()
+    filtered_codes = filtered_df.set_index(study.id_column)[
+        "participant_code"
+    ].to_dict()
     all_codes = all_records_df.set_index(study.id_column)["participant_code"].to_dict()
 
     assert sampled_private_df["participant_code"].is_unique
@@ -187,10 +232,14 @@ def test_participant_codes_are_stable_across_sample_and_survey_modes(tmp_path: P
         assert all_codes[response_id] == participant_code
 
 
-def test_assign_participant_codes_rejects_duplicate_response_ids(tmp_path: Path) -> None:
+def test_assign_participant_codes_rejects_duplicate_response_ids(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     source_df = pd.read_csv(FIXTURES / "survey_fixture.csv")
-    duplicated = pd.concat([source_df.iloc[[0]], source_df.iloc[[0]]], ignore_index=True)
+    duplicated = pd.concat(
+        [source_df.iloc[[0]], source_df.iloc[[0]]], ignore_index=True
+    )
 
     try:
         assign_participant_codes(duplicated, study)
@@ -200,10 +249,14 @@ def test_assign_participant_codes_rejects_duplicate_response_ids(tmp_path: Path)
         raise AssertionError("Expected duplicate response ids to be rejected.")
 
 
-def test_survey_batch_source_applies_require_all_texts_by_default(tmp_path: Path) -> None:
+def test_survey_batch_source_applies_require_all_texts_by_default(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     raw = pd.read_csv(FIXTURES / "survey_fixture.csv")
-    raw.loc[raw[study.id_column] == 101, study.sections["aftereffects"].source_column] = ""
+    raw.loc[
+        raw[study.id_column] == 101, study.sections["aftereffects"].source_column
+    ] = ""
     custom_survey = tmp_path / "survey_with_blank.csv"
     raw.to_csv(custom_survey, index=False)
 
@@ -225,7 +278,15 @@ def test_run_llm_resumes_failures_and_emits_noop_when_complete(tmp_path: Path) -
     llm_config = load_llm_config(paths_config)
     source_df = load_batch_source(study, paths, source="survey", all_records=False)
     payloads = _prediction_payloads(study, source_df)
-    failed_key = next((key for key in payloads if int(source_df.set_index("participant_code").loc[key[0], study.id_column]) == 102 and key[1] == "aftereffects"))
+    failed_key = next(
+        (
+            key
+            for key in payloads
+            if int(source_df.set_index("participant_code").loc[key[0], study.id_column])
+            == 102
+            and key[1] == "aftereffects"
+        )
+    )
     provider = FakeProvider(payloads, invalid_once={failed_key})
 
     first = run_llm_experiments(
@@ -244,10 +305,27 @@ def test_run_llm_resumes_failures_and_emits_noop_when_complete(tmp_path: Path) -
     assert Path(artifact["raw_responses_file"]).exists()
     assert Path(artifact["errors_file"]).exists()
 
-    predictions_after_first = [json.loads(line) for line in Path(artifact["predictions_file"]).read_text(encoding="utf-8").splitlines() if line]
+    predictions_after_first = [
+        json.loads(line)
+        for line in Path(artifact["predictions_file"])
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
     assert len(predictions_after_first) == 2
-    section_results_first = [json.loads(line) for line in (artifact_dir / "section_results.jsonl").read_text(encoding="utf-8").splitlines() if line]
-    failed_entries = [record for record in section_results_first if record["participant_code"] == failed_key[0] and record["section"] == failed_key[1]]
+    section_results_first = [
+        json.loads(line)
+        for line in (artifact_dir / "section_results.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
+    failed_entries = [
+        record
+        for record in section_results_first
+        if record["participant_code"] == failed_key[0]
+        and record["section"] == failed_key[1]
+    ]
     assert failed_entries[0]["status"] == "failed"
     assert failed_entries[0]["attempts"] == 1
 
@@ -259,7 +337,13 @@ def test_run_llm_resumes_failures_and_emits_noop_when_complete(tmp_path: Path) -
         provider_factory=lambda runtime: provider,
     )
     artifact_second = second["experiments"][0]
-    predictions_after_second = [json.loads(line) for line in Path(artifact_second["predictions_file"]).read_text(encoding="utf-8").splitlines() if line]
+    predictions_after_second = [
+        json.loads(line)
+        for line in Path(artifact_second["predictions_file"])
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
     assert artifact_second["no_op"] is False
     assert len(predictions_after_second) == 3
     assert provider.calls[failed_key] == 2
@@ -301,10 +385,27 @@ def test_run_llm_persists_progress_during_interrupted_run(tmp_path: Path) -> Non
     else:
         raise AssertionError("Expected the simulated interruption to abort the run.")
 
-    artifact_dir = paths.llm_results_dir / f"{llm_config.experiments[0].experiment_id}__{llm_config.experiments[0].run_id}"
-    section_results = [json.loads(line) for line in (artifact_dir / "section_results.jsonl").read_text(encoding="utf-8").splitlines() if line]
-    raw_responses = [json.loads(line) for line in (artifact_dir / "raw_responses.jsonl").read_text(encoding="utf-8").splitlines() if line]
-    partial_summary = json.loads((artifact_dir / "run_summary.json").read_text(encoding="utf-8"))
+    artifact_dir = (
+        paths.llm_results_dir
+        / f"{llm_config.experiments[0].experiment_id}__{llm_config.experiments[0].run_id}"
+    )
+    section_results = [
+        json.loads(line)
+        for line in (artifact_dir / "section_results.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
+    raw_responses = [
+        json.loads(line)
+        for line in (artifact_dir / "raw_responses.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line
+    ]
+    partial_summary = json.loads(
+        (artifact_dir / "run_summary.json").read_text(encoding="utf-8")
+    )
 
     assert len(section_results) == 1
     assert section_results[0]["status"] == "success"
@@ -336,11 +437,19 @@ def test_evaluate_ignores_internal_runner_artifacts(tmp_path: Path) -> None:
     paths = load_paths_config(paths_config)
     llm_config = load_llm_config(paths_config)
 
-    build_result = run_cli("build-annotation-sample", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    build_result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
     assert build_result.returncode == 0, build_result.stderr
 
     source_workbook = tmp_path / "annotation_outputs" / "nde_annotation_sample.xlsx"
-    mapping_workbook = tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    mapping_workbook = (
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    )
     human_root = tmp_path / "human_annotations"
     populate_human_annotation_workbook(source_workbook, mapping_workbook, study_config)
     _prepare_human_artifact(source_workbook, human_root, "ann_a")
@@ -357,11 +466,25 @@ def test_evaluate_ignores_internal_runner_artifacts(tmp_path: Path) -> None:
         provider_factory=lambda runtime: provider,
     )
 
-    eval_result = run_cli("evaluate", "--study-config", str(study_config), "--paths-config", str(paths_config))
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
     assert eval_result.returncode == 0, eval_result.stderr
 
-    summary = json.loads((tmp_path / "evaluation_outputs" / "evaluation_summary.json").read_text(encoding="utf-8"))
-    llm_manifest = json.loads((tmp_path / "evaluation_outputs" / "llm_artifacts_manifest.json").read_text(encoding="utf-8"))
+    summary = json.loads(
+        (tmp_path / "evaluation_outputs" / "evaluation_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    llm_manifest = json.loads(
+        (tmp_path / "evaluation_outputs" / "llm_artifacts_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert summary["coverage"]["n_valid_llm_artifacts"] == 1
     assert summary["coverage"]["n_rejected_llm_artifacts"] == 0
@@ -370,7 +493,9 @@ def test_evaluate_ignores_internal_runner_artifacts(tmp_path: Path) -> None:
     assert llm_manifest["accepted"][0]["artifact_id"] == "exp_alpha__run-01"
 
 
-def test_load_batch_source_prefers_preprocessed_dataset_and_can_filter_by_cleaned_sections(tmp_path: Path) -> None:
+def test_load_batch_source_prefers_preprocessed_dataset_and_can_filter_by_cleaned_sections(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
@@ -395,19 +520,27 @@ def test_load_batch_source_prefers_preprocessed_dataset_and_can_filter_by_cleane
         study=study,
         paths=paths,
         preprocessing=PreprocessConfigStub(),
-        provider_factory=lambda _: FakePreprocessingProvider(invalid_participant=invalid_participant),
+        provider_factory=lambda _: FakePreprocessingProvider(
+            invalid_participant=invalid_participant
+        ),
     )
 
     preferred_df = load_batch_source(study, paths, source="survey", all_records=False)
     assert "n_valid_sections_cleaned" in preferred_df.columns
     assert invalid_participant not in set(preferred_df["participant_code"])
-    assert set(preferred_df["participant_code"]) == set(preview_df["participant_code"]) - {invalid_participant}
+    assert set(preferred_df["participant_code"]) == set(
+        preview_df["participant_code"]
+    ) - {invalid_participant}
 
-    filtered_df = load_batch_source(study, paths, source="survey", all_records=False, min_valid_sections=3)
+    filtered_df = load_batch_source(
+        study, paths, source="survey", all_records=False, min_valid_sections=3
+    )
     assert invalid_participant not in set(filtered_df["participant_code"])
 
 
-def test_load_batch_source_uses_post_preprocessing_validity_and_to_drop_filters(tmp_path: Path) -> None:
+def test_load_batch_source_uses_post_preprocessing_validity_and_to_drop_filters(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
@@ -438,7 +571,9 @@ def test_load_batch_source_uses_post_preprocessing_validity_and_to_drop_filters(
     cleaned_df.loc[cleaned_df[study.id_column] == 104, "TO_DROP"] = False
     cleaned_df.loc[cleaned_df[study.id_column] == 104, "n_valid_sections_cleaned"] = 3
     cleaned_df.loc[cleaned_df[study.id_column] == 104, "n_valid_sections"] = 3
-    cleaned_df.loc[cleaned_df[study.id_column] == 104, study.sections["aftereffects"].source_column] = "clean aftereffects"
+    cleaned_df.loc[
+        cleaned_df[study.id_column] == 104, study.sections["aftereffects"].source_column
+    ] = "clean aftereffects"
     cleaned_df.to_csv(cleaned_path, index=False)
 
     filtered_df = load_batch_source(study, paths, source="survey", all_records=False)
@@ -448,7 +583,9 @@ def test_load_batch_source_uses_post_preprocessing_validity_and_to_drop_filters(
     assert 104 in set(all_records_df[study.id_column])
 
 
-def test_load_batch_source_excludes_preprocessed_rows_marked_to_drop(tmp_path: Path) -> None:
+def test_load_batch_source_excludes_preprocessed_rows_marked_to_drop(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
@@ -486,7 +623,9 @@ def test_load_batch_source_excludes_preprocessed_rows_marked_to_drop(tmp_path: P
     assert 101 in set(all_records_df[study.id_column])
 
 
-def test_load_batch_source_prefers_preprocessed_dataset_over_translated(tmp_path: Path) -> None:
+def test_load_batch_source_prefers_preprocessed_dataset_over_translated(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
@@ -500,12 +639,13 @@ def test_load_batch_source_prefers_preprocessed_dataset_over_translated(tmp_path
     translated = cleaned.copy()
     translated.loc[:, study.id_column] = 5102
     translated.loc[:, "participant_code"] = "ANN_TRANSLATED"
-    translated.to_csv(paths.preprocessing_output_dir / "translated_dataset.csv", index=False)
+    translated.to_csv(
+        paths.preprocessing_output_dir / "translated_dataset.csv", index=False
+    )
 
     preferred_df = load_batch_source(study, paths, source="survey", all_records=False)
 
     assert set(preferred_df[study.id_column]) == {5101}
-
 
 
 def test_ollama_provider_accepts_structured_output_in_thinking() -> None:
@@ -519,7 +659,10 @@ def test_ollama_provider_accepts_structured_output_in_thinking() -> None:
     assert source_field == "thinking"
     assert '"tone": "neutral"' in raw_text
 
-def test_load_batch_source_explicit_input_path_applies_valid_sections_filter_by_default(tmp_path: Path) -> None:
+
+def test_load_batch_source_explicit_input_path_applies_valid_sections_filter_by_default(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())
@@ -544,7 +687,9 @@ def test_load_batch_source_explicit_input_path_applies_valid_sections_filter_by_
     assert set(filtered_df[study.id_column]) == {101}
 
 
-def test_load_batch_source_explicit_input_path_can_disable_valid_sections_filter(tmp_path: Path) -> None:
+def test_load_batch_source_explicit_input_path_can_disable_valid_sections_filter(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv, llm_block=_llm_block())

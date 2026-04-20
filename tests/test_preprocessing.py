@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from nde_narratives.config import load_paths_config, load_preprocessing_config, load_study_config
+from nde_narratives.config import (
+    load_paths_config,
+    load_preprocessing_config,
+    load_study_config,
+)
 from nde_narratives.llm.types import LLMProviderResponse
 from nde_narratives.preprocessing import run_preprocessing_pipeline
 
@@ -25,7 +29,9 @@ class FakePreprocessingProvider:
         if request.section == "preprocess_validate":
             self.validation_calls.append(request.participant_code)
             self.validation_num_ctx.append(request.metadata.get("num_ctx"))
-            count = self.validation_call_counts.get(str(request.participant_code), 0) + 1
+            count = (
+                self.validation_call_counts.get(str(request.participant_code), 0) + 1
+            )
             self.validation_call_counts[str(request.participant_code)] = count
             if request.participant_code == self.invalid_participant and count == 1:
                 payload = {
@@ -41,7 +47,9 @@ class FakePreprocessingProvider:
                     "aftereffects_assessment": "valid",
                     "needs_resegmentation": "no",
                 }
-            return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            return LLMProviderResponse(
+                provider="fake", model=request.model, raw_text=json.dumps(payload)
+            )
 
         if request.section == "preprocess_validate_post_resegment":
             payload = {
@@ -50,7 +58,9 @@ class FakePreprocessingProvider:
                 "aftereffects_assessment": "valid",
                 "needs_resegmentation": "no",
             }
-            return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+            return LLMProviderResponse(
+                provider="fake", model=request.model, raw_text=json.dumps(payload)
+            )
 
         self.resegment_calls.append(request.participant_code)
         self.resegment_num_ctx.append(request.metadata.get("num_ctx"))
@@ -59,11 +69,13 @@ class FakePreprocessingProvider:
             "experience": "clean experience",
             "aftereffects": "clean aftereffects",
         }
-        return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+        return LLMProviderResponse(
+            provider="fake", model=request.model, raw_text=json.dumps(payload)
+        )
 
 
 def _preprocessing_block() -> str:
-    return '''
+    return """
 [preprocessing]
 provider = "ollama"
 base_url = "http://localhost:11434"
@@ -76,7 +88,7 @@ dynamic_context_enabled = true
 num_ctx_min = 4096
 num_ctx_max = 16384
 chars_per_token = 4.0
-'''
+"""
 
 
 def test_preprocess_help_mentions_cleaned_dataset_and_validation_sample() -> None:
@@ -88,9 +100,13 @@ def test_preprocess_help_mentions_cleaned_dataset_and_validation_sample() -> Non
     assert "nde preprocess" in result.stdout
 
 
-def test_run_preprocessing_pipeline_writes_cleaned_outputs_and_validation_sample(tmp_path: Path) -> None:
+def test_run_preprocessing_pipeline_writes_cleaned_outputs_and_validation_sample(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
-    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -124,7 +140,9 @@ def test_run_preprocessing_pipeline_writes_cleaned_outputs_and_validation_sample
 
 def test_run_preprocessing_pipeline_resegments_invalid_rows(tmp_path: Path) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
-    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -149,7 +167,13 @@ def test_run_preprocessing_pipeline_resegments_invalid_rows(tmp_path: Path) -> N
         provider_factory=lambda _: provider,
     )
 
-    records = [json.loads(line) for line in Path(result["participant_results_file"]).read_text(encoding="utf-8-sig").splitlines() if line]
+    records = [
+        json.loads(line)
+        for line in Path(result["participant_results_file"])
+        .read_text(encoding="utf-8-sig")
+        .splitlines()
+        if line
+    ]
     assert records[0]["preprocessing_status"] == "fully_resegmented"
     assert records[0]["context_clean"] == "clean context"
     assert records[0]["n_valid_sections_original"] == 1
@@ -157,18 +181,28 @@ def test_run_preprocessing_pipeline_resegments_invalid_rows(tmp_path: Path) -> N
     assert provider.resegment_calls == [participant_code]
 
 
-def test_preprocessing_dynamic_num_ctx_is_attached_to_requests_and_audited(tmp_path: Path) -> None:
+def test_preprocessing_dynamic_num_ctx_is_attached_to_requests_and_audited(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     raw = pd.read_csv(FIXTURES / "survey_fixture.csv")
     target_id = int(raw.iloc[0][study.id_column])
     repeated = " ".join(["narrative"] * 800)
-    raw.loc[raw[study.id_column] == target_id, study.sections["context"].source_column] = repeated
-    raw.loc[raw[study.id_column] == target_id, study.sections["experience"].source_column] = repeated
-    raw.loc[raw[study.id_column] == target_id, study.sections["aftereffects"].source_column] = repeated
+    raw.loc[
+        raw[study.id_column] == target_id, study.sections["context"].source_column
+    ] = repeated
+    raw.loc[
+        raw[study.id_column] == target_id, study.sections["experience"].source_column
+    ] = repeated
+    raw.loc[
+        raw[study.id_column] == target_id, study.sections["aftereffects"].source_column
+    ] = repeated
     custom_survey = tmp_path / "survey_long_prompt.csv"
     raw.to_csv(custom_survey, index=False)
 
-    paths_config = make_paths_config(tmp_path, custom_survey, llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, custom_survey, llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -183,11 +217,17 @@ def test_preprocessing_dynamic_num_ctx_is_attached_to_requests_and_audited(tmp_p
 
     assert provider.validation_num_ctx
     assert provider.validation_num_ctx[0] is not None
-    assert preprocessing.num_ctx_min <= int(provider.validation_num_ctx[0]) <= preprocessing.num_ctx_max
+    assert (
+        preprocessing.num_ctx_min
+        <= int(provider.validation_num_ctx[0])
+        <= preprocessing.num_ctx_max
+    )
 
     raw_responses = [
         json.loads(line)
-        for line in Path(result["raw_responses_file"]).read_text(encoding="utf-8-sig").splitlines()
+        for line in Path(result["raw_responses_file"])
+        .read_text(encoding="utf-8-sig")
+        .splitlines()
         if line
     ]
     assert raw_responses
@@ -195,9 +235,13 @@ def test_preprocessing_dynamic_num_ctx_is_attached_to_requests_and_audited(tmp_p
     assert "num_ctx" in raw_responses[0]["request_metadata"]
 
 
-def test_run_preprocessing_pipeline_from_scratch_discards_previous_ledger_state(tmp_path: Path) -> None:
+def test_run_preprocessing_pipeline_from_scratch_discards_previous_ledger_state(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
-    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -208,7 +252,13 @@ def test_run_preprocessing_pipeline_from_scratch_discards_previous_ledger_state(
         limit=1,
         provider_factory=lambda _: FakePreprocessingProvider(),
     )
-    first_records = [json.loads(line) for line in Path(first["participant_results_file"]).read_text(encoding="utf-8-sig").splitlines() if line]
+    first_records = [
+        json.loads(line)
+        for line in Path(first["participant_results_file"])
+        .read_text(encoding="utf-8-sig")
+        .splitlines()
+        if line
+    ]
     first_code = first_records[0]["participant_code"]
 
     second = run_preprocessing_pipeline(
@@ -218,24 +268,40 @@ def test_run_preprocessing_pipeline_from_scratch_discards_previous_ledger_state(
         limit=1,
         from_scratch=True,
         output_dir=paths.preprocessing_output_dir,
-        provider_factory=lambda _: FakePreprocessingProvider(invalid_participant=first_code),
+        provider_factory=lambda _: FakePreprocessingProvider(
+            invalid_participant=first_code
+        ),
     )
-    second_records = [json.loads(line) for line in Path(second["participant_results_file"]).read_text(encoding="utf-8-sig").splitlines() if line]
+    second_records = [
+        json.loads(line)
+        for line in Path(second["participant_results_file"])
+        .read_text(encoding="utf-8-sig")
+        .splitlines()
+        if line
+    ]
 
     assert len(second_records) == 1
     assert second_records[0]["preprocessing_status"] == "fully_resegmented"
 
 
-def test_preprocess_source_frame_keeps_rows_with_partial_narratives_for_rescue(tmp_path: Path) -> None:
+def test_preprocess_source_frame_keeps_rows_with_partial_narratives_for_rescue(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     raw = pd.read_csv(FIXTURES / "survey_fixture.csv")
     target_id = int(raw.iloc[0][study.id_column])
-    raw.loc[raw[study.id_column] == target_id, study.sections["experience"].source_column] = ""
-    raw.loc[raw[study.id_column] == target_id, study.sections["aftereffects"].source_column] = ""
+    raw.loc[
+        raw[study.id_column] == target_id, study.sections["experience"].source_column
+    ] = ""
+    raw.loc[
+        raw[study.id_column] == target_id, study.sections["aftereffects"].source_column
+    ] = ""
     custom_survey = tmp_path / "survey_partial.csv"
     raw.to_csv(custom_survey, index=False)
 
-    paths_config = make_paths_config(tmp_path, custom_survey, llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, custom_survey, llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -250,16 +316,24 @@ def test_preprocess_source_frame_keeps_rows_with_partial_narratives_for_rescue(t
     assert target_id in set(cleaned_df[study.id_column])
 
 
-def test_preprocessing_treats_nan_section_values_as_empty_strings(tmp_path: Path) -> None:
+def test_preprocessing_treats_nan_section_values_as_empty_strings(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
     raw = pd.read_csv(FIXTURES / "survey_fixture.csv")
     target_id = int(raw.iloc[0][study.id_column])
-    raw.loc[raw[study.id_column] == target_id, study.sections["experience"].source_column] = pd.NA
-    raw.loc[raw[study.id_column] == target_id, study.sections["aftereffects"].source_column] = pd.NA
+    raw.loc[
+        raw[study.id_column] == target_id, study.sections["experience"].source_column
+    ] = pd.NA
+    raw.loc[
+        raw[study.id_column] == target_id, study.sections["aftereffects"].source_column
+    ] = pd.NA
     custom_survey = tmp_path / "survey_with_nan_sections.csv"
     raw.to_csv(custom_survey, index=False)
 
-    paths_config = make_paths_config(tmp_path, custom_survey, llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, custom_survey, llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -281,9 +355,13 @@ def test_preprocessing_treats_nan_section_values_as_empty_strings(tmp_path: Path
     assert pd.isna(row["original_aftereffects"])
 
 
-def test_preprocess_prefers_translated_dataset_when_present_and_no_input_path(tmp_path: Path) -> None:
+def test_preprocess_prefers_translated_dataset_when_present_and_no_input_path(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
-    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -304,9 +382,13 @@ def test_preprocess_prefers_translated_dataset_when_present_and_no_input_path(tm
     assert 999 in set(cleaned_df[study.id_column])
 
 
-def test_resegmentation_fails_when_post_validation_still_invalid(tmp_path: Path) -> None:
+def test_resegmentation_fails_when_post_validation_still_invalid(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
-    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -319,7 +401,9 @@ def test_resegmentation_fails_when_post_validation_still_invalid(tmp_path: Path)
                     "aftereffects_assessment": "invalid",
                     "needs_resegmentation": "yes",
                 }
-                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+                return LLMProviderResponse(
+                    provider="fake", model=request.model, raw_text=json.dumps(payload)
+                )
             if request.section == "preprocess_validate_post_resegment":
                 payload = {
                     "context_assessment": "invalid",
@@ -327,7 +411,9 @@ def test_resegmentation_fails_when_post_validation_still_invalid(tmp_path: Path)
                     "aftereffects_assessment": "invalid",
                     "needs_resegmentation": "yes",
                 }
-                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+                return LLMProviderResponse(
+                    provider="fake", model=request.model, raw_text=json.dumps(payload)
+                )
             return super().generate_structured(request)
 
     result = run_preprocessing_pipeline(
@@ -338,7 +424,13 @@ def test_resegmentation_fails_when_post_validation_still_invalid(tmp_path: Path)
         provider_factory=lambda _: AlwaysInvalidPostValidationProvider(),
     )
 
-    records = [json.loads(line) for line in Path(result["participant_results_file"]).read_text(encoding="utf-8-sig").splitlines() if line]
+    records = [
+        json.loads(line)
+        for line in Path(result["participant_results_file"])
+        .read_text(encoding="utf-8-sig")
+        .splitlines()
+        if line
+    ]
     assert records[0]["preprocessing_status"] == "post_validation_failed"
     assert records[0]["status"] == "failed"
     cleaned_df = pd.read_csv(result["cleaned_dataset_csv"])
@@ -346,9 +438,13 @@ def test_resegmentation_fails_when_post_validation_still_invalid(tmp_path: Path)
     assert "post_validation_needs_resegmentation" in cleaned_df.columns
 
 
-def test_resegmentation_allows_warning_when_two_sections_valid_after_post_validation(tmp_path: Path) -> None:
+def test_resegmentation_allows_warning_when_two_sections_valid_after_post_validation(
+    tmp_path: Path,
+) -> None:
     study = load_study_config(FIXTURES / "study_test.toml")
-    paths_config = make_paths_config(tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block())
+    paths_config = make_paths_config(
+        tmp_path, FIXTURES / "survey_fixture.csv", llm_block=_preprocessing_block()
+    )
     paths = load_paths_config(paths_config)
     preprocessing = load_preprocessing_config(paths_config)
 
@@ -361,7 +457,9 @@ def test_resegmentation_allows_warning_when_two_sections_valid_after_post_valida
                     "aftereffects_assessment": "invalid",
                     "needs_resegmentation": "yes",
                 }
-                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+                return LLMProviderResponse(
+                    provider="fake", model=request.model, raw_text=json.dumps(payload)
+                )
             if request.section == "preprocess_validate_post_resegment":
                 payload = {
                     "context_assessment": "valid",
@@ -369,7 +467,9 @@ def test_resegmentation_allows_warning_when_two_sections_valid_after_post_valida
                     "aftereffects_assessment": "valid",
                     "needs_resegmentation": "yes",
                 }
-                return LLMProviderResponse(provider="fake", model=request.model, raw_text=json.dumps(payload))
+                return LLMProviderResponse(
+                    provider="fake", model=request.model, raw_text=json.dumps(payload)
+                )
             return super().generate_structured(request)
 
     result = run_preprocessing_pipeline(
@@ -380,7 +480,13 @@ def test_resegmentation_allows_warning_when_two_sections_valid_after_post_valida
         provider_factory=lambda _: WarningPostValidationProvider(),
     )
 
-    records = [json.loads(line) for line in Path(result["participant_results_file"]).read_text(encoding="utf-8-sig").splitlines() if line]
+    records = [
+        json.loads(line)
+        for line in Path(result["participant_results_file"])
+        .read_text(encoding="utf-8-sig")
+        .splitlines()
+        if line
+    ]
     assert records[0]["status"] == "success"
     assert records[0]["preprocessing_status"] == "post_validation_warning"
     assert records[0]["n_valid_sections_cleaned"] == 2
