@@ -131,6 +131,9 @@ See how this works (2 min video)
 """.strip()
 
 
+ARTICLE_URL = "https://cristian-pulido.github.io/representational-mismatch-nde/"
+
+
 def _display_value(value: str) -> str:
     normalized = str(value).strip().lower()
     if not normalized:
@@ -747,6 +750,17 @@ footer, .footer, #footer {display: none !important;}
   transform: translateY(-1px);
   box-shadow: 0 8px 20px rgba(255, 111, 42, 0.35);
 }
+.cta-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cta-btn-secondary {
+  background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
+}
+.cta-btn-secondary:hover {
+  box-shadow: 0 8px 20px rgba(34, 197, 94, 0.35);
+}
 .pipeline-stepper {
   display: flex;
   align-items: center;
@@ -1038,7 +1052,12 @@ footer, .footer, #footer {display: none !important;}
             gr.HTML("<h1 class='hero-title'>From Stories to Structure</h1>")
             gr.HTML(f"<p class='hero-subtitle'>{escape(HERO_SUBTITLE_MD)}</p>")
             gr.HTML(f"<p class='hero-support'>{escape(HERO_SUPPORT_MD)}</p>")
-            gr.HTML("<a class='cta-btn' href='#input-workspace'>Try the Demo ↓</a>")
+            gr.HTML(
+                "<div class='cta-row'>"
+                "<a class='cta-btn' href='#input-workspace'>Try the Demo ↓</a>"
+                f"<a class='cta-btn cta-btn-secondary' href='{ARTICLE_URL}' target='_blank' rel='noopener noreferrer'>Article Page ↗</a>"
+                "</div>"
+            )
             gr.Markdown(AUTHOR_MD)
 
         with gr.Group(elem_classes="note-card"):
