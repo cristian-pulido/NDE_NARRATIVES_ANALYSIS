@@ -46,7 +46,9 @@ def test_sentiment_sensitivity_preserves_schema_with_zero_rows(tmp_path: Path) -
     ]
 
 
-def test_sentiment_sensitivity_generates_scores_figures_and_report(tmp_path: Path) -> None:
+def test_sentiment_sensitivity_generates_scores_figures_and_report(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
@@ -91,7 +93,9 @@ def test_sentiment_sensitivity_generates_scores_figures_and_report(tmp_path: Pat
         "--all-records",
     )
     assert all_records_result.returncode == 0, all_records_result.stderr
-    all_scores = pd.read_csv(tmp_path / "sentiment_outputs_all" / "vader_sentiment_scores.csv")
+    all_scores = pd.read_csv(
+        tmp_path / "sentiment_outputs_all" / "vader_sentiment_scores.csv"
+    )
     assert len(all_scores) == 12
 
     include_text_result = run_cli(
@@ -105,11 +109,15 @@ def test_sentiment_sensitivity_generates_scores_figures_and_report(tmp_path: Pat
         "--include-text",
     )
     assert include_text_result.returncode == 0, include_text_result.stderr
-    include_text_scores = pd.read_csv(tmp_path / "sentiment_outputs_text" / "vader_sentiment_scores.csv")
+    include_text_scores = pd.read_csv(
+        tmp_path / "sentiment_outputs_text" / "vader_sentiment_scores.csv"
+    )
     assert "text" in include_text_scores.columns
 
 
-def test_sentiment_sensitivity_prefers_cleaned_dataset_when_available(tmp_path: Path) -> None:
+def test_sentiment_sensitivity_prefers_cleaned_dataset_when_available(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)
@@ -152,7 +160,9 @@ def test_sentiment_sensitivity_prefers_cleaned_dataset_when_available(tmp_path: 
 
 
 @pytest.mark.skipif(not _HAS_VADER, reason="vaderSentiment is not installed")
-def test_sentiment_sensitivity_prefers_cleaned_dataset_over_translated(tmp_path: Path) -> None:
+def test_sentiment_sensitivity_prefers_cleaned_dataset_over_translated(
+    tmp_path: Path,
+) -> None:
     study_config = FIXTURES / "study_test.toml"
     survey_csv = FIXTURES / "survey_fixture.csv"
     paths_config = make_paths_config(tmp_path, survey_csv)

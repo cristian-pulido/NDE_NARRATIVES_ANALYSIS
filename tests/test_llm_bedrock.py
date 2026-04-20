@@ -56,7 +56,9 @@ def test_build_llm_provider_routes_to_bedrock(monkeypatch) -> None:
         def __init__(self, **kwargs) -> None:
             captured.update(kwargs)
 
-    monkeypatch.setattr("nde_narratives.llm.factory.BedrockProvider", FakeBedrockProvider)
+    monkeypatch.setattr(
+        "nde_narratives.llm.factory.BedrockProvider", FakeBedrockProvider
+    )
 
     runtime = LLMRuntimeConfig(
         provider="bedrock",
@@ -77,11 +79,40 @@ def test_build_llm_provider_routes_to_bedrock(monkeypatch) -> None:
     assert captured["max_tokens"] == 512
 
 
+def test_build_llm_provider_routes_preprocessing_bedrock(monkeypatch) -> None:
+    captured: dict[str, object] = {}
 
-def test_build_llm_provider_preserves_unsupported_for_preprocessing_bedrock() -> None:
-    runtime = PreprocessingConfig(path=Path("/tmp/paths.local.toml"), provider="bedrock")
-    with pytest.raises(ValueError, match="Unsupported LLM provider"):
-        build_llm_provider(runtime)
+    class FakeBedrockProvider:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "nde_narratives.llm.factory.BedrockProvider", FakeBedrockProvider
+    )
+
+    runtime = PreprocessingConfig(
+        path=Path("/tmp/paths.local.toml"),
+        provider="bedrock",
+        aws_region="us-west-2",
+        aws_profile="dev",
+        timeout_seconds=75,
+        temperature=0.15,
+        max_tokens=1024,
+        top_p=0.9,
+        top_k=50,
+        stop_sequences=["</stop>"],
+    )
+    provider = build_llm_provider(runtime)
+
+    assert isinstance(provider, FakeBedrockProvider)
+    assert captured["region_name"] == "us-west-2"
+    assert captured["aws_profile"] == "dev"
+    assert captured["timeout_seconds"] == 75
+    assert captured["temperature"] == 0.15
+    assert captured["max_tokens"] == 1024
+    assert captured["top_p"] == 0.9
+    assert captured["top_k"] == 50
+    assert captured["stop_sequences"] == ["</stop>"]
 
 
 def test_load_llm_config_rejects_string_stop_sequences(tmp_path: Path) -> None:

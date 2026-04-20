@@ -45,6 +45,10 @@ If you only want quick interactive testing without local setup, use the public l
 
 - [https://huggingface.co/spaces/cpulido/NDE-NARRATIVES-ANALYSIS](https://cpulido-nde-narratives-analysis.hf.space)
 
+<p align="center">
+  <video src="demo_video.mov" controls width="760" autoplay muted></video>
+</p>
+
 Note: the Space is intentionally lightweight and not a replacement for this full local pipeline.
 
 ## Video Summary
