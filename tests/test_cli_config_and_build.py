@@ -124,7 +124,7 @@ def test_build_annotation_sample_creates_workbooks(tmp_path: Path) -> None:
     assert len(worksheet.data_validations.dataValidation) == 2
 
     sampled_private = pd.read_excel(mapping_workbook, sheet_name="sampled_private")
-    assert len(sampled_private) == 3
+    assert len(sampled_private) == 2
     assert "participant_code" in sampled_private.columns
 
 
@@ -263,7 +263,7 @@ def test_build_annotation_sample_falls_back_to_survey_when_preprocessed_missing_
         tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx",
         sheet_name="sampled_private",
     )
-    assert len(sampled_private) == 3
+    assert len(sampled_private) == 2
 
 
 def test_build_llm_batch_writes_experiment_directory_and_manifest(

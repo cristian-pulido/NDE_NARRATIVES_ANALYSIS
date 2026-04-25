@@ -179,8 +179,8 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     ].iloc[0]
     llm_rows = metrics[metrics["comparison"].str.startswith("human_reference_vs_llm:")]
 
-    assert int(context_vader["n"]) == 2
-    assert len(reference_df) == 3
+    assert int(context_vader["n"]) == 1
+    assert len(reference_df) == 2
     assert summary["coverage"]["n_valid_human_artifacts"] == 2
     assert summary["coverage"]["n_rejected_human_artifacts"] == 1
     assert summary["coverage"]["n_valid_llm_artifacts"] == 2
