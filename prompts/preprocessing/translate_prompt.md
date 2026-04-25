@@ -10,6 +10,8 @@ Section name:
 Guidelines:
 - Preserve the original meaning, tone, and nuance as faithfully as possible.
 - Maintain first-person perspective, temporal structure, and narrative style.
+- Preserve writing structure and formatting as much as possible: keep paragraph boundaries, line breaks, and spacing patterns that carry structure.
+- Do not collapse or reflow lines unless required for minimal readability in English.
 - Do NOT interpret, summarize, or clinically reframe the content.
 - Do NOT normalize or simplify unusual, fragmented, or ambiguous expressions.
 - If the text is incoherent, incomplete, or fragmentary, translate it as-is.

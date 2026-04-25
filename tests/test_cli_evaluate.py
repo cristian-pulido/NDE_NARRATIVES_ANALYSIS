@@ -265,16 +265,16 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
     assert detailed_heatmaps_index < contradiction_index
     assert set(family_metrics["family"]) >= {"tone", "m8", "m9"}
     assert (
-        "families are operationalized as tone, nde-c, and nde-mcq"
+        "families are operationalized as tone, nde-c, and lci-r"
         in report_text.lower()
     )
     assert "#### NDE-C" in report_text
-    assert "#### NDE-MCQ" in report_text
+    assert "#### LCI-R" in report_text
     assert "#### M8" not in report_text
     assert "#### M9" not in report_text
     assert "questionnaire_extraction_item_scatter.png" in questionnaire_report_text
     assert "questionnaire_nde_c_macro_f1_heatmap.png" not in questionnaire_report_text
-    assert "questionnaire_nde_mcq_macro_f1_heatmap.png" not in questionnaire_report_text
+    assert "questionnaire_lci_r_macro_f1_heatmap.png" not in questionnaire_report_text
     assert "questionnaire_m8_accuracy_heatmap.png" not in questionnaire_report_text
     assert "questionnaire_m9_accuracy_heatmap.png" not in questionnaire_report_text
     assert "<details open>" in report_text
@@ -304,7 +304,7 @@ def test_evaluate_uses_majority_reference_and_reports_artifacts(tmp_path: Path) 
         / "evaluation_outputs"
         / "figures"
         / "alignment"
-        / "human_nde_mcq_macro_f1_heatmap.png"
+        / "human_lci_r_macro_f1_heatmap.png"
     ).exists()
     assert (
         tmp_path

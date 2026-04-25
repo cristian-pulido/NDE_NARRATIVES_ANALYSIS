@@ -43,11 +43,16 @@ tone_internal_column = "experience_tone"
 tone_visible_label = "Experience Tone"
 
 [sections.experience.binary_labels]
-m8_out_of_body = "Out-of-body sensation"
-m8_bright_light = "Bright light"
-m8_peace = "Peace or wellbeing"
-m8_time_distortion = "Altered time perception"
-m8_presence = "Encounter with a presence"
+outside_of_body_experience = "Out-of-body sensation"
+feeling_bright_light = "Bright light"
+feeling_awareness = "Heightened awareness"
+presence_encounter = "Encounter with a presence"
+saw_relived_past_events = "Relived past events"
+time_perception_altered = "Altered time perception"
+border_point_of_no_return = "Border or point of no return"
+non_existence_feeling = "Feeling of non-existence"
+feeling_peace_wellbeing = "Peace or wellbeing"
+saw_entered_gateway = "Entered a gateway"
 
 [sections.aftereffects]
 source_column = "nde_aftereffects"
@@ -56,30 +61,46 @@ tone_internal_column = "aftereffects_tone"
 tone_visible_label = "Aftereffects Tone"
 
 [sections.aftereffects.binary_labels]
-m9_moral_rules = "Stronger moral principles"
-m9_long_term_thinking = "More long-term thinking"
-m9_consider_others = "More consideration for others"
-m9_help_others = "Greater willingness to help others"
-m9_forgiveness = "Greater willingness to forgive"
+fear_of_death = "Fear of death"
+inner_meaning_in_my_life = "Inner meaning in my life"
+compassion_toward_others = "Compassion toward others"
+spiritual_feelings = "Spiritual feelings"
+desire_to_help_others = "Desire to help others"
+personal_vulnerability = "Personal vulnerability"
+interest_in_material_goods = "Interest in material goods"
+interest_in_religion = "Interest in religion"
+understanding_myself = "Understanding myself"
+social_justice_issues = "Social justice issues"
 
-[questionnaire.m8]
+[questionnaire.nde_c]
 yes_values = ["Medium", "Intensively", "Extremely"]
 no_values = ["Not at all - absence", "Slightly"]
 
-[questionnaire.m8.columns]
-m8_out_of_body = "outside_of_body_experience"
-m8_bright_light = "feeling_bright_light"
-m8_peace = "feeling_peace_wellbeing"
-m8_time_distortion = "time_perception_altered"
-m8_presence = "presence_encounter"
+[questionnaire.nde_c.columns]
+outside_of_body_experience = "outside_of_body_experience"
+feeling_bright_light = "feeling_bright_light"
+feeling_awareness = "feeling_awareness"
+presence_encounter = "presence_encounter"
+saw_relived_past_events = "saw_relived_past_events"
+time_perception_altered = "time_perception_altered"
+border_point_of_no_return = "border_point_of_no_return"
+non_existence_feeling = "non_existence_feeling"
+feeling_peace_wellbeing = "feeling_peace_wellbeing"
+saw_entered_gateway = "saw_entered_gateway"
 
-[questionnaire.m9]
-yes_values = ["Increased", "Strongly increased"]
-no_values = ["Strongly diminished", "Decreased", "Not changed", "Missing"]
+[questionnaire.lci_r]
+yes_values = ["Increased", "Strongly increased", "Decreased", "Strongly diminished"]
+no_values = ["Not changed"]
+na_values = ["Missing"]
 
-[questionnaire.m9.columns]
-m9_moral_rules = "NDE-MCQ_02_Since_NDE"
-m9_long_term_thinking = "NDE-MCQ_05_Since_NDE"
-m9_consider_others = "NDE-MCQ_03_Since_NDE"
-m9_help_others = "NDE-MCQ_01_Since_NDE"
-m9_forgiveness = "NDE-MCQ_04_Since_NDE"
+[questionnaire.lci_r.columns]
+fear_of_death = "fear_of_death"
+inner_meaning_in_my_life = "inner_meaning_in_my_life"
+compassion_toward_others = "compassion_toward_others"
+spiritual_feelings = "spiritual_feelings"
+desire_to_help_others = "desire_to_help_others"
+personal_vulnerability = "personal_vulnerability"
+interest_in_material_goods = "interest_in_material_goods"
+interest_in_religion = "interest_in_religion"
+understanding_myself = "understanding_myself"
+social_justice_issues = "social_justice_issues"

@@ -33,16 +33,26 @@ CONTEXT_NATURE_LABELS = {
 }
 
 LABEL_DISPLAY_NAMES = {
-    "m8_out_of_body": "Out-of-body sensation",
-    "m8_bright_light": "Bright light perception",
-    "m8_peace": "Sense of peace",
-    "m8_time_distortion": "Time distortion",
-    "m8_presence": "Perceived presence",
-    "m9_moral_rules": "Change in moral orientation",
-    "m9_long_term_thinking": "Long-term thinking",
-    "m9_consider_others": "Considering others",
-    "m9_help_others": "Helping others",
-    "m9_forgiveness": "Forgiveness",
+    "outside_of_body_experience": "Out-of-body sensation",
+    "feeling_bright_light": "Bright light perception",
+    "feeling_awareness": "Heightened awareness",
+    "presence_encounter": "Encounter with a presence",
+    "saw_relived_past_events": "Relived past events",
+    "time_perception_altered": "Altered time perception",
+    "border_point_of_no_return": "Point of no return",
+    "non_existence_feeling": "Feeling of non-existence",
+    "feeling_peace_wellbeing": "Peace and wellbeing",
+    "saw_entered_gateway": "Entered a gateway",
+    "fear_of_death": "Fear of death",
+    "inner_meaning_in_my_life": "Inner meaning in life",
+    "compassion_toward_others": "Compassion toward others",
+    "spiritual_feelings": "Spiritual feelings",
+    "desire_to_help_others": "Desire to help others",
+    "personal_vulnerability": "Personal vulnerability",
+    "interest_in_material_goods": "Interest in material goods",
+    "interest_in_religion": "Interest in religion",
+    "understanding_myself": "Understanding myself",
+    "social_justice_issues": "Social justice issues",
 }
 
 VALUE_DISPLAY_NAMES = {

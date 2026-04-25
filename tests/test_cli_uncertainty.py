@@ -17,7 +17,7 @@ def _write_minimal_evaluation_metrics(path) -> None:
         },
         {
             "comparison": "questionnaire_vs_llm:exp_alpha__run-01",
-            "field": "m8_out_of_body",
+            "field": "outside_of_body_experience",
             "n": 20,
             "accuracy": 0.70,
             "cohen_kappa": 0.34,
@@ -25,7 +25,7 @@ def _write_minimal_evaluation_metrics(path) -> None:
         },
         {
             "comparison": "questionnaire_vs_llm:exp_alpha__run-01",
-            "field": "m9_moral_rules",
+            "field": "fear_of_death",
             "n": 20,
             "accuracy": 0.58,
             "cohen_kappa": 0.14,
@@ -41,7 +41,7 @@ def _write_minimal_evaluation_metrics(path) -> None:
         },
         {
             "comparison": "questionnaire_vs_llm:exp_beta__run-01",
-            "field": "m8_out_of_body",
+            "field": "outside_of_body_experience",
             "n": 20,
             "accuracy": 0.74,
             "cohen_kappa": 0.41,
@@ -49,7 +49,7 @@ def _write_minimal_evaluation_metrics(path) -> None:
         },
         {
             "comparison": "questionnaire_vs_llm:exp_beta__run-01",
-            "field": "m9_moral_rules",
+            "field": "fear_of_death",
             "n": 20,
             "accuracy": 0.63,
             "cohen_kappa": 0.21,
@@ -65,7 +65,7 @@ def _write_minimal_evaluation_metrics(path) -> None:
         },
         {
             "comparison": "human_reference_vs_llm:exp_alpha__run-01",
-            "field": "m8_out_of_body",
+            "field": "outside_of_body_experience",
             "n": 12,
             "accuracy": 0.44,
             "cohen_kappa": 0.10,

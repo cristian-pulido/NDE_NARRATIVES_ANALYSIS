@@ -22,12 +22,23 @@ Experience Tone (4): Positive
 Experience Tone (3): Mixed
 Out-of-body sensation: Yes
 Bright light: No
+Heightened awareness: Yes
 Altered time perception: Yes
 Encounter with a presence: No
+Peace or wellbeing: Yes
 Aftereffects Narrative: After one
 Aftereffects Tone (4): Positive
 Aftereffects Tone (3): Positive
-Stronger moral principles: Yes
+Fear of death: Yes
+Inner meaning in my life: Yes
+Compassion toward others: Yes
+Spiritual feelings: Yes
+Desire to help others: Yes
+Personal vulnerability: Yes
+Interest in material goods: No
+Interest in religion: Yes
+Understanding myself: Yes
+Social justice issues: Yes
 
 response_id: 2
 Context Narrative: Context two
@@ -38,12 +49,23 @@ Experience Tone (4): Mixed
 Experience Tone (3): Mixed
 Out-of-body sensation: No
 Bright light: Yes
+Heightened awareness: No
 Altered time perception: No
 Encounter with a presence: Yes
+Peace or wellbeing: No
 Aftereffects Narrative: After two
 Aftereffects Tone (4): Neutral
 Aftereffects Tone (3): Mixed
-Stronger moral principles: No
+Fear of death: No
+Inner meaning in my life: Yes
+Compassion toward others: Yes
+Spiritual feelings: No
+Desire to help others: Yes
+Personal vulnerability: Yes
+Interest in material goods: No
+Interest in religion: No
+Understanding myself: Yes
+Social justice issues: Yes
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -77,20 +99,50 @@ def _write_questionnaire(path: Path) -> None:
             {
                 "response_id": 1,
                 "valence": "Positive",
-                "q_m8_out_of_body": "Extremely",
-                "q_m8_bright_light": "Not at all",
-                "q_m8_time_distortion": "Extremely",
-                "q_m8_presence": "Not at all",
-                "q_m9_moral_rules": "Increased",
+                "outside_of_body_experience": "Extremely",
+                "feeling_bright_light": "Not at all - absence",
+                "feeling_awareness": "Medium",
+                "presence_encounter": "Not at all - absence",
+                "saw_relived_past_events": "Slightly",
+                "time_perception_altered": "Extremely",
+                "border_point_of_no_return": "Medium",
+                "non_existence_feeling": "Slightly",
+                "feeling_peace_wellbeing": "Extremely",
+                "saw_entered_gateway": "Slightly",
+                "fear_of_death": "Decreased",
+                "inner_meaning_in_my_life": "Strongly increased",
+                "compassion_toward_others": "Increased",
+                "spiritual_feelings": "Increased",
+                "desire_to_help_others": "Strongly increased",
+                "personal_vulnerability": "Increased",
+                "interest_in_material_goods": "Decreased",
+                "interest_in_religion": "Increased",
+                "understanding_myself": "Strongly increased",
+                "social_justice_issues": "Increased",
             },
             {
                 "response_id": 2,
                 "valence": "Negative",
-                "q_m8_out_of_body": "Not at all",
-                "q_m8_bright_light": "Extremely",
-                "q_m8_time_distortion": "Not at all",
-                "q_m8_presence": "Extremely",
-                "q_m9_moral_rules": "Not changed",
+                "outside_of_body_experience": "Not at all - absence",
+                "feeling_bright_light": "Extremely",
+                "feeling_awareness": "Slightly",
+                "presence_encounter": "Extremely",
+                "saw_relived_past_events": "Not at all - absence",
+                "time_perception_altered": "Not at all - absence",
+                "border_point_of_no_return": "Slightly",
+                "non_existence_feeling": "Not at all - absence",
+                "feeling_peace_wellbeing": "Slightly",
+                "saw_entered_gateway": "Not at all - absence",
+                "fear_of_death": "Not changed",
+                "inner_meaning_in_my_life": "Increased",
+                "compassion_toward_others": "Increased",
+                "spiritual_feelings": "Not changed",
+                "desire_to_help_others": "Increased",
+                "personal_vulnerability": "Increased",
+                "interest_in_material_goods": "Not changed",
+                "interest_in_religion": "Not changed",
+                "understanding_myself": "Increased",
+                "social_justice_issues": "Missing",
             },
         ]
     ).to_csv(path, index=False)
@@ -118,24 +170,60 @@ def _write_llm_artifact(
             "context": {"tone": tones[0]},
             "experience": {
                 "tone": tones[1],
-                "m8_out_of_body": "yes",
-                "m8_bright_light": "no",
-                "m8_time_distortion": "yes",
-                "m8_presence": "no",
+                "outside_of_body_experience": "yes",
+                "feeling_bright_light": "no",
+                "feeling_awareness": "yes",
+                "presence_encounter": "no",
+                "saw_relived_past_events": "no",
+                "time_perception_altered": "yes",
+                "border_point_of_no_return": "yes",
+                "non_existence_feeling": "no",
+                "feeling_peace_wellbeing": "yes",
+                "saw_entered_gateway": "no",
             },
-            "aftereffects": {"tone": tones[2], "m9_moral_rules": "yes"},
+            "aftereffects": {
+                "tone": tones[2],
+                "fear_of_death": "yes",
+                "inner_meaning_in_my_life": "yes",
+                "compassion_toward_others": "yes",
+                "spiritual_feelings": "yes",
+                "desire_to_help_others": "yes",
+                "personal_vulnerability": "yes",
+                "interest_in_material_goods": "no",
+                "interest_in_religion": "yes",
+                "understanding_myself": "yes",
+                "social_justice_issues": "yes",
+            },
         },
         {
             "response_id": 2,
             "context": {"tone": "negative"},
             "experience": {
                 "tone": "mixed",
-                "m8_out_of_body": "no",
-                "m8_bright_light": "yes",
-                "m8_time_distortion": "no",
-                "m8_presence": "yes",
+                "outside_of_body_experience": "no",
+                "feeling_bright_light": "yes",
+                "feeling_awareness": "no",
+                "presence_encounter": "yes",
+                "saw_relived_past_events": "no",
+                "time_perception_altered": "no",
+                "border_point_of_no_return": "no",
+                "non_existence_feeling": "no",
+                "feeling_peace_wellbeing": "no",
+                "saw_entered_gateway": "no",
             },
-            "aftereffects": {"tone": "neutral", "m9_moral_rules": "no"},
+            "aftereffects": {
+                "tone": "neutral",
+                "fear_of_death": "no",
+                "inner_meaning_in_my_life": "yes",
+                "compassion_toward_others": "yes",
+                "spiritual_feelings": "no",
+                "desire_to_help_others": "yes",
+                "personal_vulnerability": "yes",
+                "interest_in_material_goods": "no",
+                "interest_in_religion": "no",
+                "understanding_myself": "yes",
+                "social_justice_issues": "yes",
+            },
         },
     ]
     with (artifact_dir / "predictions.jsonl").open("w", encoding="utf-8") as handle:

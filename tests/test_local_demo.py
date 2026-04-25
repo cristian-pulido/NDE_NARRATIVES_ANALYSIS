@@ -21,15 +21,15 @@ def _sample_predictions() -> dict[str, dict[str, dict[str, object]]]:
             "experience": {
                 "tone": "positive",
                 "evidence_segments": ["bright light and peace"],
-                "m8_bright_light": "yes",
-                "m8_peace": "yes",
+                "feeling_bright_light": "yes",
+                "feeling_peace_wellbeing": "yes",
             }
         },
         "aftereffects": {
             "aftereffects": {
                 "tone": "positive",
                 "evidence_segments": ["less fear of death"],
-                "m9_help_others": "yes",
+                "desire_to_help_others": "yes",
             }
         },
     }

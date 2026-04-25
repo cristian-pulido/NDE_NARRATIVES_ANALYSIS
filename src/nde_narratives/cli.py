@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import pandas as pd
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
@@ -1245,26 +1246,63 @@ def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
         study.stratify_column,
         *study.text_columns().values(),
     ]
-    source_candidates = [
-        paths.preprocessing_output_dir / "cleaned_dataset.csv",
-        paths.preprocessing_output_dir / "translated_dataset.csv",
-        Path(paths.survey_csv),
-    ]
-
-    source_path: Path | None = None
-    source_df = None
-    for candidate in source_candidates:
-        if not candidate.exists():
-            continue
-        candidate_df = read_tabular_file(candidate)
-        if all(column in candidate_df.columns for column in required_columns):
-            source_path = candidate
-            source_df = candidate_df
-            break
-
+    # If user gave explicit path, use it (unchanged behavior)
+    explicit_input = getattr(args, "input_path", None)
+    if explicit_input:
+        source_path = Path(explicit_input).resolve()
+        if not source_path.exists():
+            raise FileNotFoundError(f"Explicit input path not found: {source_path}")
+        source_df = read_tabular_file(source_path)
+    else:
+        # Prefer cleaned > translated > original, but only if usable
+        source_path = None
+        source_df = None
+        source_candidates = [
+            paths.preprocessing_output_dir / "cleaned_dataset.csv",
+            paths.preprocessing_output_dir / "translated_dataset.csv",
+            Path(paths.survey_csv),
+        ]
+        for candidate in source_candidates:
+            if not candidate.exists():
+                continue
+            candidate_df = read_tabular_file(candidate)
+            if all(column in candidate_df.columns for column in required_columns):
+                source_path = candidate
+                source_df = candidate_df
+                break
     if source_path is None or source_df is None:
         source_path = resolve_survey_source_path(paths, None)
         source_df = read_tabular_file(source_path)
+
+    # -- completeness filter: 3 valid sections + all binary labels present --
+    n_valid_col = None
+    for c in ("n_valid_sections", "n_valid_sections_cleaned", "n_valid_sections_original"):
+        if c in source_df.columns:
+            n_valid_col = c
+            break
+
+    mask = pd.Series(True, index=source_df.index)
+    if n_valid_col is not None:
+        mask &= source_df[n_valid_col] == 3
+
+    has_bin = []
+    for sec in ("experience", "aftereffects"):
+        has_bin.extend(study.sections[sec].binary_labels.keys())
+    has_bin = list(dict.fromkeys(has_bin))
+
+    for col in has_bin:
+        if col in source_df.columns:
+            mask &= source_df[col].notna() & (source_df[col].astype(str).str.strip() != "")
+
+    usable = source_df[mask].copy()
+    if len(usable) == 0:
+        raise ValueError(
+            "No rows satisfy completeness requirements "
+            "(3 valid sections + non-missing binary labels). "
+            "Check your source file and preprocessing state."
+        )
+    source_df = usable.reset_index(drop=True)
+    # --
 
     annotation_df, mapping_df, column_map_df, sampled_private_df, summary = (
         create_annotation_frames(
@@ -1777,6 +1815,7 @@ def cmd_compare_evaluation_outputs(args: argparse.Namespace) -> int:
 def cmd_evaluate_uncertainty(args: argparse.Namespace) -> int:
     from .uncertainty import run_uncertainty_analysis
 
+    study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
     input_dir = (
         Path(args.input_dir).resolve()
@@ -1785,6 +1824,7 @@ def cmd_evaluate_uncertainty(args: argparse.Namespace) -> int:
     )
     written = run_uncertainty_analysis(
         input_dir=input_dir,
+        study=study,
         output_dir=Path(args.output_dir).resolve() if args.output_dir else None,
         n_bootstrap=int(args.bootstrap_samples),
         confidence_level=float(args.confidence_level),

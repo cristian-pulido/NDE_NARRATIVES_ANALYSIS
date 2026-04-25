@@ -11,11 +11,16 @@
       "required": [
         "tone",
         "evidence_segments",
-        "m8_out_of_body",
-        "m8_bright_light",
-        "m8_peace",
-        "m8_time_distortion",
-        "m8_presence"
+        "outside_of_body_experience",
+        "feeling_bright_light",
+        "feeling_awareness",
+        "presence_encounter",
+        "saw_relived_past_events",
+        "time_perception_altered",
+        "border_point_of_no_return",
+        "non_existence_feeling",
+        "feeling_peace_wellbeing",
+        "saw_entered_gateway"
       ],
       "properties": {
         "tone": {
@@ -30,23 +35,43 @@
           "minItems": 1,
           "maxItems": 3
         },
-        "m8_out_of_body": {
+        "outside_of_body_experience": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m8_bright_light": {
+        "feeling_bright_light": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m8_peace": {
+        "feeling_awareness": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m8_time_distortion": {
+        "presence_encounter": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m8_presence": {
+        "saw_relived_past_events": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "time_perception_altered": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "border_point_of_no_return": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "non_existence_feeling": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "feeling_peace_wellbeing": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "saw_entered_gateway": {
           "type": "string",
           "enum": ["yes", "no"]
         }

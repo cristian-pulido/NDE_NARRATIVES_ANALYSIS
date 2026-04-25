@@ -6,7 +6,11 @@ Language policy:
 
 You must do two tasks independently:
 1) Tone classification of writing style.
-2) Explicit feature detection for M9 long-term changes.
+2) Explicit feature detection for LCI-R long-term changes.
+
+Definition:
+- LCI-R = Life Changes Inventory-Revised.
+- Here, LCI-R items refer to post-experience life changes described in the `aftereffects` narrative.
 
 Critical boundary:
 - Judge tone from wording in the text, not from assumed event severity or inferred valence.
@@ -31,15 +35,16 @@ Tone decision protocol:
 4) If balance is not near-equal, choose the global dominant tone.
 5) If emotional cues are minimal/absent, choose neutral.
 
-M9 feature rules:
-- Mark yes only when the feature is explicitly present in text.
-- Otherwise mark no.
-- Do not use implication-only evidence.
+LCI-R feature rules:
+- `yes` = any explicit change is mentioned for that item, regardless of direction (increase OR decrease, positive OR negative wording).
+- `no` = no explicit change is stated for that item, including when the item is not mentioned.
+- Do not infer change from vague implication.
 
 Borderline guidance:
 - Purely descriptive sequence without explicit affect language -> neutral.
 - One isolated opposite-polarity phrase in otherwise clear dominant tone -> choose dominant tone, not mixed.
 - Mixed only if both polarities are explicit and comparably strong in the writing.
+- For LCI-R items, vague implication without explicit stated change -> no.
 
 Output format:
 Return JSON only with this structure:
@@ -47,11 +52,16 @@ Return JSON only with this structure:
   "aftereffects": {
     "tone": "positive | negative | mixed | neutral",
     "evidence_segments": ["short verbatim span 1"],
-    "m9_moral_rules": "yes | no",
-    "m9_long_term_thinking": "yes | no",
-    "m9_consider_others": "yes | no",
-    "m9_help_others": "yes | no",
-    "m9_forgiveness": "yes | no"
+    "fear_of_death": "yes | no",
+    "inner_meaning_in_my_life": "yes | no",
+    "compassion_toward_others": "yes | no",
+    "spiritual_feelings": "yes | no",
+    "desire_to_help_others": "yes | no",
+    "personal_vulnerability": "yes | no",
+    "interest_in_material_goods": "yes | no",
+    "interest_in_religion": "yes | no",
+    "understanding_myself": "yes | no",
+    "social_justice_issues": "yes | no"
   }
 }
 
