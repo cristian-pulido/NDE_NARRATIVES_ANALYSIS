@@ -47,11 +47,16 @@ class SequencedProvider:
                 "experience": {
                     "tone": "positive",
                     "evidence_segments": ["I saw bright light and felt peace."],
-                    "m8_out_of_body": "no",
-                    "m8_bright_light": "yes",
-                    "m8_peace": "yes",
-                    "m8_time_distortion": "no",
-                    "m8_presence": "no",
+                    "outside_of_body_experience": "no",
+                    "feeling_bright_light": "yes",
+                    "feeling_awareness": "yes",
+                    "presence_encounter": "no",
+                    "saw_relived_past_events": "no",
+                    "time_perception_altered": "no",
+                    "border_point_of_no_return": "no",
+                    "non_existence_feeling": "no",
+                    "feeling_peace_wellbeing": "yes",
+                    "saw_entered_gateway": "no",
                 }
             }
             return LLMProviderResponse(
@@ -59,16 +64,21 @@ class SequencedProvider:
             )
 
         payload = {
-            "aftereffects": {
-                "tone": "positive",
-                "evidence_segments": ["I no longer fear death."],
-                "m9_moral_rules": "yes",
-                "m9_long_term_thinking": "yes",
-                "m9_consider_others": "yes",
-                "m9_help_others": "yes",
-                "m9_forgiveness": "yes",
+                "aftereffects": {
+                    "tone": "positive",
+                    "evidence_segments": ["I no longer fear death."],
+                    "fear_of_death": "yes",
+                    "inner_meaning_in_my_life": "yes",
+                    "compassion_toward_others": "yes",
+                    "spiritual_feelings": "yes",
+                    "desire_to_help_others": "yes",
+                    "personal_vulnerability": "yes",
+                    "interest_in_material_goods": "no",
+                    "interest_in_religion": "yes",
+                    "understanding_myself": "yes",
+                    "social_justice_issues": "yes",
+                }
             }
-        }
         return LLMProviderResponse(
             provider="fake", model=request.model, raw_text=json.dumps(payload)
         )

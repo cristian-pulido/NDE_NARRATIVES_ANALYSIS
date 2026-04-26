@@ -70,12 +70,19 @@ def _infer_prompt_variant_from_metadata(metadata: dict[str, Any]) -> str | None:
     return candidate or None
 
 
-def _validate_labels(df: pd.DataFrame, columns: list[str], study: StudyConfig, source_name: str) -> None:
+def _validate_labels(
+    df: pd.DataFrame,
+    columns: list[str],
+    study: StudyConfig,
+    source_name: str,
+    allow_blank_columns: set[str] | None = None,
+) -> None:
+    allow_blank = allow_blank_columns or set()
     for column in columns:
         if column not in df.columns:
             raise ValueError(f"{source_name} is missing required column: {column}")
         blank_mask = df[column].apply(_is_blank)
-        if blank_mask.any():
+        if blank_mask.any() and column not in allow_blank:
             raise ValueError(f"{source_name} contains blank values in required column: {column}")
         allowed = set(study.allowed_labels_for_column(column))
         invalid = sorted({str(value) for value in df.loc[~blank_mask, column] if str(value) not in allowed})
@@ -157,11 +164,6 @@ def _flatten_llm_payload(payload: dict[str, Any], study: StudyConfig) -> dict[st
             if column in section_block:
                 row[column] = section_block[column]
 
-    # Legacy flat contract fallback
-    for column in study.annotation_internal_columns():
-        if column in payload and column not in row:
-            row[column] = payload[column]
-
     return row
 
 
@@ -183,10 +185,6 @@ def _extract_section_evidence(payload: dict[str, Any], section_name: str) -> lis
     section_block = payload.get(section_name)
     if isinstance(section_block, dict):
         return _normalize_evidence_segments(section_block.get("evidence_segments"))
-
-    # Fallback for legacy flat payloads where evidence may exist only at top level.
-    if section_name == "experience":
-        return _normalize_evidence_segments(payload.get("evidence_segments"))
     return []
 
 
@@ -811,14 +809,34 @@ def _build_questionnaire_tone_label_analysis(
     }
 
 
-def _map_questionnaire_value(value: object, yes_values: list[str], no_values: list[str], source_column: str) -> str:
+def _map_questionnaire_value(
+    value: object,
+    yes_values: list[str],
+    no_values: list[str],
+    na_values: list[str],
+    source_column: str,
+) -> str | Any:
+    def _normalize_token(raw: object) -> str:
+        return " ".join(str(raw).strip().lower().split())
+
     if _is_blank(value):
-        raise ValueError(f"Questionnaire column {source_column} contains blank values.")
-    normalized = str(value).strip()
-    if normalized in yes_values:
+        return pd.NA
+
+    normalized = _normalize_token(value)
+    if normalized == "missing":
+        return pd.NA
+
+    yes_tokens = {_normalize_token(item) for item in yes_values}
+    no_tokens = {_normalize_token(item) for item in no_values}
+    na_tokens = {_normalize_token(item) for item in na_values}
+
+    if normalized in na_tokens:
+        return pd.NA
+    if normalized in yes_tokens:
         return "yes"
-    if normalized in no_values:
+    if normalized in no_tokens:
         return "no"
+
     raise ValueError(f"Unexpected questionnaire value in {source_column}: {normalized}")
 
 
@@ -864,18 +882,57 @@ def load_questionnaire_labels(
         lambda value: tone_map.get(str(value).strip().lower(), str(value).strip().lower()) if pd.notna(value) else pd.NA
     )
 
-    for block_name in ("m8", "m9"):
-        block = study.questionnaire[block_name]
+    for block in study.questionnaire.values():
         for internal_column, source_column in block["columns"].items():
             if source_column not in df.columns:
                 raise ValueError(f"Sampled private workbook is missing questionnaire column: {source_column}")
             out[internal_column] = df[source_column].apply(
-                lambda value: _map_questionnaire_value(value, block["yes_values"], block["no_values"], source_column)
+                lambda value: _map_questionnaire_value(
+                    value,
+                    block["yes_values"],
+                    block["no_values"],
+                    list(block.get("na_values", [])),
+                    source_column,
+                )
             )
 
     _validate_labels(out, [experience_tone_column], study, "Questionnaire tone labels")
-    _validate_labels(out, study.binary_columns(), study, "Questionnaire labels")
+    _validate_labels(
+        out,
+        study.binary_columns(),
+        study,
+        "Questionnaire labels",
+        allow_blank_columns=set(study.binary_columns()),
+    )
     return out
+
+
+def _complete_case_sources(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    shared_columns: list[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    merged = left["df"].merge(
+        right["df"],
+        on="participant_code",
+        how="inner",
+        suffixes=("_left", "_right"),
+    )
+    if merged.empty:
+        return left["df"].iloc[0:0].copy(), right["df"].iloc[0:0].copy()
+
+    complete_mask = pd.Series(True, index=merged.index)
+    for column in shared_columns:
+        complete_mask = complete_mask & ~merged[f"{column}_left"].apply(_is_blank)
+        complete_mask = complete_mask & ~merged[f"{column}_right"].apply(_is_blank)
+
+    complete_codes = set(merged.loc[complete_mask, "participant_code"].astype(str))
+    if not complete_codes:
+        return left["df"].iloc[0:0].copy(), right["df"].iloc[0:0].copy()
+
+    left_cc = left["df"][left["df"]["participant_code"].astype(str).isin(complete_codes)].copy()
+    right_cc = right["df"][right["df"]["participant_code"].astype(str).isin(complete_codes)].copy()
+    return left_cc, right_cc
 
 
 def load_vader_predictions(
@@ -1210,13 +1267,23 @@ def _pairwise_comparison_metadata(left: dict[str, Any], right: dict[str, Any]) -
     return metadata
 
 
-def _compute_source_pair_metrics(left: dict[str, Any], right: dict[str, Any], study: StudyConfig) -> pd.DataFrame | None:
+def _compute_source_pair_metrics(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    study: StudyConfig,
+    *,
+    complete_case: bool = False,
+) -> pd.DataFrame | None:
     shared_columns = [column for column in left["columns"] if column in right["columns"]]
     if not shared_columns:
         return None
+    left_df = left["df"]
+    right_df = right["df"]
+    if complete_case:
+        left_df, right_df = _complete_case_sources(left, right, shared_columns)
     return compute_comparison_metrics(
-        left["df"],
-        right["df"],
+        left_df,
+        right_df,
         shared_columns,
         study,
         comparison_name=_pairwise_comparison_name(left, right),
@@ -1277,12 +1344,20 @@ def evaluate_outputs(
     vader_source = _comparison_source("vader", vader_df, study) if not skip_vader else None
 
     questionnaire_tone_columns = [study.sections["experience"].tone_internal_column]
+    reference_source = _comparison_source("human_reference", reference_df, study)
     metrics_frames = [
         compute_comparison_metrics(reference_df, questionnaire_df, questionnaire_tone_columns, study, "human_reference_vs_questionnaire"),
         compute_comparison_metrics(reference_df, questionnaire_df, study.binary_columns(), study, "human_reference_vs_questionnaire"),
     ]
+    complete_case_frames = [
+        _compute_source_pair_metrics(reference_source, questionnaire_source, study, complete_case=True),
+    ]
     if not skip_vader:
         metrics_frames.append(compute_comparison_metrics(reference_df, vader_df, study.tone_columns(), study, "human_reference_vs_vader"))
+        if vader_source is not None:
+            complete_case_frames.append(
+                _compute_source_pair_metrics(reference_source, vader_source, study, complete_case=True)
+            )
 
     llm_candidates, rejected_llm = discover_llm_prediction_artifacts(
         study,
@@ -1337,6 +1412,14 @@ def evaluate_outputs(
             )
         )
         metrics_frames.append(experiment_metrics)
+        complete_case_frames.append(
+            _compute_source_pair_metrics(
+                reference_source,
+                accepted_llm_sources[-1],
+                study,
+                complete_case=True,
+            )
+        )
 
         artifact_dir = experiment_output_dir / artifact["artifact_id"]
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -1357,8 +1440,22 @@ def evaluate_outputs(
         pair_metrics = _compute_source_pair_metrics(left_source, right_source, study)
         if pair_metrics is not None:
             metrics_frames.append(pair_metrics)
+        pair_complete_case = _compute_source_pair_metrics(
+            left_source,
+            right_source,
+            study,
+            complete_case=True,
+        )
+        if pair_complete_case is not None:
+            complete_case_frames.append(pair_complete_case)
 
     metrics_df = pd.concat(metrics_frames, ignore_index=True)
+    complete_case_frames = [frame for frame in complete_case_frames if frame is not None]
+    metrics_complete_case_df = (
+        pd.concat(complete_case_frames, ignore_index=True)
+        if complete_case_frames
+        else pd.DataFrame(columns=metrics_df.columns)
+    )
     human_pairwise_df, human_summary_df = compute_human_agreement_metrics(human_long_df, study)
 
     sampled_private_df = load_sampled_private_data(resolved_sampled_private)
@@ -1379,6 +1476,7 @@ def evaluate_outputs(
             "fields": human_summary_df.to_dict(orient="records") if not human_summary_df.empty else [],
         },
         "comparisons": _comparison_summary(metrics_df),
+        "comparisons_complete_case": _comparison_summary(metrics_complete_case_df),
         "comparison_scopes": {
             comparison: {
                 "fields": int(len(group)),
@@ -1397,6 +1495,12 @@ def evaluate_outputs(
         },
         "vader": {
             "enabled": not skip_vader,
+        },
+        "sensitivity": {
+            "complete_case": {
+                "enabled": True,
+                "n_metric_rows": int(len(metrics_complete_case_df)),
+            }
         },
     }
 
@@ -1424,6 +1528,7 @@ def evaluate_outputs(
     )
 
     metrics_path = evaluation_dir / "evaluation_metrics.csv"
+    metrics_complete_case_path = evaluation_dir / "evaluation_metrics_complete_case.csv"
     summary_path = evaluation_dir / "evaluation_summary.json"
     reference_path = evaluation_dir / "human_reference_majority.csv"
     adjudication_path = evaluation_dir / "adjudication_summary.csv"
@@ -1435,6 +1540,7 @@ def evaluate_outputs(
     contradiction_examples_path = evaluation_dir / "questionnaire_contradiction_examples.csv"
 
     metrics_df.to_csv(metrics_path, index=False)
+    metrics_complete_case_df.to_csv(metrics_complete_case_path, index=False)
     reference_df.to_csv(reference_path, index=False)
     pd.DataFrame(summary["adjudication"]["fields"]).to_csv(adjudication_path, index=False)
     human_pairwise_df.to_csv(human_pairwise_path, index=False)
@@ -1457,6 +1563,7 @@ def evaluate_outputs(
 
     return metrics_df, summary, {
         "metrics_file": str(metrics_path),
+        "metrics_complete_case_file": str(metrics_complete_case_path),
         "summary_file": str(summary_path),
         "human_reference_file": str(reference_path),
         "adjudication_summary_file": str(adjudication_path),

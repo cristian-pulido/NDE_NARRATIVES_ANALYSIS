@@ -97,12 +97,12 @@ def _field_display_label(field: str, study: StudyConfig) -> str:
     return study.internal_to_visible_annotation_columns().get(field, field)
 
 
-def _field_bucket(field: str) -> str:
+def _field_bucket(field: str, study: StudyConfig) -> str:
     if field.endswith("_tone"):
         return "tone"
-    if field.startswith("m8_"):
+    if field in study.sections["experience"].binary_labels:
         return "m8"
-    if field.startswith("m9_"):
+    if field in study.sections["aftereffects"].binary_labels:
         return "m9"
     return "other"
 
@@ -111,7 +111,7 @@ def _field_bucket_title(bucket: str) -> str:
     titles = {
         "tone": "Tone",
         "m8": "NDE-C (Content of the Near-Death Experience Scale)",
-        "m9": "NDE-MCQ (Impact of the NDE on Moral Cognition)",
+        "m9": "LCI-R (Long-term Changes Inventory-Revised)",
         "other": "Other",
     }
     return titles.get(bucket, bucket.replace("_", " ").title())
@@ -127,8 +127,8 @@ def _field_bucket_order(study: StudyConfig) -> dict[str, list[str]]:
     aftereffects_fields = list(study.sections["aftereffects"].binary_labels.keys())
     return {
         "tone": list(study.tone_columns()),
-        "m8": [field for field in experience_fields if field.startswith("m8_")],
-        "m9": [field for field in aftereffects_fields if field.startswith("m9_")],
+        "m8": experience_fields,
+        "m9": aftereffects_fields,
     }
 
 
@@ -1310,7 +1310,7 @@ def plot_questionnaire_family_tradeoff_map(
     dpi: int = 300,
     export_pdf: bool = False,
 ) -> list[str]:
-    """Main questionnaire figure in one panel: NDE-C + NDE-MCQ + Tone."""
+    """Main questionnaire figure in one panel: NDE-C + LCI-R + Tone."""
     if family_df.empty:
         fig, ax = plt.subplots(figsize=(9, 4.2))
         ax.text(
@@ -1393,7 +1393,7 @@ def plot_questionnaire_family_tradeoff_map(
     }
     family_labels = {
         "m8": "NDE-C (Content of the Near-Death Experience Scale)",
-        "m9": "NDE-MCQ (Impact of the NDE on Moral Cognition)",
+        "m9": "LCI-R (Long-term Changes Inventory-Revised)",
         "tone": "Experience Tone",
     }
     for _, row in plot_df.iterrows():
@@ -1540,7 +1540,7 @@ def plot_questionnaire_family_tradeoff_map(
         family_handles,
         [
             "NDE-C (Content of the Near-Death Experience Scale)",
-            "NDE-MCQ (Impact of the NDE on Moral Cognition)",
+            "LCI-R (Long-term Changes Inventory-Revised)",
             "Experience Tone",
         ],
         loc="upper left",
@@ -1629,7 +1629,7 @@ def plot_questionnaire_extraction_item_scatter(
     dpi: int = 300,
     export_pdf: bool = False,
 ) -> list[str]:
-    """Scatter view for questionnaire extraction items (NDE-C + NDE-MCQ).
+    """Scatter view for questionnaire extraction items (NDE-C + LCI-R).
 
     X axis: Cohen kappa
     Y axis: Macro F1
@@ -1932,7 +1932,7 @@ def plot_questionnaire_extraction_item_scatter(
     nde_mcq_legend = ax.legend(
         nde_mcq_handles,
         nde_mcq_labels,
-        title="NDE-MCQ (Impact of the NDE on Moral Cognition) items",
+        title="LCI-R (Long-term Changes Inventory-Revised) items",
         frameon=False,
         loc="upper right",
         bbox_to_anchor=(0.985, 0.64),
@@ -1952,7 +1952,7 @@ def plot_questionnaire_family_gap_slope(
     dpi: int = 300,
     export_pdf: bool = False,
 ) -> list[str]:
-    """Slope chart contrasting NDE-C vs NDE-MCQ macro F1 for selected questionnaire comparisons."""
+    """Slope chart contrasting NDE-C vs LCI-R macro F1 for selected questionnaire comparisons."""
     if family_df.empty:
         fig, ax = plt.subplots(figsize=(9, 4.2))
         ax.text(
@@ -1977,7 +1977,7 @@ def plot_questionnaire_family_gap_slope(
         ax.text(
             0.5,
             0.5,
-            "No NDE-C/NDE-MCQ data available",
+            "No NDE-C/LCI-R data available",
             ha="center",
             va="center",
             fontsize=13,
@@ -2005,7 +2005,7 @@ def plot_questionnaire_family_gap_slope(
         ax.text(
             0.5,
             0.5,
-            "No paired NDE-C/NDE-MCQ values available",
+            "No paired NDE-C/LCI-R values available",
             ha="center",
             va="center",
             fontsize=13,
@@ -2054,11 +2054,11 @@ def plot_questionnaire_family_gap_slope(
         )
 
     ax.set_xticks([x_left, x_right])
-    ax.set_xticklabels(["NDE-C", "NDE-MCQ"])
+    ax.set_xticklabels(["NDE-C", "LCI-R"])
     ax.set_xlim(-0.20, 1.22)
     ax.set_ylim(0.25, 0.90)
     ax.set_ylabel("Mean Macro F1")
-    ax.set_title("Family gap per model: NDE-C vs NDE-MCQ")
+    ax.set_title("Family gap per model: NDE-C vs LCI-R")
     _style_axes(ax)
     fig.patch.set_facecolor("#FFFDF8")
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
@@ -2150,7 +2150,7 @@ def plot_comparison_summary(
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
-def build_family_summary_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
+def build_family_summary_table(metrics_df: pd.DataFrame, study: StudyConfig) -> pd.DataFrame:
     if metrics_df.empty:
         return pd.DataFrame(
             columns=[
@@ -2179,8 +2179,9 @@ def build_family_summary_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
             ]
         )
     family_df = metrics_df.copy()
+    # ensure study is available for bucketing
     family_df["family"] = family_df["field"].map(
-        lambda value: _field_bucket(str(value))
+        lambda value: _field_bucket(str(value), study)
     )
     grouped = (
         family_df.groupby(["comparison", "family"], as_index=False)
@@ -2525,7 +2526,7 @@ def plot_metric_heatmap(
         top_n: Number of top LLMs to include.
     """
     bucket_fields = _field_bucket_order(study).get(bucket, [])
-    bucket_df = metrics_df[metrics_df["field"].map(_field_bucket) == bucket].copy()
+    bucket_df = metrics_df[metrics_df["field"].map(lambda v: _field_bucket(v, study)) == bucket].copy()
     if bucket_fields:
         bucket_df = bucket_df[bucket_df["field"].isin(bucket_fields)]
 
@@ -2716,7 +2717,7 @@ def write_alignment_figures(
         scoped_metrics_df = _comparison_subset(metrics_df, scope_prefix)
         if scoped_metrics_df.empty:
             continue
-        family_df = build_family_summary_table(scoped_metrics_df)
+        family_df = build_family_summary_table(scoped_metrics_df, study)
         base = _figure_basename(scope_prefix)
         summary_path = figures_dir / f"{base}_comparison_summary.png"
         family_summary_path = figures_dir / f"{base}_family_summary.png"
@@ -2735,27 +2736,11 @@ def write_alignment_figures(
             f"{base}_nde_c_cohen_kappa_heatmap": str(
                 figures_dir / f"{base}_nde_c_cohen_kappa_heatmap.png"
             ),
-            f"{base}_nde_mcq_macro_f1_heatmap": str(
-                figures_dir / f"{base}_nde_mcq_macro_f1_heatmap.png"
+            f"{base}_lci_r_macro_f1_heatmap": str(
+                figures_dir / f"{base}_lci_r_macro_f1_heatmap.png"
             ),
-            f"{base}_nde_mcq_cohen_kappa_heatmap": str(
-                figures_dir / f"{base}_nde_mcq_cohen_kappa_heatmap.png"
-            ),
-            # Legacy keys retained for compatibility with downstream consumers.
-            f"{base}_tone_accuracy_heatmap": str(
-                figures_dir / f"{base}_tone_macro_f1_heatmap.png"
-            ),
-            f"{base}_m8_accuracy_heatmap": str(
-                figures_dir / f"{base}_nde_c_macro_f1_heatmap.png"
-            ),
-            f"{base}_m8_cohen_kappa_heatmap": str(
-                figures_dir / f"{base}_nde_c_cohen_kappa_heatmap.png"
-            ),
-            f"{base}_m9_accuracy_heatmap": str(
-                figures_dir / f"{base}_nde_mcq_macro_f1_heatmap.png"
-            ),
-            f"{base}_m9_cohen_kappa_heatmap": str(
-                figures_dir / f"{base}_nde_mcq_cohen_kappa_heatmap.png"
+            f"{base}_lci_r_cohen_kappa_heatmap": str(
+                figures_dir / f"{base}_lci_r_cohen_kappa_heatmap.png"
             ),
         }
         if scope_prefix == "questionnaire_vs_":
@@ -2864,7 +2849,7 @@ def write_alignment_figures(
         bucket_to_public_key = {
             "tone": "tone",
             "m8": "nde_c",
-            "m9": "nde_mcq",
+            "m9": "lci_r",
         }
         for bucket in ("tone", "m8", "m9"):
             public_key = bucket_to_public_key[bucket]
@@ -3067,33 +3052,33 @@ def _questionnaire_interpretation_lines(family_df: pd.DataFrame) -> list[str]:
         m9_recall = float(m9.iloc[0]["recall_yes_mean"])
         m9_recall_std = float(m9.iloc[0]["recall_yes_std"])
         kappa_relation = (
-            f"NDE-C shows stronger agreement than NDE-MCQ (mean family kappa {m8_kappa:.3f} ± {m8_kappa_std:.3f} vs {m9_kappa:.3f} ± {m9_kappa_std:.3f})"
+            f"NDE-C shows stronger agreement than LCI-R (mean family kappa {m8_kappa:.3f} ± {m8_kappa_std:.3f} vs {m9_kappa:.3f} ± {m9_kappa_std:.3f})"
             if m8_kappa > m9_kappa
-            else f"NDE-MCQ shows stronger agreement than NDE-C (mean family kappa {m9_kappa:.3f} ± {m9_kappa_std:.3f} vs {m8_kappa:.3f} ± {m8_kappa_std:.3f})"
+            else f"LCI-R shows stronger agreement than NDE-C (mean family kappa {m9_kappa:.3f} ± {m9_kappa_std:.3f} vs {m8_kappa:.3f} ± {m8_kappa_std:.3f})"
             if m9_kappa > m8_kappa
-            else f"NDE-C and NDE-MCQ show matched agreement at the family level (mean family kappa {m8_kappa:.3f} ± {m8_kappa_std:.3f} vs {m9_kappa:.3f} ± {m9_kappa_std:.3f})"
+            else f"NDE-C and LCI-R show matched agreement at the family level (mean family kappa {m8_kappa:.3f} ± {m8_kappa_std:.3f} vs {m9_kappa:.3f} ± {m9_kappa_std:.3f})"
         )
         recall_relation = (
-            f"Positive-class recovery is weaker for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} ± {m9_recall_std:.3f} vs {m8_recall:.3f} ± {m8_recall_std:.3f})"
+            f"Positive-class recovery is weaker for LCI-R than for NDE-C (mean recall for `yes`: {m9_recall:.3f} ± {m9_recall_std:.3f} vs {m8_recall:.3f} ± {m8_recall_std:.3f})"
             if (
                 not pd.isna(m8_recall)
                 and not pd.isna(m9_recall)
                 and m8_recall > m9_recall
             )
-            else f"Positive-class recovery is stronger for NDE-MCQ than for NDE-C (mean recall for `yes`: {m9_recall:.3f} ± {m9_recall_std:.3f} vs {m8_recall:.3f} ± {m8_recall_std:.3f})"
+            else f"Positive-class recovery is stronger for LCI-R than for NDE-C (mean recall for `yes`: {m9_recall:.3f} ± {m9_recall_std:.3f} vs {m8_recall:.3f} ± {m8_recall_std:.3f})"
             if (
                 not pd.isna(m8_recall)
                 and not pd.isna(m9_recall)
                 and m9_recall > m8_recall
             )
-            else f"Positive-class recovery is matched or unavailable across NDE-C and NDE-MCQ (mean recall for `yes`: {m8_recall:.3f} ± {m8_recall_std:.3f} vs {m9_recall:.3f} ± {m9_recall_std:.3f})"
+            else f"Positive-class recovery is matched or unavailable across NDE-C and LCI-R (mean recall for `yes`: {m8_recall:.3f} ± {m8_recall_std:.3f} vs {m9_recall:.3f} ± {m9_recall_std:.3f})"
         )
         if m8_kappa > m9_kappa:
-            interpretation_tail = "- This pattern is consistent with the prompt design: the system marks `yes` only when the construct is explicitly verbalized in the narrative, so lower NDE-MCQ alignment is compatible with weaker narrative explicitness rather than a pure model-quality failure."
+            interpretation_tail = "- This pattern is consistent with the prompt design: the system marks `yes` only when the construct is explicitly verbalized in the narrative, so lower LCI-R alignment is compatible with weaker narrative explicitness rather than a pure model-quality failure."
         elif m9_kappa > m8_kappa:
-            interpretation_tail = "- In this run, the questionnaire-based family pattern does not support the usual expectation that NDE-MCQ is less recoverable than NDE-C, so the result should be interpreted cautiously and checked against item-level detail and prevalence structure."
+            interpretation_tail = "- In this run, the questionnaire-based family pattern does not support the usual expectation that LCI-R is less recoverable than NDE-C, so the result should be interpreted cautiously and checked against item-level detail and prevalence structure."
         else:
-            interpretation_tail = "- In this run, the questionnaire-based family comparison does not separate NDE-C and NDE-MCQ on agreement, so the interpretation should rely more heavily on item-level detail, recall patterns, and prevalence structure."
+            interpretation_tail = "- In this run, the questionnaire-based family comparison does not separate NDE-C and LCI-R on agreement, so the interpretation should rely more heavily on item-level detail, recall patterns, and prevalence structure."
         lines.extend(
             [
                 f"- Across questionnaire-vs-LLM comparisons, {kappa_relation}.",
@@ -3106,7 +3091,7 @@ def _questionnaire_interpretation_lines(family_df: pd.DataFrame) -> list[str]:
         return lines
     lines.extend(
         [
-            "- The current run did not contain both NDE-C and NDE-MCQ family summaries for interpretation.",
+            "- The current run did not contain both NDE-C and LCI-R family summaries for interpretation.",
             "",
         ]
     )
@@ -3684,7 +3669,7 @@ def write_alignment_report_for_scope(
         "- Human reference: field-level majority vote across valid human annotation artifacts.",
         "- Unresolved ties remain blank and are excluded only from the affected field metrics.",
         "- Metrics reported: accuracy, Cohen kappa, and macro F1.",
-        "- Families are operationalized as Tone, NDE-C, and NDE-MCQ to support article-oriented interpretation before item-level detail.",
+        "- Families are operationalized as Tone, NDE-C, and LCI-R to support article-oriented interpretation before item-level detail.",
         "- Coverage explicitly reports available sampled records, retained reference records, and the complete set of valid LLM artifacts used in evaluation.",
         "",
     ]
@@ -3736,6 +3721,26 @@ def write_alignment_report_for_scope(
             ]
         )
     lines.extend(_summary_table_lines(metrics_df, "General Results"))
+    complete_case_summary = summary.get("comparisons_complete_case", {})
+    if isinstance(complete_case_summary, dict) and complete_case_summary:
+        lines.extend(
+            [
+                "## Complete-Case Sensitivity",
+                "",
+                "This sensitivity section re-computes metrics using only participant rows with non-missing values across all shared fields in each comparison.",
+                "",
+                "| Comparison | Fields | Mean Accuracy | Mean Kappa | Mean Macro F1 |",
+                "| --- | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for comparison, values in sorted(
+            complete_case_summary.items(),
+            key=lambda item: str(item[0]),
+        ):
+            lines.append(
+                f"| {_comparison_label(comparison)} | {values['fields']} | {values['accuracy_mean']:.3f} | {values['cohen_kappa_mean']:.3f} | {values['macro_f1_mean']:.3f} |"
+            )
+        lines.append("")
     lines.extend(_family_summary_lines(family_df, "Family-Level Results"))
     if report_filename == ALIGNMENT_QUESTIONNAIRE_REPORT_FILENAME:
         lines.extend(_questionnaire_interpretation_lines(family_df))
@@ -3770,12 +3775,12 @@ def write_alignment_report_for_scope(
             [
                 "## Item-Level Structure (Extended Figures)",
                 "",
-                "This section integrates NDE-C and NDE-MCQ extraction items in one scatter figure (x = kappa, y = macro F1), with standardized model names, larger markers, and compact legends for article readability.",
+                "This section integrates NDE-C and LCI-R extraction items in one scatter figure (x = kappa, y = macro F1), with standardized model names, larger markers, and compact legends for article readability.",
                 "",
                 *tone_lines,
-                "#### NDE-C + NDE-MCQ (Integrated Extraction View)",
+                "#### NDE-C + LCI-R (Integrated Extraction View)",
                 "",
-                f"![NDE-C + NDE-MCQ extraction scatter]({Path(figure_paths[f'{figure_prefix}_extraction_item_scatter']).relative_to(output_dir).as_posix()})",
+                f"![NDE-C + LCI-R extraction scatter]({Path(figure_paths[f'{figure_prefix}_extraction_item_scatter']).relative_to(output_dir).as_posix()})",
                 "",
             ]
         )
@@ -3793,11 +3798,11 @@ def write_alignment_report_for_scope(
                 "",
                 f"![NDE-C kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_c_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
                 "",
-                "#### NDE-MCQ",
+                "#### LCI-R",
                 "",
-                f"![NDE-MCQ macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
+                f"![LCI-R macro F1 heatmap]({Path(figure_paths[f'{figure_prefix}_lci_r_macro_f1_heatmap']).relative_to(output_dir).as_posix()})",
                 "",
-                f"![NDE-MCQ kappa heatmap]({Path(figure_paths[f'{figure_prefix}_nde_mcq_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
+                f"![LCI-R kappa heatmap]({Path(figure_paths[f'{figure_prefix}_lci_r_cohen_kappa_heatmap']).relative_to(output_dir).as_posix()})",
                 "",
             ]
         )
@@ -3883,7 +3888,7 @@ def write_alignment_report(
     vader_summary: dict[str, Any] | None = None,
 ) -> Path:
     primary_metrics_df = _comparison_subset(metrics_df, "human_reference_vs_")
-    family_df = build_family_summary_table(primary_metrics_df)
+    family_df = build_family_summary_table(primary_metrics_df, study)
     return write_alignment_report_for_scope(
         study=study,
         metrics_df=primary_metrics_df,
@@ -3908,7 +3913,7 @@ def write_questionnaire_alignment_report(
     figure_paths: dict[str, str],
 ) -> Path:
     questionnaire_metrics_df = _questionnaire_automated_subset(metrics_df)
-    family_df = build_family_summary_table(questionnaire_metrics_df)
+    family_df = build_family_summary_table(questionnaire_metrics_df, study)
     return write_alignment_report_for_scope(
         study=study,
         metrics_df=questionnaire_metrics_df,
@@ -3955,7 +3960,7 @@ def write_alignment_outputs(
         )
     )
     long_df = build_alignment_long_table(metrics_df)
-    family_df = build_family_summary_table(metrics_df)
+    family_df = build_family_summary_table(metrics_df, study)
     long_path = output_dir / ALIGNMENT_LONG_FILENAME
     family_path = output_dir / ALIGNMENT_FAMILY_FILENAME
     long_df.to_csv(long_path, index=False)

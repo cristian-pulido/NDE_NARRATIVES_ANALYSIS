@@ -1,4 +1,4 @@
-response_id,context_tone,experience_tone,aftereffects_tone,m8_out_of_body,m8_bright_light,m8_peace,m8_time_distortion,m8_presence,m9_moral_rules,m9_long_term_thinking,m9_consider_others,m9_help_others,m9_forgiveness
-101,negative,positive,positive,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes
-102,negative,negative,negative,no,no,no,no,no,no,no,no,no,no
-103,mixed,mixed,mixed,no,no,yes,yes,no,no,no,yes,yes,no
+response_id,context_tone,experience_tone,aftereffects_tone,outside_of_body_experience,feeling_bright_light,feeling_awareness,presence_encounter,saw_relived_past_events,time_perception_altered,border_point_of_no_return,non_existence_feeling,feeling_peace_wellbeing,saw_entered_gateway,fear_of_death,inner_meaning_in_my_life,compassion_toward_others,spiritual_feelings,desire_to_help_others,personal_vulnerability,interest_in_material_goods,interest_in_religion,understanding_myself,social_justice_issues
+101,negative,positive,positive,yes,yes,yes,yes,no,yes,yes,no,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes,yes
+102,negative,negative,negative,no,no,no,no,no,no,no,no,no,no,no,no,no,no,no,yes,no,no,no,no
+103,mixed,mixed,mixed,no,no,yes,yes,no,yes,no,no,yes,no,yes,yes,yes,no,yes,yes,no,no,yes,yes

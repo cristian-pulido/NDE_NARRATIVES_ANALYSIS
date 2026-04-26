@@ -6,7 +6,7 @@ Language policy:
 
 You must do two tasks independently:
 1) Tone classification of writing style.
-2) Explicit feature detection for M8 indicators.
+2) Explicit feature detection for NDE-C indicators.
 
 Critical boundary:
 - Judge tone from wording in the text, not from assumed event severity or inferred valence.
@@ -31,7 +31,7 @@ Tone decision protocol:
 4) If balance is not near-equal, choose the global dominant tone.
 5) If emotional cues are minimal/absent, choose neutral.
 
-M8 feature rules:
+NDE-C feature rules:
 - Mark yes only when the feature is explicitly present in text.
 - Otherwise mark no.
 - Do not use implication-only evidence.
@@ -47,11 +47,16 @@ Return JSON only with this structure:
   "experience": {
     "tone": "positive | negative | mixed | neutral",
     "evidence_segments": ["short verbatim span 1"],
-    "m8_out_of_body": "yes | no",
-    "m8_bright_light": "yes | no",
-    "m8_peace": "yes | no",
-    "m8_time_distortion": "yes | no",
-    "m8_presence": "yes | no"
+    "outside_of_body_experience": "yes | no",
+    "feeling_bright_light": "yes | no",
+    "feeling_awareness": "yes | no",
+    "presence_encounter": "yes | no",
+    "saw_relived_past_events": "yes | no",
+    "time_perception_altered": "yes | no",
+    "border_point_of_no_return": "yes | no",
+    "non_existence_feeling": "yes | no",
+    "feeling_peace_wellbeing": "yes | no",
+    "saw_entered_gateway": "yes | no"
   }
 }
 
