@@ -1595,6 +1595,9 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
             or "dataset"
         )
 
+        # Determine resume flag
+        resume_flag = not bool(args.from_scratch)
+
         dataset_df, written, download_summary = download_and_prepare_benchmark_dataset(
             paths=paths,
             benchmark=dataset_benchmark,
@@ -1603,6 +1606,7 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
             output_processed_dir=Path(args.processed_dir).resolve()
             if args.processed_dir
             else None,
+            resume=resume_flag,
         )
         run_summary = run_benchmark_pipeline(
             paths=paths,
