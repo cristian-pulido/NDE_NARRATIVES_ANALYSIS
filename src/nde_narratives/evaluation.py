@@ -15,6 +15,7 @@ from .constants import ANNOTATION_SHEET, SAMPLED_PRIVATE_SHEET
 from .evaluation_report import write_alignment_outputs
 from .io_utils import read_tabular_file
 from .llm_runner import INTERNAL_ARTIFACT_FILENAMES
+from .prompting import load_batch_source
 from .sampling import assign_participant_codes, filter_source_data
 from .vader_analysis import (
     default_vader_scores_path,
@@ -35,6 +36,63 @@ def _is_blank(value: object) -> bool:
 def _safe_divide(numerator: float, denominator: float) -> float:
     """Safely divide two numbers, returning NaN if denominator is zero."""
     return numerator / denominator if denominator else float("nan")
+
+
+def _select_top_by_pareto(
+    df: pd.DataFrame,
+    *,
+    top_n: int,
+    metric_columns: tuple[str, str] = ("macro_f1", "cohen_kappa"),
+) -> pd.DataFrame:
+    """Select top rows using Pareto-front ranking over two metrics.
+
+    Primary rule: non-dominated sorting (maximize both metrics).
+    Tie-break inside each front: max-min balance over normalized metrics.
+    """
+    if df.empty:
+        return df
+
+    m1, m2 = metric_columns
+    work = df.copy()
+    work = work[work[m1].notna() & work[m2].notna()].copy()
+    if work.empty:
+        return df.head(0).copy()
+
+    remaining = work.reset_index(drop=True)
+    selected_fronts: list[pd.DataFrame] = []
+
+    while not remaining.empty and sum(len(front) for front in selected_fronts) < top_n:
+        idx = remaining.index.to_list()
+        frontier: list[int] = []
+        for i in idx:
+            i_m1 = float(remaining.at[i, m1])
+            i_m2 = float(remaining.at[i, m2])
+            dominated = False
+            for j in idx:
+                if i == j:
+                    continue
+                j_m1 = float(remaining.at[j, m1])
+                j_m2 = float(remaining.at[j, m2])
+                j_dominates_i = (j_m1 >= i_m1 and j_m2 >= i_m2) and (j_m1 > i_m1 or j_m2 > i_m2)
+                if j_dominates_i:
+                    dominated = True
+                    break
+            if not dominated:
+                frontier.append(i)
+
+        front_df = remaining.loc[frontier].copy()
+        # Balance tie-break: maximize the weaker metric after min-max normalization.
+        span_m1 = float(front_df[m1].max() - front_df[m1].min())
+        span_m2 = float(front_df[m2].max() - front_df[m2].min())
+        front_df["_m1_norm"] = 0.5 if span_m1 == 0 else (front_df[m1] - float(front_df[m1].min())) / span_m1
+        front_df["_m2_norm"] = 0.5 if span_m2 == 0 else (front_df[m2] - float(front_df[m2].min())) / span_m2
+        front_df["_balance"] = front_df[["_m1_norm", "_m2_norm"]].min(axis=1)
+        front_df = front_df.sort_values(["_balance", m1, m2], ascending=[False, False, False], na_position="last")
+        selected_fronts.append(front_df.drop(columns=["_m1_norm", "_m2_norm", "_balance"]))
+        remaining = remaining.drop(index=frontier)
+
+    out = pd.concat(selected_fronts, ignore_index=True) if selected_fronts else work.head(0).copy()
+    return out.head(top_n)
 
 
 def _normalize_identifier(value: str) -> str:
@@ -309,6 +367,7 @@ def discover_human_annotations(
     human_annotation_workbook: Path | None = None,
     human_annotations_dir: Path | None = None,
     annotator_ids: list[str] | None = None,
+    allow_empty: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -340,6 +399,8 @@ def discover_human_annotations(
 
     if not accepted:
         scanned_root = Path(human_annotations_dir or paths.human_annotations_dir)
+        if allow_empty and not candidates:
+            return [], []
         if not candidates:
             raise ValueError(
                 "No valid human annotation artifacts were found. "
@@ -485,8 +546,8 @@ def _build_questionnaire_contradiction_analysis(
     llm_metric_rows = metrics_df[
         metrics_df["comparison"].astype(str).str.startswith("questionnaire_vs_llm:") & (metrics_df["field"] == tone_column)
     ].copy()
-    llm_metric_rows = llm_metric_rows.sort_values(["macro_f1", "accuracy"], ascending=[False, False], na_position="last")
-    selected_comparisons = llm_metric_rows["comparison"].head(top_n).tolist()
+    llm_metric_rows = _select_top_by_pareto(llm_metric_rows, top_n=top_n, metric_columns=("macro_f1", "cohen_kappa"))
+    selected_comparisons = llm_metric_rows["comparison"].tolist()
     selected_artifact_ids = [comparison.split(":", 1)[1] for comparison in selected_comparisons if ":" in comparison]
 
     selected_map = {
@@ -685,7 +746,7 @@ def _build_questionnaire_contradiction_analysis(
         },
         "notes": [
             "VADER is included only in quantitative contradiction rates because it does not provide extractive evidence spans.",
-            "Qualitative evidence analysis is limited to the top questionnaire-vs-LLM comparisons by macro F1 on experience_tone.",
+            "Qualitative evidence analysis is limited to the top questionnaire-vs-LLM comparisons on experience_tone, ranked by macro F1 and Cohen kappa.",
         ],
     }
 
@@ -767,8 +828,8 @@ def _build_questionnaire_tone_label_analysis(
     llm_metric_rows = metrics_df[
         metrics_df["comparison"].astype(str).str.startswith("questionnaire_vs_llm:") & (metrics_df["field"] == tone_column)
     ].copy()
-    llm_metric_rows = llm_metric_rows.sort_values(["macro_f1", "accuracy"], ascending=[False, False], na_position="last")
-    selected_llm_comparisons = llm_metric_rows["comparison"].head(top_n).tolist()
+    llm_metric_rows = _select_top_by_pareto(llm_metric_rows, top_n=top_n, metric_columns=("macro_f1", "cohen_kappa"))
+    selected_llm_comparisons = llm_metric_rows["comparison"].tolist()
     selected_artifact_ids = [comparison.split(":", 1)[1] for comparison in selected_llm_comparisons if ":" in comparison]
     selected_comparisons = ["questionnaire_vs_vader", *selected_llm_comparisons]
 
@@ -943,9 +1004,13 @@ def load_vader_predictions(
     vader_scores_path: Path | None = None,
     output_dir: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any] | None]:
-    survey_df = read_tabular_file(paths.survey_csv)
-    survey_df = filter_source_data(survey_df, study)
-    survey_df = assign_participant_codes(survey_df, study)
+    survey_df = load_batch_source(
+        study=study,
+        paths=paths,
+        source="survey",
+        all_records=False,
+        min_valid_sections=3,
+    )
     sampled_private_df = _filter_participant_subset(load_sampled_private_data(sampled_private_workbook), participant_codes)
     resolved_vader_scores = Path(vader_scores_path or default_vader_scores_path(paths))
 
@@ -1323,11 +1388,34 @@ def evaluate_outputs(
         human_annotation_workbook=human_annotation_workbook,
         human_annotations_dir=human_annotations_dir,
         annotator_ids=annotator_ids,
+        allow_empty=human_annotation_workbook is None,
     )
-    reference_df, adjudication_summary, human_long_df = consolidate_majority_human_reference(human_artifacts, study)
-    participant_codes = set(reference_df["participant_code"])
+    human_enabled = bool(human_artifacts)
+    if human_enabled:
+        reference_df, adjudication_summary, human_long_df = consolidate_majority_human_reference(
+            human_artifacts, study
+        )
+        participant_codes: set[str] | None = set(reference_df["participant_code"])
+    else:
+        reference_df = pd.DataFrame(
+            columns=["participant_code", *study.annotation_internal_columns()]
+        )
+        adjudication_summary = {
+            "n_valid_annotators": 0,
+            "n_reference_participants": 0,
+            "n_fields": int(len(study.annotation_internal_columns())),
+            "n_unresolved_field_participant_pairs": 0,
+        }
+        human_long_df = pd.DataFrame(
+            columns=["participant_code", "annotator_id", *study.annotation_internal_columns()]
+        )
+        participant_codes = None
 
-    questionnaire_df = load_questionnaire_labels(paths.survey_csv, study)
+    questionnaire_df = load_questionnaire_labels(
+        paths.survey_csv,
+        study,
+        participant_codes=participant_codes,
+    )
     if skip_vader:
         vader_df = pd.DataFrame(columns=["participant_code", *study.tone_columns()])
         vader_summary = None
@@ -1336,6 +1424,7 @@ def evaluate_outputs(
             study,
             paths,
             resolved_sampled_private,
+            participant_codes=participant_codes,
             vader_scores_path=Path(vader_scores_path) if vader_scores_path else None,
             output_dir=evaluation_dir,
         )
@@ -1344,20 +1433,55 @@ def evaluate_outputs(
     vader_source = _comparison_source("vader", vader_df, study) if not skip_vader else None
 
     questionnaire_tone_columns = [study.sections["experience"].tone_internal_column]
+    metrics_frames: list[pd.DataFrame] = []
+    complete_case_frames: list[pd.DataFrame | None] = []
     reference_source = _comparison_source("human_reference", reference_df, study)
-    metrics_frames = [
-        compute_comparison_metrics(reference_df, questionnaire_df, questionnaire_tone_columns, study, "human_reference_vs_questionnaire"),
-        compute_comparison_metrics(reference_df, questionnaire_df, study.binary_columns(), study, "human_reference_vs_questionnaire"),
-    ]
-    complete_case_frames = [
-        _compute_source_pair_metrics(reference_source, questionnaire_source, study, complete_case=True),
-    ]
-    if not skip_vader:
-        metrics_frames.append(compute_comparison_metrics(reference_df, vader_df, study.tone_columns(), study, "human_reference_vs_vader"))
-        if vader_source is not None:
-            complete_case_frames.append(
-                _compute_source_pair_metrics(reference_source, vader_source, study, complete_case=True)
+    if human_enabled:
+        metrics_frames.extend(
+            [
+                compute_comparison_metrics(
+                    reference_df,
+                    questionnaire_df,
+                    questionnaire_tone_columns,
+                    study,
+                    "human_reference_vs_questionnaire",
+                ),
+                compute_comparison_metrics(
+                    reference_df,
+                    questionnaire_df,
+                    study.binary_columns(),
+                    study,
+                    "human_reference_vs_questionnaire",
+                ),
+            ]
+        )
+        complete_case_frames.append(
+            _compute_source_pair_metrics(
+                reference_source,
+                questionnaire_source,
+                study,
+                complete_case=True,
             )
+        )
+        if not skip_vader:
+            metrics_frames.append(
+                compute_comparison_metrics(
+                    reference_df,
+                    vader_df,
+                    study.tone_columns(),
+                    study,
+                    "human_reference_vs_vader",
+                )
+            )
+            if vader_source is not None:
+                complete_case_frames.append(
+                    _compute_source_pair_metrics(
+                        reference_source,
+                        vader_source,
+                        study,
+                        complete_case=True,
+                    )
+                )
 
     llm_candidates, rejected_llm = discover_llm_prediction_artifacts(
         study,
@@ -1381,7 +1505,6 @@ def evaluate_outputs(
 
     for artifact in llm_candidates:
         llm_df = artifact["data"]
-        comparison_name = f"human_reference_vs_llm:{artifact['artifact_id']}"
         metadata = {
             "experiment_id": artifact["experiment_id"],
             "artifact_id": artifact["artifact_id"],
@@ -1389,16 +1512,45 @@ def evaluate_outputs(
             "run_id": artifact.get("run_id"),
             "model_variant": artifact.get("model_variant"),
         }
-        experiment_metrics = compute_comparison_metrics(
-            reference_df,
-            llm_df,
-            study.annotation_internal_columns(),
-            study,
-            comparison_name=comparison_name,
-            metadata=metadata,
-        )
+        if human_enabled:
+            experiment_metrics = compute_comparison_metrics(
+                reference_df,
+                llm_df,
+                study.annotation_internal_columns(),
+                study,
+                comparison_name=f"human_reference_vs_llm:{artifact['artifact_id']}",
+                metadata=metadata,
+            )
+            rejection_reason = "No overlap with adjudicated human reference."
+        else:
+            llm_source_for_precheck = _comparison_source(
+                "llm",
+                llm_df,
+                study,
+                artifact_id=str(artifact["artifact_id"]),
+                metadata=metadata,
+            )
+            experiment_metrics = _compute_source_pair_metrics(
+                questionnaire_source,
+                llm_source_for_precheck,
+                study,
+            )
+            if experiment_metrics is None:
+                rejected_llm.append(
+                    {
+                        **{k: v for k, v in artifact.items() if k != "data"},
+                        "reason": "No shared evaluation columns with questionnaire labels.",
+                    }
+                )
+                continue
+            rejection_reason = "No overlap with questionnaire labels."
         if int(experiment_metrics["n"].fillna(0).sum()) == 0:
-            rejected_llm.append({**{k: v for k, v in artifact.items() if k != "data"}, "reason": "No overlap with adjudicated human reference."})
+            rejected_llm.append(
+                {
+                    **{k: v for k, v in artifact.items() if k != "data"},
+                    "reason": rejection_reason,
+                }
+            )
             continue
         accepted_llm.append({k: v for k, v in artifact.items() if k not in {"data", "evidence_data"}})
         accepted_llm_analysis.append(artifact)
@@ -1411,15 +1563,16 @@ def evaluate_outputs(
                 metadata=metadata,
             )
         )
-        metrics_frames.append(experiment_metrics)
-        complete_case_frames.append(
-            _compute_source_pair_metrics(
-                reference_source,
-                accepted_llm_sources[-1],
-                study,
-                complete_case=True,
+        if human_enabled:
+            metrics_frames.append(experiment_metrics)
+            complete_case_frames.append(
+                _compute_source_pair_metrics(
+                    reference_source,
+                    accepted_llm_sources[-1],
+                    study,
+                    complete_case=True,
+                )
             )
-        )
 
         artifact_dir = experiment_output_dir / artifact["artifact_id"]
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -1449,6 +1602,13 @@ def evaluate_outputs(
         if pair_complete_case is not None:
             complete_case_frames.append(pair_complete_case)
 
+    if not metrics_frames:
+        raise ValueError(
+            "No overlap-based comparisons were available to evaluate. "
+            "Provide at least one compatible source pair (for example questionnaire + LLM, "
+            "or questionnaire + VADER)."
+        )
+
     metrics_df = pd.concat(metrics_frames, ignore_index=True)
     complete_case_frames = [frame for frame in complete_case_frames if frame is not None]
     metrics_complete_case_df = (
@@ -1456,11 +1616,49 @@ def evaluate_outputs(
         if complete_case_frames
         else pd.DataFrame(columns=metrics_df.columns)
     )
-    human_pairwise_df, human_summary_df = compute_human_agreement_metrics(human_long_df, study)
+    if human_enabled:
+        human_pairwise_df, human_summary_df = compute_human_agreement_metrics(
+            human_long_df, study
+        )
+    else:
+        human_pairwise_df = pd.DataFrame(
+            columns=[
+                "comparison",
+                "field",
+                "n",
+                "accuracy",
+                "cohen_kappa",
+                "macro_f1",
+                "annotator_a",
+                "annotator_b",
+            ]
+        )
+        human_summary_df = pd.DataFrame(
+            columns=[
+                "field",
+                "n_mean",
+                "accuracy_mean",
+                "cohen_kappa_mean",
+                "macro_f1_mean",
+                "n_pairs",
+            ]
+        )
 
-    sampled_private_df = load_sampled_private_data(resolved_sampled_private)
+    sampled_private_missing = False
+    try:
+        sampled_private_df = load_sampled_private_data(resolved_sampled_private)
+    except FileNotFoundError:
+        sampled_private_missing = True
+        sampled_private_df = pd.DataFrame(columns=["participant_code"])
+        if not skip_vader:
+            raise
+
+    sampled_total = int(len(sampled_private_df))
+    if sampled_total == 0:
+        sampled_total = int(questionnaire_df["participant_code"].nunique())
+
     coverage = {
-        "n_sampled_total": int(len(sampled_private_df)),
+        "n_sampled_total": sampled_total,
         "n_preprocessed_three_sections_total": int(len(preprocessed_three_section_codes)),
         "n_valid_human_artifacts": int(len(human_artifacts)),
         "n_rejected_human_artifacts": int(len(rejected_humans)),
@@ -1495,6 +1693,20 @@ def evaluate_outputs(
         },
         "vader": {
             "enabled": not skip_vader,
+        },
+        "inputs": {
+            "sampled_private_workbook": {
+                "path": str(resolved_sampled_private),
+                "exists": not sampled_private_missing,
+            }
+        },
+        "human_evaluation": {
+            "enabled": human_enabled,
+            "reason": (
+                None
+                if human_enabled
+                else "No human annotation artifacts were discovered; generated questionnaire-vs-automated outputs only."
+            ),
         },
         "sensitivity": {
             "complete_case": {
@@ -1541,12 +1753,13 @@ def evaluate_outputs(
 
     metrics_df.to_csv(metrics_path, index=False)
     metrics_complete_case_df.to_csv(metrics_complete_case_path, index=False)
-    reference_df.to_csv(reference_path, index=False)
-    pd.DataFrame(summary["adjudication"]["fields"]).to_csv(adjudication_path, index=False)
-    human_pairwise_df.to_csv(human_pairwise_path, index=False)
-    human_summary_df.to_csv(human_summary_path, index=False)
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    _write_json(human_manifest_path, summary["human_artifacts"])
+    if human_enabled:
+        reference_df.to_csv(reference_path, index=False)
+        pd.DataFrame(summary["adjudication"]["fields"]).to_csv(adjudication_path, index=False)
+        human_pairwise_df.to_csv(human_pairwise_path, index=False)
+        human_summary_df.to_csv(human_summary_path, index=False)
+        _write_json(human_manifest_path, summary["human_artifacts"])
     _write_json(llm_manifest_path, summary["llm_artifacts"])
     pd.DataFrame(summary["questionnaire_contradictions"].get("rows", [])).to_csv(contradiction_rows_path, index=False)
     pd.DataFrame(summary["questionnaire_contradictions"].get("examples", [])).to_csv(contradiction_examples_path, index=False)
@@ -1561,17 +1774,24 @@ def evaluate_outputs(
         export_figures_pdf=export_figures_pdf,
     )
 
-    return metrics_df, summary, {
+    written_files: dict[str, str] = {
         "metrics_file": str(metrics_path),
         "metrics_complete_case_file": str(metrics_complete_case_path),
         "summary_file": str(summary_path),
-        "human_reference_file": str(reference_path),
-        "adjudication_summary_file": str(adjudication_path),
-        "human_agreement_pairwise_file": str(human_pairwise_path),
-        "human_agreement_summary_file": str(human_summary_path),
-        "human_artifacts_manifest_file": str(human_manifest_path),
         "llm_artifacts_manifest_file": str(llm_manifest_path),
         "questionnaire_contradictions_file": str(contradiction_rows_path),
         "questionnaire_contradiction_examples_file": str(contradiction_examples_path),
         **reporting_outputs,
     }
+    if human_enabled:
+        written_files.update(
+            {
+                "human_reference_file": str(reference_path),
+                "adjudication_summary_file": str(adjudication_path),
+                "human_agreement_pairwise_file": str(human_pairwise_path),
+                "human_agreement_summary_file": str(human_summary_path),
+                "human_artifacts_manifest_file": str(human_manifest_path),
+            }
+        )
+
+    return metrics_df, summary, written_files

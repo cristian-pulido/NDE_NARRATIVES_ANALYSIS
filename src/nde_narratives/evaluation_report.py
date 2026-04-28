@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 from textwrap import fill
 from typing import Any
@@ -37,16 +38,46 @@ def _comparison_label(comparison: str) -> str:
 
 
 def _presentation_model_name(identifier: str) -> str:
+    def _normalize_version(version_digits: str) -> str:
+        if not version_digits:
+            return ""
+        if len(version_digits) == 1:
+            return version_digits
+        major = version_digits[0]
+        minor = str(int(version_digits[1:]))
+        return f"{major}.{minor}"
+
+    def _extract_size(token: str) -> str | None:
+        match = re.fullmatch(r"(\d+)(?:b)?", token)
+        if not match:
+            return None
+        return f"{int(match.group(1))}B"
+
+    def _family_label(name: str) -> str:
+        labels = {
+            "qwen": "Qwen",
+            "gemma": "Gemma",
+            "llama": "Llama",
+            "claude": "Claude",
+            "ministral": "Ministral",
+            "mistral": "Mistral",
+            "deepseek": "DeepSeek",
+            "nemotron": "Nemotron",
+        }
+        return labels.get(name, name.title())
+
     raw = str(identifier or "").strip()
     if not raw:
         return raw
     if raw.lower() == "vader":
         return "VADER"
 
-    normalized = raw.replace("-", "_").replace(":", "_")
+    normalized = raw.replace("-", "_").replace(":", "_").replace("/", "_")
+    normalized = normalized.strip("_ ").lower()
     normalized = normalized.replace("__run_", "__").replace("__run-", "__")
     if "__" in normalized:
         normalized = normalized.split("__", 1)[0]
+    normalized = re.sub(r"_+", "_", normalized)
 
     alias_map = {
         "deepseek_r1_32": "DeepSeek-R1 32B",
@@ -66,6 +97,36 @@ def _presentation_model_name(identifier: str) -> str:
     }
     if normalized in alias_map:
         return alias_map[normalized]
+
+    match = re.fullmatch(r"([a-z]+)(\d+)(?:_(.+))?", normalized)
+    if match:
+        family, version_digits, remainder = match.groups()
+        family_text = _family_label(family)
+        version_text = _normalize_version(version_digits)
+        if remainder:
+            remainder_tokens = [token for token in remainder.split("_") if token]
+            size_text = _extract_size(remainder_tokens[0]) if remainder_tokens else None
+            if size_text:
+                tail_tokens = [token.title() for token in remainder_tokens[1:]]
+                tail_text = f" {' '.join(tail_tokens)}" if tail_tokens else ""
+                return f"{family_text} {version_text} {size_text}{tail_text}".strip()
+            remainder_text = " ".join(token.title() for token in remainder_tokens)
+            return f"{family_text} {version_text} {remainder_text}".strip()
+        return f"{family_text} {version_text}".strip()
+
+    tokens = [token for token in normalized.split("_") if token]
+    if tokens:
+        head = tokens[0]
+        head_match = re.fullmatch(r"([a-z]+)(\d+)", head)
+        if head_match and len(tokens) >= 2:
+            family, version_digits = head_match.groups()
+            family_text = _family_label(family)
+            version_text = _normalize_version(version_digits)
+            size_text = _extract_size(tokens[1])
+            if size_text:
+                tail_tokens = [token.title() for token in tokens[2:]]
+                tail_text = f" {' '.join(tail_tokens)}" if tail_tokens else ""
+                return f"{family_text} {version_text} {size_text}{tail_text}".strip()
 
     fallback = normalized.replace("_", " ").strip()
     return fallback.title()
@@ -160,6 +221,54 @@ def _comparison_tab(comparison: str) -> str:
     return "other"
 
 
+def _select_top_comparisons_by_pareto(
+    comparison_means: pd.DataFrame,
+    *,
+    top_n: int,
+    metric_x: str,
+    metric_y: str,
+) -> list[str]:
+    if comparison_means.empty:
+        return []
+
+    work = comparison_means[["comparison", metric_x, metric_y]].copy()
+    work = work[work[metric_x].notna() & work[metric_y].notna()].reset_index(drop=True)
+    if work.empty:
+        return []
+
+    selected: list[str] = []
+    remaining = work.copy()
+    while not remaining.empty and len(selected) < top_n:
+        idx = remaining.index.to_list()
+        frontier: list[int] = []
+        for i in idx:
+            i_x = float(remaining.at[i, metric_x])
+            i_y = float(remaining.at[i, metric_y])
+            dominated = False
+            for j in idx:
+                if i == j:
+                    continue
+                j_x = float(remaining.at[j, metric_x])
+                j_y = float(remaining.at[j, metric_y])
+                if (j_x >= i_x and j_y >= i_y) and (j_x > i_x or j_y > i_y):
+                    dominated = True
+                    break
+            if not dominated:
+                frontier.append(i)
+
+        front_df = remaining.loc[frontier].copy()
+        span_x = float(front_df[metric_x].max() - front_df[metric_x].min())
+        span_y = float(front_df[metric_y].max() - front_df[metric_y].min())
+        front_df["_x_norm"] = 0.5 if span_x == 0 else (front_df[metric_x] - float(front_df[metric_x].min())) / span_x
+        front_df["_y_norm"] = 0.5 if span_y == 0 else (front_df[metric_y] - float(front_df[metric_y].min())) / span_y
+        front_df["_balance"] = front_df[["_x_norm", "_y_norm"]].min(axis=1)
+        front_df = front_df.sort_values(["_balance", metric_x, metric_y], ascending=[False, False, False], na_position="last")
+        selected.extend(front_df["comparison"].tolist())
+        remaining = remaining.drop(index=frontier)
+
+    return selected[:top_n]
+
+
 def _select_top_comparisons_for_figure(
     metrics_df: pd.DataFrame,
     scope_prefix: str,
@@ -167,14 +276,14 @@ def _select_top_comparisons_for_figure(
     top_n: int = 3,
     ranking_metric: str = "macro_f1",
 ) -> list[str]:
-    """Select comparisons for figure display: always include baselines, then top N LLMs by ranking metric.
+    """Select comparisons for figure display: always include baselines, then top N LLMs by Pareto ranking.
 
     Args:
         metrics_df: Full metrics dataframe.
         scope_prefix: Scope prefix (e.g., "questionnaire_vs_" or "human_reference_vs_").
         baseline_comparisons: List of baseline comparison names to always include.
         top_n: Number of top LLM comparisons to include.
-        ranking_metric: Metric to rank LLMs by ("accuracy", "cohen_kappa", or "macro_f1").
+        ranking_metric: Retained for API compatibility; TOP selection uses macro_f1 and cohen_kappa jointly.
 
     Returns:
         List of comparison names to display in figures.
@@ -193,15 +302,18 @@ def _select_top_comparisons_for_figure(
     baselines_present = [c for c in baseline_comparisons if c in all_comparisons]
     llm_comparisons = [c for c in all_comparisons if c not in baseline_set]
 
-    # Compute mean ranking metric per comparison
-    comparison_means = (
-        scoped_df.groupby("comparison", as_index=False)[[ranking_metric]]
-        .mean(numeric_only=True)
-        .sort_values(ranking_metric, ascending=False)
-    )
+    if "macro_f1" not in scoped_df.columns or "cohen_kappa" not in scoped_df.columns:
+        return baselines_present
+    comparison_means = scoped_df.groupby("comparison", as_index=False)[["macro_f1", "cohen_kappa"]].mean(numeric_only=True)
 
-    # Select top N LLMs
-    top_llms = comparison_means.head(top_n)["comparison"].tolist()
+    # Select top N LLMs by Pareto-front ranking on macro_f1 + cohen_kappa.
+    llm_means = comparison_means[comparison_means["comparison"].isin(llm_comparisons)].copy()
+    top_llms = _select_top_comparisons_by_pareto(
+        llm_means,
+        top_n=top_n,
+        metric_x="macro_f1",
+        metric_y="cohen_kappa",
+    )
 
     # Combine baselines + top LLMs
     selected = baselines_present + top_llms
@@ -1711,13 +1823,44 @@ def plot_questionnaire_extraction_item_scatter(
     m8_fields = [field for field in m8_fields_full if field in observed_fields]
     m9_fields = [field for field in m9_fields_full if field in observed_fields]
 
-    m8_marker_cycle = ["o", "8", "p", "h", "H"]
-    m9_marker_cycle = ["^", ">", "v", "<", "2"]
-    marker_map: dict[str, str] = {}
+    # Keep item families visually distinct:
+    # - NDE-C: mostly circular/polygonal markers.
+    # - LCI-R: mostly triangular markers.
+    marker_map: dict[str, Any] = {}
+    nde_c_markers: list[Any] = [
+        "o",
+        "8",
+        "h",
+        "H",
+        "p",
+        "D",
+        "d",
+        "X",
+        "P",
+        "s",
+    ]
+    lci_r_markers: list[Any] = [
+        "^",
+        "v",
+        "<",
+        ">",
+        "1",
+        "2",
+        "3",
+        "4",
+        (3, 0, 0),
+        (3, 0, 30),
+    ]
     for index, field in enumerate(m8_fields):
-        marker_map[field] = m8_marker_cycle[index % len(m8_marker_cycle)]
+        if index < len(nde_c_markers):
+            marker_map[field] = nde_c_markers[index]
+        else:
+            marker_map[field] = f"${index + 1}$"
     for index, field in enumerate(m9_fields):
-        marker_map[field] = m9_marker_cycle[index % len(m9_marker_cycle)]
+        if index < len(lci_r_markers):
+            marker_map[field] = lci_r_markers[index]
+        else:
+            marker_map[field] = f"$T{index + 1}$"
 
     fig, ax = plt.subplots(figsize=(13.4, 8.4))
 
@@ -1904,17 +2047,17 @@ def plot_questionnaire_extraction_item_scatter(
         for field in m8_fields
     ]
     nde_c_labels = [_field_display_label(field, study) for field in m8_fields]
-    nde_c_legend = ax.legend(
+    nde_c_legend = fig.legend(
         nde_c_handles,
         nde_c_labels,
-        title="NDE-C (Content of the Near-Death Experience Scale) items",
+        title="NDE-C items",
         frameon=False,
-        loc="center right",
-        bbox_to_anchor=(0.985, 0.24),
-        fontsize=12.5,
-        title_fontsize=14,
+        loc="center left",
+        bbox_to_anchor=(0.70, 0.55),
+        fontsize=12.0,
+        title_fontsize=13.5,
     )
-    ax.add_artist(nde_c_legend)
+    nde_c_legend.set_in_layout(False)
 
     nde_mcq_handles = [
         plt.Line2D(
@@ -1929,20 +2072,21 @@ def plot_questionnaire_extraction_item_scatter(
         for field in m9_fields
     ]
     nde_mcq_labels = [_field_display_label(field, study) for field in m9_fields]
-    nde_mcq_legend = ax.legend(
+    nde_mcq_legend = fig.legend(
         nde_mcq_handles,
         nde_mcq_labels,
-        title="LCI-R (Long-term Changes Inventory-Revised) items",
+        title="LCI-R items",
         frameon=False,
-        loc="upper right",
-        bbox_to_anchor=(0.985, 0.64),
+        loc="lower center",
+        bbox_to_anchor=(0.50, 0.125),
+        ncol=2,
         fontsize=12.5,
-        title_fontsize=14,
+        title_fontsize=14.5,
     )
-    ax.add_artist(nde_mcq_legend)
+    nde_mcq_legend.set_in_layout(False)
 
     fig.patch.set_facecolor("#FFFFFF")
-    fig.subplots_adjust(right=0.97, top=0.97)
+    fig.subplots_adjust(right=0.98, top=0.97, bottom=0.20)
     return _save_figure(fig, figure_path, dpi=dpi, export_pdf=export_pdf)
 
 
@@ -2234,7 +2378,7 @@ def plot_family_summary(
     baseline_comparisons: list[str] | None = None,
     top_n: int = 3,
 ) -> list[str]:
-    """Plot family summary figure, optionally filtered to baselines + top N LLMs by macro_f1.
+    """Plot family summary figure, optionally filtered to baselines + top N LLMs by macro_f1 and kappa.
 
     Args:
         family_df: Family-level summary dataframe.
@@ -2260,22 +2404,23 @@ def plot_family_summary(
 
     # Select comparisons for figure if filtering is enabled
     if scope_prefix and baseline_comparisons:
-        # Compute mean macro_f1 per comparison for ranking
-        comparison_means = (
-            plot_df.groupby("comparison", as_index=False)["macro_f1_mean"]
-            .mean(numeric_only=True)
-            .sort_values("macro_f1_mean", ascending=False)
-        )
+        # Compute ranking using Pareto fronts on macro F1 and Cohen kappa.
+        ranking_columns = ["macro_f1_mean", "cohen_kappa_mean"]
+        comparison_means = plot_df.groupby("comparison", as_index=False)[ranking_columns].mean(numeric_only=True)
         baseline_set = set(baseline_comparisons)
         baselines_present = [
             c
             for c in baseline_comparisons
             if c in comparison_means["comparison"].tolist()
         ]
-        llm_comparisons = [
-            c for c in comparison_means["comparison"].tolist() if c not in baseline_set
-        ]
-        top_llms = comparison_means.head(top_n)["comparison"].tolist()
+        llm_comparisons = [c for c in comparison_means["comparison"].tolist() if c not in baseline_set]
+        llm_means = comparison_means[comparison_means["comparison"].isin(llm_comparisons)].copy()
+        top_llms = _select_top_comparisons_by_pareto(
+            llm_means,
+            top_n=top_n,
+            metric_x="macro_f1_mean",
+            metric_y="cohen_kappa_mean",
+        )
         selected_comparisons = baselines_present + top_llms
         plot_df = plot_df[plot_df["comparison"].isin(selected_comparisons)]
 
@@ -3965,22 +4110,25 @@ def write_alignment_outputs(
     family_path = output_dir / ALIGNMENT_FAMILY_FILENAME
     long_df.to_csv(long_path, index=False)
     family_df.to_csv(family_path, index=False)
-    report_path = write_alignment_report(
-        study,
-        metrics_df,
-        summary,
-        output_dir,
-        figure_paths,
-        vader_summary=vader_summary,
-    )
-    questionnaire_report_path = write_questionnaire_alignment_report(
-        study, metrics_df, summary, output_dir, figure_paths
-    )
-    return {
-        "alignment_report_file": str(report_path),
-        "alignment_report_questionnaire_file": str(questionnaire_report_path),
+    has_human_scope = not _comparison_subset(metrics_df, "human_reference_vs_").empty
+    written: dict[str, str] = {
         "alignment_metrics_long_file": str(long_path),
         "alignment_family_metrics_file": str(family_path),
         "alignment_figures_dir": str(figures_dir),
         **{f"figure_{name}": path for name, path in figure_paths.items()},
     }
+    if has_human_scope:
+        report_path = write_alignment_report(
+            study,
+            metrics_df,
+            summary,
+            output_dir,
+            figure_paths,
+            vader_summary=vader_summary,
+        )
+        written["alignment_report_file"] = str(report_path)
+    questionnaire_report_path = write_questionnaire_alignment_report(
+        study, metrics_df, summary, output_dir, figure_paths
+    )
+    written["alignment_report_questionnaire_file"] = str(questionnaire_report_path)
+    return written

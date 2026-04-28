@@ -619,3 +619,144 @@ def test_evaluate_can_filter_to_selected_prompt_variant_and_custom_output_dir(
     assert llm_manifest["accepted"][0]["prompt_variant"] == "sentence_majority_v1"
     assert (custom_output_dir / "alignment_report.md").exists()
     assert not (tmp_path / "evaluation_outputs" / "evaluation_metrics.csv").exists()
+
+
+def test_evaluate_without_human_artifacts_skips_human_outputs(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    build_result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
+    assert build_result.returncode == 0, build_result.stderr
+
+    mapping_workbook = (
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    )
+    llm_root = tmp_path / "llm_outputs"
+    _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-alpha")
+
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    output_dir = tmp_path / "evaluation_outputs"
+    metrics = pd.read_csv(output_dir / "evaluation_metrics.csv")
+    summary = json.loads((output_dir / "evaluation_summary.json").read_text(encoding="utf-8"))
+
+    assert summary["human_evaluation"]["enabled"] is False
+    assert summary["coverage"]["n_valid_human_artifacts"] == 0
+    assert "alignment_report_file" not in json.loads(eval_result.stdout)
+
+    assert not (output_dir / "alignment_report.md").exists()
+    assert (output_dir / "alignment_report_questionnaire.md").exists()
+
+    assert not (output_dir / "human_reference_majority.csv").exists()
+    assert not (output_dir / "adjudication_summary.csv").exists()
+    assert not (output_dir / "human_agreement_pairwise.csv").exists()
+    assert not (output_dir / "human_agreement_summary.csv").exists()
+    assert not (output_dir / "human_artifacts_manifest.json").exists()
+
+    assert "questionnaire_vs_llm:exp_alpha__run-01" in set(metrics["comparison"])
+    assert not any(
+        str(value).startswith("human_reference_vs_")
+        for value in set(metrics["comparison"])
+    )
+
+
+def test_evaluate_vader_auto_generation_matches_run_llm_valid_sections_filter(
+    tmp_path: Path,
+) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    cleaned_df = pd.read_csv(survey_csv).head(3).copy()
+    cleaned_df.loc[:, "TO_DROP"] = False
+    cleaned_df.loc[:, "n_valid_sections"] = [3, 2, 1]
+    cleaned_df.loc[:, "n_valid_sections_cleaned"] = [3, 2, 1]
+    cleaned_df.to_csv(tmp_path / "preprocessing_outputs" / "cleaned_dataset.csv", index=False)
+
+    build_result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
+    assert build_result.returncode == 0, build_result.stderr
+
+    mapping_workbook = (
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    )
+    llm_root = tmp_path / "llm_outputs"
+    _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-alpha")
+
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    output_dir = tmp_path / "evaluation_outputs"
+    vader_summary = json.loads(
+        (output_dir / "vader_sentiment_sample" / "vader_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    vader_scores = pd.read_csv(
+        output_dir / "vader_sentiment_sample" / "vader_sentiment_scores.csv"
+    )
+
+    assert int(vader_summary["n_input"]) == 1
+    assert int(vader_summary["n_rows_after_filters"]) == 1
+    assert len(vader_scores) == 3
+
+
+def test_evaluate_accepts_directory_passed_to_llm_predictions(tmp_path: Path) -> None:
+    study_config = FIXTURES / "study_test.toml"
+    survey_csv = FIXTURES / "survey_fixture.csv"
+    paths_config = make_paths_config(tmp_path, survey_csv)
+
+    build_result = run_cli(
+        "build-annotation-sample",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+    )
+    assert build_result.returncode == 0, build_result.stderr
+
+    mapping_workbook = (
+        tmp_path / "annotation_outputs" / "nde_annotation_mapping_private.xlsx"
+    )
+    llm_root = tmp_path / "llm_outputs"
+    _prepare_llm_artifact(mapping_workbook, study_config, llm_root, "exp-alpha")
+
+    eval_result = run_cli(
+        "evaluate",
+        "--study-config",
+        str(study_config),
+        "--paths-config",
+        str(paths_config),
+        "--llm-predictions",
+        str(llm_root),
+        "--skip-vader",
+    )
+    assert eval_result.returncode == 0, eval_result.stderr
+
+    metrics = pd.read_csv(tmp_path / "evaluation_outputs" / "evaluation_metrics.csv")
+    assert "questionnaire_vs_llm:exp_alpha__run-01" in set(metrics["comparison"])

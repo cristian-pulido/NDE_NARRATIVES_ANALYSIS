@@ -140,12 +140,22 @@ def _make_progress_callback(label: str) -> Callable[[dict[str, Any]], None]:
         percent = (100.0 * min(max(current, 0), safe_total)) / safe_total
         bar = _render_progress_bar(current, safe_total)
         status = str(event.get("status", "running"))
+        stage = str(event.get("stage", "")).strip()
+        detail = str(event.get("detail", "")).strip()
         message = f"\r[{label}] [{bar}] {percent:6.2f}% ({current}/{safe_total}) status={status}"
+        if stage:
+            message += f" stage={stage}"
+        if detail:
+            message += f" · {detail}"
         print(message, end="", file=sys.stderr, flush=True)
         if current >= safe_total:
             print(file=sys.stderr, flush=True)
 
     return _callback
+
+
+def _progress_note(label: str, message: str) -> None:
+    print(f"[{label}] {message}", file=sys.stderr, flush=True)
 
 
 def _display_path(path: Path) -> str:
@@ -1274,35 +1284,32 @@ def cmd_build_annotation_sample(args: argparse.Namespace) -> int:
         source_path = resolve_survey_source_path(paths, None)
         source_df = read_tabular_file(source_path)
 
-    # -- completeness filter: 3 valid sections + all binary labels present --
-    n_valid_col = None
-    for c in ("n_valid_sections", "n_valid_sections_cleaned", "n_valid_sections_original"):
-        if c in source_df.columns:
-            n_valid_col = c
-            break
-
-    mask = pd.Series(True, index=source_df.index)
-    if n_valid_col is not None:
-        mask &= source_df[n_valid_col] == 3
-
-    has_bin = []
+    # Exclude rows with explicit questionnaire NA tokens (e.g., "Missing")
+    # for configured binary-label columns, but do not require non-empty values.
+    has_bin: list[str] = []
     for sec in ("experience", "aftereffects"):
         has_bin.extend(study.sections[sec].binary_labels.keys())
     has_bin = list(dict.fromkeys(has_bin))
 
-    for col in has_bin:
-        if col in source_df.columns:
-            mask &= source_df[col].notna() & (source_df[col].astype(str).str.strip() != "")
+    if has_bin:
+        mask = pd.Series(True, index=source_df.index)
+        for col in has_bin:
+            if col not in source_df.columns:
+                continue
+            try:
+                block_name = study.questionnaire_block_for_column(col)
+            except KeyError:
+                continue
+            na_values = {
+                str(value).strip().lower()
+                for value in study.questionnaire[block_name].get("na_values", [])
+            }
+            if not na_values:
+                continue
+            normalized = source_df[col].astype(str).str.strip().str.lower()
+            mask &= ~normalized.isin(na_values)
 
-    usable = source_df[mask].copy()
-    if len(usable) == 0:
-        raise ValueError(
-            "No rows satisfy completeness requirements "
-            "(3 valid sections + non-missing binary labels). "
-            "Check your source file and preprocessing state."
-        )
-    source_df = usable.reset_index(drop=True)
-    # --
+        source_df = source_df[mask].reset_index(drop=True)
 
     annotation_df, mapping_df, column_map_df, sampled_private_df, summary = (
         create_annotation_frames(
@@ -1515,6 +1522,7 @@ def cmd_benchmark_run(args: argparse.Namespace) -> int:
         max_rows=args.max_rows,
         resume=not bool(args.from_scratch),
         from_scratch=bool(args.from_scratch),
+        progress_callback=_make_progress_callback("benchmark-run"),
     )
     print(json.dumps(summary, indent=2))
     return 0
@@ -1577,6 +1585,13 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
     configured_datasets = (
         benchmark.datasets if benchmark.datasets else [benchmark.dataset]
     )
+    _progress_note(
+        "benchmark-all",
+        (
+            f"Starting benchmark-all for {len(configured_datasets)} dataset(s); "
+            f"mode={'from-scratch' if bool(args.from_scratch) else 'resume'}"
+        ),
+    )
     run_root_base = (
         Path(args.run_output_dir).resolve()
         if args.run_output_dir
@@ -1587,17 +1602,28 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
 
     per_dataset_rows: list[dict[str, object]] = []
     summary_paths: list[Path] = []
+    staged_datasets: list[dict[str, object]] = []
 
-    for dataset_cfg in configured_datasets:
+    # Stage 1: download and normalize every configured dataset first.
+    for dataset_index, dataset_cfg in enumerate(configured_datasets, start=1):
         dataset_benchmark = replace(benchmark, dataset=dataset_cfg)
         dataset_slug = (
             re.sub(r"[^a-z0-9]+", "_", dataset_cfg.dataset_name.lower()).strip("_")
             or "dataset"
         )
+        _progress_note(
+            "benchmark-all",
+            (
+                f"[download {dataset_index}/{len(configured_datasets)}] "
+                f"Dataset '{dataset_cfg.dataset_name}' (slug={dataset_slug})"
+            ),
+        )
 
-        # Determine resume flag
         resume_flag = not bool(args.from_scratch)
-
+        _progress_note(
+            "benchmark-all",
+            f"[{dataset_slug}] Download/normalize stage started",
+        )
         dataset_df, written, download_summary = download_and_prepare_benchmark_dataset(
             paths=paths,
             benchmark=dataset_benchmark,
@@ -1607,6 +1633,45 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
             if args.processed_dir
             else None,
             resume=resume_flag,
+        )
+        resumed_download = bool(download_summary.get("resumed", False))
+        _progress_note(
+            "benchmark-all",
+            (
+                f"[{dataset_slug}] Download/normalize completed: rows={len(dataset_df)} "
+                f"resumed={resumed_download}"
+            ),
+        )
+        staged_datasets.append(
+            {
+                "dataset_cfg": dataset_cfg,
+                "dataset_benchmark": dataset_benchmark,
+                "dataset_slug": dataset_slug,
+                "rows": int(len(dataset_df)),
+                "written": written,
+                "download_summary": download_summary,
+            }
+        )
+
+    # Stage 2: run predictions for each dataset already downloaded/normalized.
+    for run_index, staged in enumerate(staged_datasets, start=1):
+        dataset_cfg = staged["dataset_cfg"]
+        dataset_benchmark = staged["dataset_benchmark"]
+        dataset_slug = str(staged["dataset_slug"])
+        written = staged["written"]
+        download_summary = staged["download_summary"]
+        rows = int(staged["rows"])
+
+        _progress_note(
+            "benchmark-all",
+            (
+                f"[run {run_index}/{len(staged_datasets)}] "
+                f"Dataset '{dataset_cfg.dataset_name}' (slug={dataset_slug})"
+            ),
+        )
+        _progress_note(
+            "benchmark-all",
+            f"[{dataset_slug}] Benchmark run stage started",
         )
         run_summary = run_benchmark_pipeline(
             paths=paths,
@@ -1618,13 +1683,18 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
             max_rows=args.max_rows,
             resume=not bool(args.from_scratch),
             from_scratch=bool(args.from_scratch),
+            progress_callback=_make_progress_callback(f"benchmark:{dataset_slug}"),
         )
         summary_path = Path(run_summary["summary_file"])  # type: ignore[index]
         summary_paths.append(summary_path)
+        _progress_note(
+            "benchmark-all",
+            f"[{dataset_slug}] Benchmark run completed: {summary_path}",
+        )
         per_dataset_rows.append(
             {
                 "dataset_name": dataset_cfg.dataset_name,
-                "rows": int(len(dataset_df)),
+                "rows": rows,
                 "download": {
                     "raw_file": str(written.raw_file),
                     "processed_file": str(written.processed_file),
@@ -1650,6 +1720,7 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
         if configured_nde_metrics.exists()
         else None
     )
+    _progress_note("benchmark-all", "Report stage started")
     report_path = write_benchmark_report(
         summary_paths[0],
         output_dir=Path(args.report_output_dir).resolve()
@@ -1661,6 +1732,7 @@ def cmd_benchmark_all(args: argparse.Namespace) -> int:
         nde_metrics_path=nde_metrics_path,
         comparison_run_summaries=summary_paths[1:] if len(summary_paths) > 1 else None,
     )
+    _progress_note("benchmark-all", f"Report stage completed: {report_path}")
     report_output_dir = (
         Path(args.report_output_dir).resolve()
         if args.report_output_dir
@@ -1690,6 +1762,23 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
     study = load_study_config(args.study_config)
     paths = load_paths_config(args.paths_config)
+
+    llm_predictions_path: Path | None = None
+    llm_results_dir: Path | None = None
+    if args.llm_predictions:
+        resolved_llm_predictions = Path(args.llm_predictions).resolve()
+        if resolved_llm_predictions.is_dir():
+            if args.llm_results_dir:
+                raise ValueError(
+                    "--llm-predictions points to a directory while --llm-results-dir is also set. "
+                    "Provide only one source for LLM artifact discovery."
+                )
+            llm_results_dir = resolved_llm_predictions
+        else:
+            llm_predictions_path = resolved_llm_predictions
+    if args.llm_results_dir:
+        llm_results_dir = Path(args.llm_results_dir).resolve()
+
     metrics_df, summary, written = evaluate_outputs(
         study=study,
         paths=paths,
@@ -1699,12 +1788,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         human_annotations_dir=Path(args.human_annotations_dir).resolve()
         if args.human_annotations_dir
         else None,
-        llm_predictions_path=Path(args.llm_predictions).resolve()
-        if args.llm_predictions
-        else None,
-        llm_results_dir=Path(args.llm_results_dir).resolve()
-        if args.llm_results_dir
-        else None,
+        llm_predictions_path=llm_predictions_path,
+        llm_results_dir=llm_results_dir,
         annotator_ids=list(args.annotator_id) if args.annotator_id else None,
         experiment_ids=list(args.experiment_id) if args.experiment_id else None,
         prompt_variants=list(args.prompt_variant) if args.prompt_variant else None,
