@@ -16,26 +16,16 @@ The current study design assumes complete narratives across all three sections.
 
 ## Measures Linked to the Narratives
 
-- `M8` / NDE-C: phenomenological characteristics of the NDE
-- `M9` / NDE-MCQ: moral and cognitive changes after the experience
+- `NDE-C`: phenomenological characteristics of the NDE
+- `LCI-R`: long-term changes after the experience
 
 ## Structured Outputs
 
 The coding framework extracts:
 
 - Tone for each section: `positive`, `negative`, or `mixed`
-- Five M8-related elements from the `experience` section:
-  - `m8_out_of_body`
-  - `m8_bright_light`
-  - `m8_peace`
-  - `m8_time_distortion`
-  - `m8_presence`
-- Five M9-related elements from the `aftereffects` section:
-  - `m9_moral_rules`
-  - `m9_long_term_thinking`
-  - `m9_consider_others`
-  - `m9_help_others`
-  - `m9_forgiveness`
+- Ten NDE-C elements from the `experience` section.
+- Ten LCI-R elements from the `aftereffects` section.
 
 All extracted elements are binary: `yes` or `no`.
 
@@ -51,15 +41,16 @@ This makes it possible to analyze trajectories such as:
 
 ## Questionnaire Binarization Rules
 
-### M8
+### NDE-C
 
-- `Medium`, `Intensely`, `Extremely` -> `yes`
-- `Not at all`, `Slightly` -> `no`
+- `Medium`, `Intensively`, `Extremely` -> `yes`
+- `Not at all - absence`, `Slightly` -> `no`
 
-### M9
+### LCI-R
 
-- `Increased`, `Strongly increased` -> `yes`
-- `Strongly diminished`, `Decreased`, `Not changed` -> `no`
+- Any explicit change (`Increased`, `Strongly increased`, `Decreased`, `Strongly diminished`) -> `yes`
+- `Not changed` -> `no`
+- `Missing` or blank -> excluded (`NA`)
 
 ## Multi-Annotator Design
 

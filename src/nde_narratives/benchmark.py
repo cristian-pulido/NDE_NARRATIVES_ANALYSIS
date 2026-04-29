@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import matplotlib
 
@@ -674,6 +674,7 @@ def download_and_prepare_amazon_benchmark(
     max_rows: int | None = None,
     output_raw_dir: Path | None = None,
     output_processed_dir: Path | None = None,
+    resume: bool = True,
 ) -> tuple[pd.DataFrame, BenchmarkArtifactPaths, dict[str, Any]]:
     try:
         from datasets import load_dataset
@@ -688,6 +689,55 @@ def download_and_prepare_amazon_benchmark(
     effective_max_rows = int(max_rows if max_rows is not None else dataset_cfg.max_rows)
     if effective_max_rows < 1:
         raise ValueError("max_rows must be >= 1")
+
+    # Determine output directories
+    raw_dir = _ensure_dir(
+        Path(
+            output_raw_dir
+            or paths.benchmark_raw_dir
+            or (paths.evaluation_output_dir / "benchmark_raw")
+        )
+    )
+    processed_dir = _ensure_dir(
+        Path(
+            output_processed_dir
+            or paths.benchmark_processed_dir
+            or (paths.evaluation_output_dir / "benchmark_processed")
+        )
+    )
+
+    # Define expected output file paths
+    raw_file = raw_dir / "amazon_reviews_multi_raw.jsonl"
+    processed_file = processed_dir / "amazon_reviews_multi_normalized.csv"
+    manifest_file = processed_dir / "amazon_reviews_multi_manifest.json"
+
+    # CHECKPOINT: If resume is enabled and processed data already exists, load and return
+    if resume and processed_file.exists() and manifest_file.exists():
+        try:
+            frame = pd.read_csv(processed_file)
+            manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            required_cols = ("record_id", "text", "gold_label")
+            if all(col in frame.columns for col in required_cols):
+                summary = {
+                    "dataset_name": manifest.get("dataset_name", dataset_cfg.dataset_name),
+                    "dataset_config": manifest.get("dataset_config", dataset_cfg.dataset_config or ""),
+                    "split": manifest.get("split", dataset_cfg.split),
+                    "text_column": manifest.get("text_column", dataset_cfg.text_column),
+                    "label_column": manifest.get("label_column", dataset_cfg.label_column),
+                    "label_mapping_description": manifest.get("label_mapping_description", "Loaded from existing manifest"),
+                    "rows_total_after_cleaning": int(len(frame)),
+                    "rows_written": int(len(frame)),
+                    "class_distribution": manifest.get("class_distribution", {}),
+                    "generated_at": manifest.get("generated_at", _now_utc_iso()),
+                    "raw_file": str(raw_file),
+                    "processed_file": str(processed_file),
+                    "resumed": True,
+                }
+                return frame, BenchmarkArtifactPaths(raw_file, processed_file, manifest_file), summary
+        except Exception:
+            pass  # Fall through to regenerate
+
+    # Normal download path
 
     def _load(primary_name: str, primary_config: str | None, primary_split: str) -> Any:
         if primary_config in {None, "", "none", "null"}:
@@ -832,6 +882,7 @@ def download_and_prepare_imdb_benchmark(
     max_rows: int | None = None,
     output_raw_dir: Path | None = None,
     output_processed_dir: Path | None = None,
+    resume: bool = True,
 ) -> tuple[pd.DataFrame, BenchmarkArtifactPaths, dict[str, Any]]:
     try:
         from datasets import load_dataset
@@ -846,6 +897,55 @@ def download_and_prepare_imdb_benchmark(
     effective_max_rows = int(max_rows if max_rows is not None else dataset_cfg.max_rows)
     if effective_max_rows < 1:
         raise ValueError("max_rows must be >= 1")
+
+    # Determine output directories
+    raw_dir = _ensure_dir(
+        Path(
+            output_raw_dir
+            or paths.benchmark_raw_dir
+            or (paths.evaluation_output_dir / "benchmark_raw")
+        )
+    )
+    processed_dir = _ensure_dir(
+        Path(
+            output_processed_dir
+            or paths.benchmark_processed_dir
+            or (paths.evaluation_output_dir / "benchmark_processed")
+        )
+    )
+
+    # Define expected output file paths
+    raw_file = raw_dir / "imdb_raw.jsonl"
+    processed_file = processed_dir / "imdb_normalized.csv"
+    manifest_file = processed_dir / "imdb_manifest.json"
+
+    # CHECKPOINT: If resume is enabled and processed data already exists, load and return
+    if resume and processed_file.exists() and manifest_file.exists():
+        try:
+            frame = pd.read_csv(processed_file)
+            manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            required_cols = ("record_id", "text", "gold_label")
+            if all(col in frame.columns for col in required_cols):
+                summary = {
+                    "dataset_name": manifest.get("dataset_name", dataset_cfg.dataset_name),
+                    "dataset_config": manifest.get("dataset_config", dataset_cfg.dataset_config or ""),
+                    "split": manifest.get("split", dataset_cfg.split),
+                    "text_column": manifest.get("text_column", dataset_cfg.text_column),
+                    "label_column": manifest.get("label_column", dataset_cfg.label_column),
+                    "label_mapping_description": manifest.get("label_mapping_description", "Loaded from existing manifest"),
+                    "rows_total_after_cleaning": int(len(frame)),
+                    "rows_written": int(len(frame)),
+                    "class_distribution": manifest.get("class_distribution", {}),
+                    "generated_at": manifest.get("generated_at", _now_utc_iso()),
+                    "raw_file": str(raw_file),
+                    "processed_file": str(processed_file),
+                    "resumed": True,
+                }
+                return frame, BenchmarkArtifactPaths(raw_file, processed_file, manifest_file), summary
+        except Exception:
+            pass  # Fall through to regenerate
+
+    # Normal download path
 
     def _load(primary_name: str, primary_config: str | None, primary_split: str) -> Any:
         if primary_config in {None, "", "none", "null"}:
@@ -945,6 +1045,7 @@ def download_and_prepare_benchmark_dataset(
     max_rows: int | None = None,
     output_raw_dir: Path | None = None,
     output_processed_dir: Path | None = None,
+    resume: bool = True,
 ) -> tuple[pd.DataFrame, BenchmarkArtifactPaths, dict[str, Any]]:
     dataset_name = str(benchmark.dataset.dataset_name).lower()
     if "imdb" in dataset_name:
@@ -954,7 +1055,16 @@ def download_and_prepare_benchmark_dataset(
             max_rows=max_rows,
             output_raw_dir=output_raw_dir,
             output_processed_dir=output_processed_dir,
+            resume=resume,
         )
+    return download_and_prepare_amazon_benchmark(
+        paths=paths,
+        benchmark=benchmark,
+        max_rows=max_rows,
+        output_raw_dir=output_raw_dir,
+        output_processed_dir=output_processed_dir,
+        resume=resume,
+    )
     return download_and_prepare_amazon_benchmark(
         paths=paths,
         benchmark=benchmark,
@@ -1344,6 +1454,7 @@ def run_benchmark_pipeline(
     max_rows: int | None = None,
     resume: bool = True,
     from_scratch: bool = False,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     if from_scratch:
         resume = True
@@ -1373,7 +1484,7 @@ def run_benchmark_pipeline(
         }
     else:
         frame, _, download_summary = download_and_prepare_amazon_benchmark(
-            paths, benchmark, max_rows=max_rows
+            paths, benchmark, max_rows=max_rows, resume=resume
         )
         dataset_metadata = {
             "source_kind": "downloaded",
@@ -1415,6 +1526,53 @@ def run_benchmark_pipeline(
     predictions_dir = _ensure_dir(artifact_dir / "predictions")
     metrics_dir = _ensure_dir(artifact_dir / "metrics")
 
+    # Determine enabled experiments early
+    enabled_experiments = [
+        experiment for experiment in benchmark.experiments if experiment.enabled
+    ]
+
+    total_steps = max(1, 1 + len(enabled_experiments))
+    progress_current = 0
+
+    def _emit_progress(status: str, stage: str, **extra: Any) -> None:
+        if progress_callback is None:
+            return
+        payload: dict[str, Any] = {
+            "status": status,
+            "stage": stage,
+            "current": int(progress_current),
+            "total": int(total_steps),
+        }
+        payload.update(extra)
+        progress_callback(payload)
+
+    # Write initial run_summary.json early (status: running) to allow resume detection
+    summary_path = artifact_dir / "run_summary.json"
+    if not summary_path.exists():
+        initial_summary = {
+            "run_id": datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+            "generated_at": _now_utc_iso(),
+            "resume_enabled": bool(resume),
+            "from_scratch": bool(from_scratch),
+            "status": "running",
+            "dataset_rows": int(len(frame)),
+            "prompt_path": str(prompt_path),
+            "prompt_variant": prompt_variant,
+            "labels": list(active_labels),
+            "runtime": benchmark.runtime.to_dict(),
+            "dataset": dataset_metadata,
+            "experiments": [experiment.to_dict() for experiment in enabled_experiments],
+            "llm_progress": [],
+            "artifacts": {
+                "artifact_dir": str(artifact_dir),
+                "predictions_dir": str(predictions_dir),
+                "metrics_file": str(metrics_dir / "benchmark_metrics.csv"),
+                "confusion_file": str(metrics_dir / "benchmark_confusion.csv"),
+                "per_label_file": str(metrics_dir / "benchmark_per_label.csv"),
+            },
+        }
+        summary_path.write_text(json.dumps(initial_summary, indent=2), encoding="utf-8")
+
     vader_predictions_path = predictions_dir / "vader_predictions.csv"
     if resume and vader_predictions_path.exists() and not from_scratch:
         vader_df = pd.read_csv(vader_predictions_path)
@@ -1425,6 +1583,9 @@ def run_benchmark_pipeline(
     model_metrics_rows: list[dict[str, Any]] = []
     confusion_rows: list[dict[str, Any]] = []
     per_label_rows: list[dict[str, Any]] = []
+    llm_progress: list[dict[str, Any]] = []
+
+    _emit_progress("running", "vader", detail="Computing VADER baseline")
 
     vader_metrics = compute_metrics(
         vader_df["gold_label"].tolist(),
@@ -1447,12 +1608,18 @@ def run_benchmark_pipeline(
         per_label_rows.append(
             {"source": "vader", "artifact_id": "vader", "label": label, **details}
         )
+    progress_current += 1
+    _emit_progress("running", "vader", detail="VADER baseline completed")
 
-    enabled_experiments = [
-        experiment for experiment in benchmark.experiments if experiment.enabled
-    ]
-    llm_progress: list[dict[str, Any]] = []
+    # enabled_experiments and llm_progress are already defined above
     for experiment in enabled_experiments:
+        _emit_progress(
+            "running",
+            "llm",
+            experiment_id=experiment.experiment_id,
+            model=experiment.model,
+            detail=f"Running experiment {experiment.experiment_id}",
+        )
         artifact_id = (
             f"{experiment.experiment_id}__{experiment.run_id}"
             if experiment.run_id
@@ -1512,6 +1679,17 @@ def run_benchmark_pipeline(
             per_label_rows.append(
                 {"source": "llm", "artifact_id": artifact_id, "label": label, **details}
             )
+        progress_current += 1
+        _emit_progress(
+            "running",
+            "llm",
+            experiment_id=experiment.experiment_id,
+            artifact_id=artifact_id,
+            detail=(
+                f"Completed {experiment.experiment_id} "
+                f"(reused={int(n_reused)}, new={int(n_new)})"
+            ),
+        )
 
     metrics_df = pd.DataFrame(model_metrics_rows)
     confusion_df = pd.DataFrame(confusion_rows)
@@ -1547,6 +1725,9 @@ def run_benchmark_pipeline(
     }
     summary_path = artifact_dir / "run_summary.json"
     summary_path.write_text(json.dumps(run_summary, indent=2), encoding="utf-8")
+
+    progress_current = total_steps
+    _emit_progress("completed", "benchmark", detail="Benchmark pipeline completed")
 
     return {
         "rows": int(len(frame)),

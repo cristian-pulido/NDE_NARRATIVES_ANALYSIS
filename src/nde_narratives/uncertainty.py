@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from .config import StudyConfig
+
 
 def _parse_scope_model(comparison: str) -> tuple[str, str | None]:
     if ":" in comparison:
@@ -18,13 +20,14 @@ def _parse_scope_model(comparison: str) -> tuple[str, str | None]:
     return comparison, None
 
 
-def _field_family(field: str) -> str:
+def _field_family(field: str, study: StudyConfig | None = None) -> str:
     if field.endswith("_tone"):
         return "tone"
-    if field.startswith("m8_"):
-        return "m8"
-    if field.startswith("m9_"):
-        return "m9"
+    if study is not None:
+        if field in study.sections["experience"].binary_labels:
+            return "m8"
+        if field in study.sections["aftereffects"].binary_labels:
+            return "m9"
     return "other"
 
 
@@ -32,7 +35,7 @@ def _family_label(family: str) -> str:
     labels = {
         "tone": "Tone",
         "m8": "NDE-C",
-        "m9": "NDE-MCQ",
+        "m9": "LCI-R",
         "other": "Other",
     }
     return labels.get(family, family)
@@ -452,6 +455,7 @@ def _write_uncertainty_report(
 def run_uncertainty_analysis(
     *,
     input_dir: Path,
+    study: StudyConfig | None = None,
     output_dir: Path | None = None,
     n_bootstrap: int = 5000,
     confidence_level: float = 0.95,
@@ -491,7 +495,9 @@ def run_uncertainty_analysis(
     prepared[["scope", "model_key"]] = prepared["comparison"].apply(
         lambda value: pd.Series(_parse_scope_model(str(value)))
     )
-    prepared["family"] = prepared["field"].map(lambda value: _field_family(str(value)))
+    prepared["family"] = prepared["field"].map(
+        lambda value: _field_family(str(value), study)
+    )
     prepared["cohen_kappa"] = prepared["cohen_kappa"].map(_safe_float)
     prepared["macro_f1"] = prepared["macro_f1"].map(_safe_float)
     prepared = prepared[

@@ -1,6 +1,6 @@
 ﻿# Output Contract
 
-The repository normalizes human annotations, LLM outputs, questionnaire-derived labels, and VADER tone outputs to comparable field names where appropriate.
+The repository normalizes human annotations, LLM outputs, questionnaire-derived labels, and VADER tone outputs to the current shared schema.
 
 ## Translation Artifact Contract
 
@@ -84,21 +84,49 @@ Prompt repository policy:
 - `context_tone`
 - `experience_tone`
 - `aftereffects_tone`
-- `m8_out_of_body`
-- `m8_bright_light`
-- `m8_peace`
-- `m8_time_distortion`
-- `m8_presence`
-- `m9_moral_rules`
-- `m9_long_term_thinking`
-- `m9_consider_others`
-- `m9_help_others`
-- `m9_forgiveness`
+- `outside_of_body_experience`
+- `feeling_bright_light`
+- `feeling_awareness`
+- `presence_encounter`
+- `saw_relived_past_events`
+- `time_perception_altered`
+- `border_point_of_no_return`
+- `non_existence_feeling`
+- `feeling_peace_wellbeing`
+- `saw_entered_gateway`
+- `fear_of_death`
+- `inner_meaning_in_my_life`
+- `compassion_toward_others`
+- `spiritual_feelings`
+- `desire_to_help_others`
+- `personal_vulnerability`
+- `interest_in_material_goods`
+- `interest_in_religion`
+- `understanding_myself`
+- `social_justice_issues`
 
 ## Allowed Values
 
 - Tone fields: `positive`, `negative`, `mixed`, `neutral`
 - Binary fields: `yes`, `no`
+
+## Questionnaire Binarization Contract
+
+Questionnaire-derived binary labels are normalized to `yes` / `no` / `NA` before evaluation.
+
+### NDE-C mapping
+
+- uses the configured `yes_values` and `no_values` per item from the study questionnaire config
+- matching is case-insensitive and whitespace-normalized
+- blank values and `Missing` are mapped to `NA`
+- configured `na_values` are also mapped to `NA` (case-insensitive)
+
+### LCI-R mapping
+
+- explicit `increased` or `decreased` responses map to `yes` (change present)
+- explicit `not changed` responses map to `no` (no change)
+- `Missing` or blank responses map to `NA`
+- `NA` cells are excluded from that item's metric denominator
 
 ## Human Annotation Artifact Contract
 
@@ -185,9 +213,7 @@ Supported artifact formats remain:
 - `.xlsx`
 - `.xls`
 
-For JSONL, records may be provided in one of these contracts:
-
-1. **Nested section contract (current)**
+For JSONL, records must follow the nested section contract:
 
 ```json
 {
@@ -201,31 +227,34 @@ For JSONL, records may be provided in one of these contracts:
     "experience": {
       "tone": "positive",
       "evidence_segments": ["short verbatim span"],
-      "m8_out_of_body": "no",
-      "m8_bright_light": "yes",
-      "m8_peace": "yes",
-      "m8_time_distortion": "no",
-      "m8_presence": "no"
+      "outside_of_body_experience": "no",
+      "feeling_bright_light": "yes",
+      "feeling_awareness": "yes",
+      "presence_encounter": "no",
+      "saw_relived_past_events": "no",
+      "time_perception_altered": "no",
+      "border_point_of_no_return": "no",
+      "non_existence_feeling": "no",
+      "feeling_peace_wellbeing": "yes",
+      "saw_entered_gateway": "no"
     },
     "aftereffects": {
       "tone": "mixed",
       "evidence_segments": ["short verbatim span"],
-      "m9_moral_rules": "yes",
-      "m9_long_term_thinking": "yes",
-      "m9_consider_others": "yes",
-      "m9_help_others": "yes",
-      "m9_forgiveness": "no"
+      "fear_of_death": "yes",
+      "inner_meaning_in_my_life": "yes",
+      "compassion_toward_others": "yes",
+      "spiritual_feelings": "yes",
+      "desire_to_help_others": "yes",
+      "personal_vulnerability": "yes",
+      "interest_in_material_goods": "no",
+      "interest_in_religion": "yes",
+      "understanding_myself": "yes",
+      "social_justice_issues": "no"
     }
   }
 }
 ```
-
-2. **Legacy flat contract (still accepted by evaluation loader)**
-
-- top-level/shared field keys directly in each record
-- or a top-level `prediction` object containing shared field keys
-
-In both cases, `nde evaluate` normalizes to shared internal columns before metrics are computed.
 
 ### Context-only extraction field (LLM output)
 
@@ -320,11 +349,10 @@ In addition to the standard alignment tables and figures, `nde evaluate` now emi
 - qualitative contradiction evidence uses only selected LLM outputs
 - selected LLMs are the top 3 `questionnaire_vs_llm:*` comparisons ranked by `macro_f1` on `experience_tone`
 
-### Evidence segments compatibility
+### Evidence segments policy
 
 - for nested JSONL outputs, section-level `evidence_segments` are retained for qualitative analysis
-- legacy flat outputs and tabular prediction files remain accepted for metrics; they may not include usable evidence segments
-- three-label historical artifacts remain valid for evaluation as long as labels fit the configured study label set
+- tabular prediction files may not include usable evidence segments for qualitative contradiction examples
 
 `nde evaluate` aligns comparison sources to the participant codes present in the majority human reference.
 
@@ -335,11 +363,14 @@ In addition to the standard alignment tables and figures, `nde evaluate` now emi
 - extra rows in automated sources are ignored naturally by field-level overlap
 - unresolved human majority cells reduce field-level `n` instead of aborting evaluation
 
+Primary evaluation uses variable-wise sample size (`n`) per item/comparison pair after per-field missingness and unresolved-majority exclusions. Complete-case evaluation is reported separately as a sensitivity analysis.
+
 ## Evaluation Report Outputs
 
 `nde evaluate` writes:
 
 - `evaluation_metrics.csv`
+- `evaluation_metrics_complete_case.csv`
 - `evaluation_summary.json`
 - `human_reference_majority.csv`
 - `adjudication_summary.csv`

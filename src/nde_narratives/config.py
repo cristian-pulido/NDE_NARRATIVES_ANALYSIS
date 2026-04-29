@@ -100,9 +100,16 @@ class StudyConfig:
 
     def questionnaire_column_map(self) -> dict[str, str]:
         out: dict[str, str] = {}
-        for block_name in ("m8", "m9"):
-            out.update(self.questionnaire[block_name]["columns"])
+        for block in self.questionnaire.values():
+            out.update(dict(block.get("columns", {})))
         return out
+
+    def questionnaire_block_for_column(self, column: str) -> str:
+        for block_name, block in self.questionnaire.items():
+            columns = dict(block.get("columns", {}))
+            if column in columns:
+                return block_name
+        raise KeyError(f"Questionnaire block not found for column: {column}")
 
     def placeholder_questionnaire_columns(self) -> dict[str, str]:
         return {
@@ -456,18 +463,14 @@ def load_study_config(path: str | Path | None = None) -> StudyConfig:
             binary_labels=dict(section_raw.get("binary_labels", {})),
         )
 
-    questionnaire = {
-        "m8": {
-            "yes_values": list(raw["questionnaire"]["m8"]["yes_values"]),
-            "no_values": list(raw["questionnaire"]["m8"]["no_values"]),
-            "columns": dict(raw["questionnaire"]["m8"]["columns"]),
-        },
-        "m9": {
-            "yes_values": list(raw["questionnaire"]["m9"]["yes_values"]),
-            "no_values": list(raw["questionnaire"]["m9"]["no_values"]),
-            "columns": dict(raw["questionnaire"]["m9"]["columns"]),
-        },
-    }
+    questionnaire: dict[str, dict[str, Any]] = {}
+    for block_name, block_raw in raw["questionnaire"].items():
+        questionnaire[str(block_name)] = {
+            "yes_values": list(block_raw["yes_values"]),
+            "no_values": list(block_raw["no_values"]),
+            "na_values": list(block_raw.get("na_values", [])),
+            "columns": dict(block_raw["columns"]),
+        }
 
     return StudyConfig(
         path=resolved,

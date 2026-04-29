@@ -11,11 +11,16 @@
       "required": [
         "tone",
         "evidence_segments",
-        "m9_moral_rules",
-        "m9_long_term_thinking",
-        "m9_consider_others",
-        "m9_help_others",
-        "m9_forgiveness"
+        "fear_of_death",
+        "inner_meaning_in_my_life",
+        "compassion_toward_others",
+        "spiritual_feelings",
+        "desire_to_help_others",
+        "personal_vulnerability",
+        "interest_in_material_goods",
+        "interest_in_religion",
+        "understanding_myself",
+        "social_justice_issues"
       ],
       "properties": {
         "tone": {
@@ -30,23 +35,43 @@
           "minItems": 1,
           "maxItems": 3
         },
-        "m9_moral_rules": {
+        "fear_of_death": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m9_long_term_thinking": {
+        "inner_meaning_in_my_life": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m9_consider_others": {
+        "compassion_toward_others": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m9_help_others": {
+        "spiritual_feelings": {
           "type": "string",
           "enum": ["yes", "no"]
         },
-        "m9_forgiveness": {
+        "desire_to_help_others": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "personal_vulnerability": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "interest_in_material_goods": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "interest_in_religion": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "understanding_myself": {
+          "type": "string",
+          "enum": ["yes", "no"]
+        },
+        "social_justice_issues": {
           "type": "string",
           "enum": ["yes", "no"]
         }

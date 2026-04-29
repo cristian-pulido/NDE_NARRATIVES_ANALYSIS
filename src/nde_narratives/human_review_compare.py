@@ -35,11 +35,26 @@ HUMAN_TEXT = {
 }
 
 HUMAN_EXTRACTED_MAP = {
-    "out_of_body": "m8_out_of_body",
-    "bright_light": "m8_bright_light",
-    "time_perception": "m8_time_distortion",
-    "presence": "m8_presence",
-    "moral_principles": "m9_moral_rules",
+    "out_of_body": "outside_of_body_experience",
+    "bright_light": "feeling_bright_light",
+    "awareness": "feeling_awareness",
+    "presence": "presence_encounter",
+    "relived_past_events": "saw_relived_past_events",
+    "time_perception": "time_perception_altered",
+    "point_of_no_return": "border_point_of_no_return",
+    "non_existence": "non_existence_feeling",
+    "peace_wellbeing": "feeling_peace_wellbeing",
+    "entered_gateway": "saw_entered_gateway",
+    "fear_of_death": "fear_of_death",
+    "inner_meaning": "inner_meaning_in_my_life",
+    "compassion": "compassion_toward_others",
+    "spiritual_feelings": "spiritual_feelings",
+    "help_others": "desire_to_help_others",
+    "personal_vulnerability": "personal_vulnerability",
+    "material_goods": "interest_in_material_goods",
+    "religion": "interest_in_religion",
+    "understanding_myself": "understanding_myself",
+    "social_justice": "social_justice_issues",
 }
 
 SEGMENT_LABELS = ["context", "experience", "aftereffects", "deleted"]
@@ -73,7 +88,7 @@ def _family_label(family: object) -> str:
     mapping = {
         "tone": "Experience Tone",
         "nde_c": "NDE-C",
-        "nde_mcq": "NDE-MCQ",
+        "lci_r": "LCI-R",
         "seg_unit": "SEG-UNIT",
     }
     return mapping.get(str(family), str(family))
@@ -323,16 +338,20 @@ def _map_questionnaire_binary(
     value: object,
     yes_values: list[str],
     no_values: list[str],
+    na_values: list[str],
 ) -> str | None:
     if _is_blank(value):
         return None
     value_norm = _collapse_spaces(str(value)).lower()
     yes_norm = {_collapse_spaces(v).lower() for v in yes_values}
     no_norm = {_collapse_spaces(v).lower() for v in no_values}
+    na_norm = {_collapse_spaces(v).lower() for v in na_values}
     if value_norm in yes_norm:
         return "yes"
     if value_norm in no_norm:
         return "no"
+    if value_norm in na_norm:
+        return None
     return None
 
 
@@ -353,9 +372,24 @@ def parse_human_md(path: Path) -> pd.DataFrame:
         "aftereffects tone (3)": "aftereffects_tone_3",
         "out-of-body sensation": "out_of_body",
         "bright light": "bright_light",
+        "heightened awareness": "awareness",
         "altered time perception": "time_perception",
         "encounter with a presence": "presence",
-        "stronger moral principles": "moral_principles",
+        "relived past events": "relived_past_events",
+        "border or point of no return": "point_of_no_return",
+        "feeling of non-existence": "non_existence",
+        "peace or wellbeing": "peace_wellbeing",
+        "entered a gateway": "entered_gateway",
+        "fear of death": "fear_of_death",
+        "inner meaning in my life": "inner_meaning",
+        "compassion toward others": "compassion",
+        "spiritual feelings": "spiritual_feelings",
+        "desire to help others": "help_others",
+        "personal vulnerability": "personal_vulnerability",
+        "interest in material goods": "material_goods",
+        "interest in religion": "religion",
+        "understanding myself": "understanding_myself",
+        "social justice issues": "social_justice",
     }
 
     records: list[dict[str, Any]] = []
@@ -421,6 +455,9 @@ def parse_human_md(path: Path) -> pd.DataFrame:
             df[column] = None
         df[column] = df[column].map(_normalize_yes_no)
 
+    for human_column, internal_column in HUMAN_EXTRACTED_MAP.items():
+        df[internal_column] = df[human_column]
+
     return df
 
 
@@ -431,7 +468,7 @@ def _first_non_blank(values: pd.Series) -> Any:
     return None
 
 
-def _load_llm_predictions(prediction_path: Path) -> pd.DataFrame:
+def _load_llm_predictions(prediction_path: Path, study: StudyConfig) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     with prediction_path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -453,20 +490,13 @@ def _load_llm_predictions(prediction_path: Path) -> pd.DataFrame:
                 "aftereffects_text": " ".join(
                     (payload.get("aftereffects") or {}).get("evidence_segments") or []
                 ),
-                "m8_out_of_body": (payload.get("experience") or {}).get(
-                    "m8_out_of_body"
-                ),
-                "m8_bright_light": (payload.get("experience") or {}).get(
-                    "m8_bright_light"
-                ),
-                "m8_time_distortion": (payload.get("experience") or {}).get(
-                    "m8_time_distortion"
-                ),
-                "m8_presence": (payload.get("experience") or {}).get("m8_presence"),
-                "m9_moral_rules": (payload.get("aftereffects") or {}).get(
-                    "m9_moral_rules"
-                ),
             }
+            experience_payload = payload.get("experience") or {}
+            aftereffects_payload = payload.get("aftereffects") or {}
+            for column in study.sections["experience"].binary_labels:
+                row[column] = experience_payload.get(column)
+            for column in study.sections["aftereffects"].binary_labels:
+                row[column] = aftereffects_payload.get(column)
             rows.append(row)
     df = pd.DataFrame(rows)
     if df.empty:
@@ -518,17 +548,17 @@ def discover_default_llm_artifacts(llm_results_dir: Path) -> list[LLMArtifact]:
     return artifacts
 
 
-def _compute_section_validity(df: pd.DataFrame, prefix: str) -> pd.Series:
+def _compute_section_validity(df: pd.DataFrame, prefix: str, study: StudyConfig) -> pd.Series:
     needed = {
         "context": [f"{prefix}context_tone"],
         "experience": [
             f"{prefix}experience_tone",
-            f"{prefix}m8_out_of_body",
-            f"{prefix}m8_bright_light",
-            f"{prefix}m8_time_distortion",
-            f"{prefix}m8_presence",
+            *[f"{prefix}{field}" for field in study.sections["experience"].binary_labels],
         ],
-        "aftereffects": [f"{prefix}aftereffects_tone", f"{prefix}m9_moral_rules"],
+        "aftereffects": [
+            f"{prefix}aftereffects_tone",
+            *[f"{prefix}{field}" for field in study.sections["aftereffects"].binary_labels],
+        ],
     }
     counts = pd.Series(0, index=df.index, dtype=int)
     for fields in needed.values():
@@ -603,7 +633,7 @@ def _plot_family_metrics_combined(
 
     # Combined family figure focuses on LLM aggregate and questionnaire comparison.
     source_order = ["Human vs LLM", "Human vs Questionnaire"]
-    family_order = ["NDE-C", "NDE-MCQ", "Experience Tone", "SEG-UNIT"]
+    family_order = ["NDE-C", "LCI-R", "Experience Tone", "SEG-UNIT"]
     source_colors = {
         "Human vs LLM": "#457B9D",
         "Human vs Questionnaire": "#2A9D8F",
@@ -611,13 +641,13 @@ def _plot_family_metrics_combined(
     }
     family_markers = {
         "NDE-C": "o",
-        "NDE-MCQ": "s",
+        "LCI-R": "s",
         "Experience Tone": "^",
         "SEG-UNIT": "D",
     }
     family_offsets = {
         "NDE-C": -0.21,
-        "NDE-MCQ": -0.07,
+        "LCI-R": -0.07,
         "Experience Tone": 0.07,
         "SEG-UNIT": 0.21,
     }
@@ -893,25 +923,21 @@ def run_human_review_comparison(
     ].map(_normalize_tone)
     for column, source_column in study.questionnaire_column_map().items():
         if source_column in questionnaire_df.columns:
-            block = "m8" if column.startswith("m8_") else "m9"
+            block_name = study.questionnaire_block_for_column(column)
+            block = study.questionnaire[block_name]
             questionnaire_df[column] = questionnaire_df[source_column].map(
                 lambda value: _map_questionnaire_binary(
                     value,
-                    study.questionnaire[block]["yes_values"],
-                    study.questionnaire[block]["no_values"],
+                    block["yes_values"],
+                    block["no_values"],
+                    list(block.get("na_values", [])),
                 )
             )
 
     base = human_df.merge(
         cleaned_df, on="response_id", how="left", suffixes=("", "_cleaned")
     )
-    questionnaire_fields = [
-        "m8_out_of_body",
-        "m8_bright_light",
-        "m8_time_distortion",
-        "m8_presence",
-        "m9_moral_rules",
-    ]
+    questionnaire_fields = list(study.binary_columns())
     q_subset = questionnaire_df[
         ["response_id", "questionnaire_tone", *questionnaire_fields]
     ].copy()
@@ -939,11 +965,9 @@ def run_human_review_comparison(
 
     for section in ("context", "experience", "aftereffects"):
         base[f"{section}_tone"] = base[HUMAN_TONE4[section]]
-    base["m8_out_of_body"] = base["out_of_body"]
-    base["m8_bright_light"] = base["bright_light"]
-    base["m8_time_distortion"] = base["time_perception"]
-    base["m8_presence"] = base["presence"]
-    base["m9_moral_rules"] = base["moral_principles"]
+    for column in study.binary_columns():
+        if column not in base.columns:
+            base[column] = None
 
     unit_base = base[
         [
@@ -1024,7 +1048,7 @@ def run_human_review_comparison(
         }
     )
 
-    # Questionnaire comparisons: Experience Tone(3) only, M8 subset, M9 subset
+    # Questionnaire comparisons: Experience Tone(3), NDE-C, and LCI-R
     questionnaire_work = base.copy()
     n, kappa, macro = _comparison_metrics(
         questionnaire_work,
@@ -1044,12 +1068,7 @@ def run_human_review_comparison(
         }
     )
 
-    for field in (
-        "m8_out_of_body",
-        "m8_bright_light",
-        "m8_time_distortion",
-        "m8_presence",
-    ):
+    for field in study.sections["experience"].binary_labels:
         n, kappa, macro = _comparison_metrics(
             questionnaire_work,
             field,
@@ -1068,30 +1087,31 @@ def run_human_review_comparison(
             }
         )
 
-    n, kappa, macro = _comparison_metrics(
-        questionnaire_work,
-        "m9_moral_rules",
-        "m9_moral_rules_questionnaire",
-        study.binary_labels,
-    )
-    metrics_rows.append(
-        {
-            "comparison": "human_vs_questionnaire",
-            "model": "questionnaire",
-            "family": "nde_mcq",
-            "field": "m9_moral_rules",
-            "n": n,
-            "cohen_kappa": kappa,
-            "macro_f1": macro,
-        }
-    )
+    for field in study.sections["aftereffects"].binary_labels:
+        n, kappa, macro = _comparison_metrics(
+            questionnaire_work,
+            field,
+            f"{field}_questionnaire",
+            study.binary_labels,
+        )
+        metrics_rows.append(
+            {
+                "comparison": "human_vs_questionnaire",
+                "model": "questionnaire",
+                "family": "lci_r",
+                "field": field,
+                "n": n,
+                "cohen_kappa": kappa,
+                "macro_f1": macro,
+            }
+        )
 
     llm_artifacts = discover_default_llm_artifacts(llm_results_dir)
     llm_valid_rows: list[dict[str, Any]] = []
     llm_metric_rows: list[dict[str, Any]] = []
 
     for artifact in llm_artifacts:
-        llm_df = _load_llm_predictions(artifact.predictions_path)
+        llm_df = _load_llm_predictions(artifact.predictions_path, study)
         llm_df = llm_df[llm_df["response_id"].isin(human_ids)].copy()
         if llm_df.empty:
             continue
@@ -1118,12 +1138,7 @@ def run_human_review_comparison(
             }
         )
 
-        for field in (
-            "m8_out_of_body",
-            "m8_bright_light",
-            "m8_time_distortion",
-            "m8_presence",
-        ):
+        for field in study.sections["experience"].binary_labels:
             n, kappa, macro = _comparison_metrics(
                 merged, field, f"{field}_llm", study.binary_labels
             )
@@ -1140,36 +1155,34 @@ def run_human_review_comparison(
                 }
             )
 
-        n, kappa, macro = _comparison_metrics(
-            merged,
-            "m9_moral_rules",
-            "m9_moral_rules_llm",
-            study.binary_labels,
-        )
-        llm_metric_rows.append(
-            {
-                "comparison": "human_vs_llm",
-                "model": artifact.artifact_id,
-                "model_variant": artifact.model_variant,
-                "family": "nde_mcq",
-                "field": "m9_moral_rules",
-                "n": n,
-                "cohen_kappa": kappa,
-                "macro_f1": macro,
-            }
-        )
+        for field in study.sections["aftereffects"].binary_labels:
+            n, kappa, macro = _comparison_metrics(
+                merged,
+                field,
+                f"{field}_llm",
+                study.binary_labels,
+            )
+            llm_metric_rows.append(
+                {
+                    "comparison": "human_vs_llm",
+                    "model": artifact.artifact_id,
+                    "model_variant": artifact.model_variant,
+                    "family": "lci_r",
+                    "field": field,
+                    "n": n,
+                    "cohen_kappa": kappa,
+                    "macro_f1": macro,
+                }
+            )
 
         merged_llm_valid = merged.copy()
-        for column in [
+        llm_value_columns = [
             "context_tone_llm",
             "experience_tone_llm",
             "aftereffects_tone_llm",
-            "m8_out_of_body_llm",
-            "m8_bright_light_llm",
-            "m8_time_distortion_llm",
-            "m8_presence_llm",
-            "m9_moral_rules_llm",
-        ]:
+            *[f"{field}_llm" for field in study.binary_columns()],
+        ]
+        for column in llm_value_columns:
             if column in merged_llm_valid.columns:
                 if column.endswith("_tone_llm"):
                     merged_llm_valid[column] = merged_llm_valid[column].map(
@@ -1179,37 +1192,25 @@ def run_human_review_comparison(
                     merged_llm_valid[column] = merged_llm_valid[column].map(
                         _normalize_yes_no
                     )
-        llm_counts = _compute_section_validity(merged_llm_valid, prefix="")
+        llm_counts = _compute_section_validity(merged_llm_valid, prefix="", study=study)
+        rename_map = {
+            "context_tone_llm": "llm_context_tone",
+            "experience_tone_llm": "llm_experience_tone",
+            "aftereffects_tone_llm": "llm_aftereffects_tone",
+            **{f"{field}_llm": f"llm_{field}" for field in study.binary_columns()},
+        }
         llm_counts = _compute_section_validity(
-            merged_llm_valid.rename(
-                columns={
-                    "context_tone_llm": "llm_context_tone",
-                    "experience_tone_llm": "llm_experience_tone",
-                    "aftereffects_tone_llm": "llm_aftereffects_tone",
-                    "m8_out_of_body_llm": "llm_m8_out_of_body",
-                    "m8_bright_light_llm": "llm_m8_bright_light",
-                    "m8_time_distortion_llm": "llm_m8_time_distortion",
-                    "m8_presence_llm": "llm_m8_presence",
-                    "m9_moral_rules_llm": "llm_m9_moral_rules",
-                }
-            ),
+            merged_llm_valid.rename(columns=rename_map),
             prefix="llm_",
+            study=study,
         )
+        observed_columns = [
+            column for column in llm_value_columns if column in merged_llm_valid.columns
+        ]
         observed_llm = (
-            merged_llm_valid[
-                [
-                    "context_tone_llm",
-                    "experience_tone_llm",
-                    "aftereffects_tone_llm",
-                    "m8_out_of_body_llm",
-                    "m8_bright_light_llm",
-                    "m8_time_distortion_llm",
-                    "m8_presence_llm",
-                    "m9_moral_rules_llm",
-                ]
-            ]
-            .notna()
-            .any(axis=1)
+            merged_llm_valid[observed_columns].notna().any(axis=1)
+            if observed_columns
+            else pd.Series(False, index=merged_llm_valid.index)
         )
         llm_valid_frame = pd.DataFrame(
             {
@@ -1239,13 +1240,8 @@ def run_human_review_comparison(
     valid_base["context_tone"] = valid_base[HUMAN_TONE4["context"]]
     valid_base["experience_tone"] = valid_base[HUMAN_TONE4["experience"]]
     valid_base["aftereffects_tone"] = valid_base[HUMAN_TONE4["aftereffects"]]
-    valid_base["m8_out_of_body"] = valid_base["out_of_body"]
-    valid_base["m8_bright_light"] = valid_base["bright_light"]
-    valid_base["m8_time_distortion"] = valid_base["time_perception"]
-    valid_base["m8_presence"] = valid_base["presence"]
-    valid_base["m9_moral_rules"] = valid_base["moral_principles"]
     valid_base["n_valid_sections_human"] = _compute_section_validity(
-        valid_base, prefix=""
+        valid_base, prefix="", study=study
     )
     valid_base["n_valid_sections_cleaned"] = pd.to_numeric(
         valid_base.get("n_valid_sections_cleaned"), errors="coerce"
@@ -1422,8 +1418,8 @@ def run_human_review_comparison(
             "## Family Alignment",
             "",
             "- `tone`: experience-only alignment (`Experience Tone (4)` vs LLM, `Experience Tone (3)` vs questionnaire valence).",
-            "- `nde_c`: available subset (`m8_out_of_body`, `m8_bright_light`, `m8_time_distortion`, `m8_presence`).",
-            "- `nde_mcq`: available subset (`m9_moral_rules`).",
+            "- `nde_c`: full NDE-C item set from the experience section.",
+            "- `lci_r`: full LCI-R item set from the aftereffects section.",
             "- `seg_unit`: unit-classification segmentation agreement (`context/experience/aftereffects/deleted`).",
             "",
             "| Comparison | Model | Family | Mean Kappa | Mean Macro-F1 | Mean n |",

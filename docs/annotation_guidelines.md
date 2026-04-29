@@ -6,7 +6,7 @@ The annotation task transforms open-ended NDE narratives into a structured forma
 
 - human judgments
 - LLM predictions
-- questionnaire-based measures from M8 and M9
+- questionnaire-based measures from NDE-C and LCI-R
 
 The task does not determine whether the event was medically verified or diagnostically classifiable as an NDE.
 
@@ -29,6 +29,7 @@ Information must not be transferred across sections.
 - If an element is implied but not explicit, code `no`.
 - If an element is denied, code `no`.
 - Prioritize the participant's framing of the event.
+- For aftereffects items, the objective is to detect whether the text explicitly mentions a change, not to infer change direction when direction is unstated.
 
 ## Evaluation Workflow Note
 
@@ -47,21 +48,33 @@ Information must not be transferred across sections.
 
 Code these only from the `experience` narrative:
 
-- `m8_out_of_body`: leaving the body, floating above it, viewing the body from outside
-- `m8_bright_light`: bright, radiant, or luminous light
-- `m8_peace`: intense peace, calm, serenity, or wellbeing
-- `m8_time_distortion`: time slowing, speeding up, stopping, or losing meaning
-- `m8_presence`: an encountered being, entity, or felt presence
+- `outside_of_body_experience`: leaving the body, floating above it, viewing the body from outside
+- `feeling_bright_light`: bright, radiant, or luminous light
+- `feeling_awareness`: unusual heightened awareness or clarity
+- `presence_encounter`: an encountered being, entity, or felt presence
+- `saw_relived_past_events`: reliving or replaying prior life events
+- `time_perception_altered`: time slowing, speeding up, stopping, or losing meaning
+- `border_point_of_no_return`: explicit border/limit threshold before return
+- `non_existence_feeling`: explicit dissolution or non-existence feeling
+- `feeling_peace_wellbeing`: intense peace, calm, serenity, or wellbeing
+- `saw_entered_gateway`: entering or approaching a gateway/tunnel/door threshold
 
 ## Aftereffects Elements
 
 Code these only from the `aftereffects` narrative:
 
-- `m9_moral_rules`: stronger commitment to moral principles
-- `m9_long_term_thinking`: greater attention to long-term consequences
-- `m9_consider_others`: stronger consideration of others' feelings or perspectives
-- `m9_help_others`: stronger responsibility or willingness to help others
-- `m9_forgiveness`: greater willingness to forgive
+For these LCI-R aligned items, mark `yes` only when the narrative explicitly states a change (for example, increased, decreased, less, more, stronger, weaker). Do not estimate a direction if the narrative does not clearly express one.
+
+- `fear_of_death`: explicit change in fear of dying/death compared with before
+- `inner_meaning_in_my_life`: explicit change in perceived meaning or purpose in life
+- `compassion_toward_others`: explicit change in empathy, compassion, or concern for others
+- `spiritual_feelings`: explicit change in spirituality, sacred connection, or spiritual feeling
+- `desire_to_help_others`: explicit change in helping/prosocial motivation toward others
+- `personal_vulnerability`: explicit change in felt vulnerability, fragility, or openness to harm
+- `interest_in_material_goods`: explicit change in attachment to possessions/material success
+- `interest_in_religion`: explicit change in religious interest, practice, or affiliation salience
+- `understanding_myself`: explicit change in self-knowledge, self-understanding, or personal insight
+- `social_justice_issues`: explicit change in concern for fairness, inequality, or justice issues
 
 ## Allowed Outputs
 

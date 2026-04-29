@@ -137,8 +137,8 @@ def _figure_family_dumbbell(
             return "Tone"
         if "nde-c" in lower or "content of the near-death experience" in lower:
             return "NDE-C"
-        if "nde-mcq" in lower or "moral cognition" in lower:
-            return "NDE-MCQ"
+        if "lci-r" in lower or "long-term changes inventory" in lower:
+            return "LCI-R"
         return text
 
     def _condition_short(name: Any) -> str:
