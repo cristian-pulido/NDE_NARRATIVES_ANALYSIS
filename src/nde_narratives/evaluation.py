@@ -1395,7 +1395,6 @@ def evaluate_outputs(
         reference_df, adjudication_summary, human_long_df = consolidate_majority_human_reference(
             human_artifacts, study
         )
-        participant_codes: set[str] | None = set(reference_df["participant_code"])
     else:
         reference_df = pd.DataFrame(
             columns=["participant_code", *study.annotation_internal_columns()]
@@ -1409,12 +1408,10 @@ def evaluate_outputs(
         human_long_df = pd.DataFrame(
             columns=["participant_code", "annotator_id", *study.annotation_internal_columns()]
         )
-        participant_codes = None
-
     questionnaire_df = load_questionnaire_labels(
         paths.survey_csv,
         study,
-        participant_codes=participant_codes,
+        participant_codes=None,
     )
     if skip_vader:
         vader_df = pd.DataFrame(columns=["participant_code", *study.tone_columns()])
@@ -1424,7 +1421,7 @@ def evaluate_outputs(
             study,
             paths,
             resolved_sampled_private,
-            participant_codes=participant_codes,
+            participant_codes=None,
             vader_scores_path=Path(vader_scores_path) if vader_scores_path else None,
             output_dir=evaluation_dir,
         )
