@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")
 
@@ -170,12 +171,16 @@ def _presentation_model_name(identifier: object) -> str:
         "deepseek_r1_32": "DeepSeek-R1 32B",
         "deepseek-r1_32": "DeepSeek-R1 32B",
         "gemma3_27": "Gemma 3 27B",
+        "gemma4_26": "Gemma 4 26B",
+        "gemma4_31": "Gemma 4 31B",
         "llama31_8": "Llama 3.1 8B",
         "ministral3_14": "Ministral 3 14B",
         "qwen35_08": "Qwen 3.5 0.8B",
         "qwen35_9": "Qwen 3.5 9B",
         "qwen35_27": "Qwen 3.5 27B",
         "qwen35_35": "Qwen 3.5 35B",
+        "qwen36_27": "Qwen 3.6 27B",
+        "qwen36_35": "Qwen 3.6 35B",
         "qwen3_32": "Qwen 3 32B",
         "qwen3_32b": "Qwen 3 32B",
     }
@@ -191,9 +196,11 @@ def _presentation_model_family_name(identifier: object) -> str:
     alias_map = {
         "vader": "VADER",
         "qwen35": "Qwen 3.5",
+        "qwen36": "Qwen 3.6",
         "qwen3": "Qwen 3",
         "llama31": "Llama 3.1",
         "gemma3": "Gemma 3",
+        "gemma4": "Gemma 4",
         "deepseek-r1": "DeepSeek-R1",
         "ministral3": "Ministral 3",
     }
@@ -207,14 +214,18 @@ def _benchmark_model_marker_map() -> dict[str, str]:
     return {
         "deepseek-r1_32": "X",
         "deepseek_r1_32": "X",
-        "gemma3_27": "s",
-        "llama31_8": ">",
-        "ministral3_14": "P",
+        "gemma3_27": "o",
+        "gemma4_31": "D",
+        "gemma4_26": "d",
+        "llama31_8": "h",
+        "ministral3_14": "v",
         "nemotron_3_nano": "<",
         "nemotron-3-nano": "<",
-        "qwen35_27": "D",
-        "qwen35_35": "o",
-        "qwen35_9": "v",
+        "qwen35_27": "^",
+        "qwen35_35": "P",
+        "qwen35_9": ">",
+        "qwen36_27": "s",
+        "qwen36_35": "<",
         "qwen3_32": "^",
         "qwen3_32b": "^",
     }
@@ -370,12 +381,16 @@ def _plot_benchmark_scatter(
     preferred_model_order = [
         "deepseek-r1_32",
         "gemma3_27",
+        "gemma4_31",
+        "gemma4_26",
         "llama31_8",
         "ministral3_14",
         "nemotron_3_nano",
         "qwen35_27",
         "qwen35_35",
         "qwen35_9",
+        "qwen36_27",
+        "qwen36_35",
         "qwen3_32",
     ]
     ordered_models = [model for model in preferred_model_order if model in models] + [
@@ -558,41 +573,61 @@ def _plot_benchmark_scatter(
         )
         for label in label_order
     ]
-    legend_section = lambda text: Line2D(
-        [0], [0], linestyle="None", marker="", label=text
+    dataset_legend = ax.legend(
+        handles=dataset_handles,
+        title="Dataset",
+        loc="upper left",
+        bbox_to_anchor=(0.01, 0.99),
+        frameon=True,
+        facecolor="white",
+        edgecolor="#D1D5DB",
+        framealpha=0.92,
+        ncol=max(1, min(2, len(dataset_handles))),
+        columnspacing=1.1,
+        handletextpad=0.6,
+        fontsize=13,
+        title_fontsize=15,
     )
-    combined_handles: list[Any] = [
-        legend_section("Dataset"),
-        *dataset_handles,
-        legend_section(f"Models ({len(ordered_models) + 1})"),
-        *model_handles_with_baseline,
-    ]
-    if tone_region_handle is not None:
-        combined_handles.extend(
-            [
-                legend_section("NDE comparison"),
-                tone_region_handle,
-            ]
-        )
-    combined_handles.extend(
-        [
-            legend_section("Mini-bar encoding"),
-            *label_handles,
-        ]
-    )
-    ax.legend(
-        handles=combined_handles,
+    ax.add_artist(dataset_legend)
+
+    model_legend = ax.legend(
+        handles=model_handles_with_baseline,
+        title=f"Models ({len(ordered_models) + 1})",
         loc="lower right",
         bbox_to_anchor=(0.99, 0.02),
         frameon=True,
         facecolor="white",
         edgecolor="#D1D5DB",
         framealpha=0.92,
-        ncol=1,
-        columnspacing=1.0,
+        ncol=max(2, min(4, int(np.ceil(len(model_handles_with_baseline) / 5.0)))),
+        columnspacing=1.2,
+        handletextpad=0.6,
+        fontsize=13,
+        title_fontsize=16,
+    )
+    ax.add_artist(model_legend)
+
+    context_handles = list(label_handles)
+    context_title = "Mini-bar encoding"
+    if tone_region_handle is not None:
+        context_handles = [tone_region_handle, *context_handles]
+        context_title = "NDE comparison and mini-bar encoding"
+    context_legend = ax.legend(
+        handles=context_handles,
+        title=context_title,
+        loc="upper left",
+        bbox_to_anchor=(0.01, 0.80),
+        frameon=True,
+        facecolor="white",
+        edgecolor="#D1D5DB",
+        framealpha=0.92,
+        ncol=max(1, min(2, len(context_handles))),
+        columnspacing=1.1,
         handletextpad=0.6,
         fontsize=12,
+        title_fontsize=14,
     )
+    ax.add_artist(context_legend)
 
     x_min = float(plot_df["cohen_kappa"].min())
     x_max = float(plot_df["cohen_kappa"].max())
