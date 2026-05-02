@@ -64,8 +64,7 @@ Main article page (project framing, results narrative, and links back to reposit
 
 
 
-https://github.com/user-attachments/assets/4fffaed9-7a8c-431c-a8ac-8f6bd717577f
-
+https://drive.google.com/file/d/1TbZiNjpFfznhpwXqeolEt1vutHcV3Cmb/view?usp=drive_link
 
 
 ## Installation
