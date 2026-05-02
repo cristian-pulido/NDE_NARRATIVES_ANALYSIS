@@ -63,8 +63,7 @@ Main article page (project framing, results narrative, and links back to reposit
 ## Video Summary
 
 
-
-https://drive.google.com/file/d/1TbZiNjpFfznhpwXqeolEt1vutHcV3Cmb/view?usp=drive_link
+https://github.com/user-attachments/assets/9d632f80-f389-4be7-ba81-eb659d586f29
 
 
 ## Installation
