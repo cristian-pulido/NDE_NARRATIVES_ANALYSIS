@@ -346,7 +346,7 @@ def _figure_family_dumbbell(
     axes[0].legend(
         handles=legend_handles,
         loc="lower right",
-        fontsize=9 if n_rows <= 24 else 8,
+        fontsize=11 if n_rows <= 24 else 10,
         frameon=True,
         borderpad=0.4,
         labelspacing=0.3,
